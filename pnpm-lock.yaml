@@ -241,6 +241,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.39.0
+        version: 0.39.0
       '@tanstack/react-query':
         specifier: ^5.62.0
         version: 5.99.0(react@18.3.1)
@@ -272,7 +275,7 @@ importers:
         specifier: ^0.468.0
         version: 0.468.0(react@18.3.1)
       next:
-        specifier: ^14.2.0
+        specifier: 14.2.35
         version: 14.2.35(@playwright/test@1.59.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       next-intl:
         specifier: ^3.25.0
@@ -280,6 +283,9 @@ importers:
       next-themes:
         specifier: ^0.4.0
         version: 0.4.6(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      postgres:
+        specifier: ^3.4.0
+        version: 3.4.9
       react:
         specifier: ^18.3.0
         version: 18.3.1

@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3001';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 const API_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || '';
 
 function authHeaders(): Record<string, string> {
