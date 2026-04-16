@@ -1,0 +1,34 @@
+# SSE trace — first-message
+conversationId: 264a06db-d8a3-40a6-8c47-b5d514797ffb
+event count: 20
+
+## event counts
+  conversation: 1
+  text: 14
+  usage: 1
+  message.start: 1
+  message.delta: 1
+  message.done: 1
+  done: 1
+
+## ordered events (t ms, event, data-summary)
+       1 conversation     {"conversationId":"264a06db-d8a3-40a6-8c47-b5d514797ffb","agentId":"manager","participants":["manager"]}
+    4340 text             +11ch
+    4493 text             +24ch
+    4676 text             +15ch
+    4891 text             +28ch
+    5115 text             +29ch
+    5323 text             +20ch
+    5525 text             +31ch
+    5738 text             +27ch
+    6060 text             +35ch
+    6174 text             +19ch
+    6370 text             +24ch
+    6578 text             +16ch
+    6790 text             +24ch
+    6940 text             +15ch
+    7020 usage            {"inputTokens":11098,"outputTokens":231,"cachedTokens":0}
+    7020 message.start    {"messageId":"418759d9-199b-4768-911f-009f99ea07ed","agentId":"manager","agentDisplay":{"ar":"الراعي","en":"manager"},"kind":"text","createdAt":"2026-04-15T13:25:22.214Z"}
+    7020 message.delta    {"messageId":"418759d9-199b-4768-911f-009f99ea07ed","text":"مرحباً بك يا عبدالله! \n\nأنا الراعي، هنا لتنسيق الفريق ومساعدتك في مشاريعك البحثية والمحتوى التعليمي.\n\nكيف أقدر أساعدك اليوم؟ هل تبي:\n- 
+    7020 message.done     {"messageId":"418759d9-199b-4768-911f-009f99ea07ed","agentId":"manager","usage":{"inputTokens":0,"outputTokens":0,"costUsd":0,"model":"claude-haiku-4-5-20251001"},"artifacts":[]}
+    7020 done             {}

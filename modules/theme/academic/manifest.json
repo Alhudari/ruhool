@@ -1,0 +1,13 @@
+{
+  "id": "academic",
+  "version": "1.0.0",
+  "type": "theme",
+  "name": { "en": "Academic", "ar": "أكاديمي" },
+  "description": {
+    "en": "Paper-like textures, serif headings, designed for long reading sessions",
+    "ar": "ملمس ورقي وعناوين بخطوط مذنبة، مصمم لجلسات القراءة الطويلة"
+  },
+  "author": "core",
+  "icon": "book-open",
+  "color": "teal"
+}

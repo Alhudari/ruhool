@@ -1,0 +1,488 @@
+/**
+ * Specialists dispatcher — part of REL-01 stage 2b.
+ *
+ * Loads the correct system prompt from `prompts/specialists/*` and runs a
+ * one-shot task against the LLM service. Supports both the Arabic-script
+ * specialist names (as used in @mentions throughout the UI) and the historical
+ * English agent IDs (manager, research, reading-helper, …) so callers that
+ * already have an agentId don't need a translation layer.
+ *
+ * Usage:
+ *   const { output, usage, durationMs } = await dispatch({
+ *     specialist: 'عبدان',
+ *     task: 'ابحث عن أحدث الأوراق في BIM للمباني العامة',
+ *     context: '...',
+ *     deps: { provider, logger, activity },
+ *   });
+ */
+import {
+  RESEARCH_SYSTEM_PROMPT,
+  READING_HELPER_SYSTEM_PROMPT,
+  COMPARATOR_SYSTEM_PROMPT,
+  WRITING_CRITIC_SYSTEM_PROMPT,
+  ARCHITECT_SYSTEM_PROMPT,
+  MANAGER_SYSTEM_PROMPT,
+  CREATIVE_SYSTEM_PROMPT,
+  CONTENT_CREATOR_SYSTEM_PROMPT,
+  TASKS_AGENT_SYSTEM_PROMPT,
+  MUSHAKHKHIS_SYSTEM_PROMPT,
+  MUNAZZIM_SYSTEM_PROMPT,
+  ANALYST_SYSTEM_PROMPT,
+} from '../../prompts/index.js';
+import type { UnifiedProvider } from '../llm/index.js';
+import {
+  runGenerationTool,
+  toolsForSpecialist,
+  type GenerationToolContext,
+} from './tools/generation-tools.js';
+import type { WorkflowStepArtifact } from '../../store/types.js';
+
+// ─── Specialist registry ───
+// Keys are both Arabic-script canonical names and historical English agent IDs.
+// Values point at the extracted system prompts in prompts/specialists/*.
+const SPECIALIST_PROMPTS: Record<string, string> = {
+  // Arabic canonical
+  'الراعي': MANAGER_SYSTEM_PROMPT,
+  'عبدان': RESEARCH_SYSTEM_PROMPT,
+  'شواشة': READING_HELPER_SYSTEM_PROMPT,
+  'رمّانة': COMPARATOR_SYSTEM_PROMPT,
+  'الصفرا': WRITING_CRITIC_SYSTEM_PROMPT,
+  'المصمم': ARCHITECT_SYSTEM_PROMPT,
+  'الدبسا': CONTENT_CREATOR_SYSTEM_PROMPT,
+  'الكرييتف': CREATIVE_SYSTEM_PROMPT,
+  'مهام': TASKS_AGENT_SYSTEM_PROMPT,
+  'المشخّص': MUSHAKHKHIS_SYSTEM_PROMPT,
+  'المنظّم': MUNAZZIM_SYSTEM_PROMPT,
+  'المحلل': ANALYST_SYSTEM_PROMPT,
+  // English historical IDs
+  manager: MANAGER_SYSTEM_PROMPT,
+  research: RESEARCH_SYSTEM_PROMPT,
+  'reading-helper': READING_HELPER_SYSTEM_PROMPT,
+  comparator: COMPARATOR_SYSTEM_PROMPT,
+  'writing-critic': WRITING_CRITIC_SYSTEM_PROMPT,
+  architect: ARCHITECT_SYSTEM_PROMPT,
+  'content-creator': CONTENT_CREATOR_SYSTEM_PROMPT,
+  creative: CREATIVE_SYSTEM_PROMPT,
+  'tasks-agent': TASKS_AGENT_SYSTEM_PROMPT,
+  mushakhkhis: MUSHAKHKHIS_SYSTEM_PROMPT,
+  munazzim: MUNAZZIM_SYSTEM_PROMPT,
+  analyst: ANALYST_SYSTEM_PROMPT,
+};
+
+export type SpecialistName = keyof typeof SPECIALIST_PROMPTS;
+
+// ─── Specialist alias resolver ───
+// The Manager's `delegate_to_specialist` tool_use may emit Arabic display names,
+// English transliterations (e.g. 'abdan', 'shwasha'), or the canonical IDs used
+// by the dispatcher. This map normalizes any known alias to the canonical ID
+// registered in `SPECIALIST_PROMPTS`.
+const SPECIALIST_ALIAS_MAP: Record<string, string> = {
+  // Arabic display names → canonical id
+  'عبدان': 'research',
+  'شواشة': 'reading-helper',
+  'الصفرا': 'writing-critic',
+  'رمّانة': 'comparator',
+  'رمانة': 'comparator',
+  'الدبسا': 'content-creator',
+  'المصمم': 'architect',
+  'الراعي': 'manager',
+  'الكرييتف': 'creative',
+  'مهام': 'tasks-agent',
+  'المحلل': 'analyst',
+  'المنظّم': 'munazzim',
+  'المنظم': 'munazzim',
+  'المشخّص': 'mushakhkhis',
+  'المشخص': 'mushakhkhis',
+
+  // English transliterations → canonical id
+  'abdan': 'research',
+  'shwasha': 'reading-helper',
+  'al-safra': 'writing-critic',
+  'alsafra': 'writing-critic',
+  'rammana': 'comparator',
+  'al-dabsa': 'content-creator',
+  'aldabsa': 'content-creator',
+  'al-musammim': 'architect',
+  'almusammim': 'architect',
+  'al-rai': 'manager',
+  'alrai': 'manager',
+  'creative': 'creative',
+  'alkreetif': 'creative',
+  'tasks': 'tasks-agent',
+  'maham': 'tasks-agent',
+  'mahaam': 'tasks-agent',
+  'muhallil': 'analyst',
+  'almuhallil': 'analyst',
+  'munazzim': 'munazzim',
+  'almunazzim': 'munazzim',
+  'mushakhkhis': 'mushakhkhis',
+  'almushakhkhis': 'mushakhkhis',
+};
+
+/**
+ * Resolve any specialist alias (Arabic name, transliteration) to its canonical
+ * dispatcher ID. Passes through unknown inputs so callers already using
+ * canonical IDs are unaffected.
+ */
+export function resolveSpecialistId(input: string): string {
+  if (!input) return input;
+  // Preserve exact match first (Arabic is case-insensitive-irrelevant, but
+  // this also handles any canonical id that would survive a lowercase).
+  if (SPECIALIST_ALIAS_MAP[input]) return SPECIALIST_ALIAS_MAP[input];
+  const normalized = input.trim().toLowerCase();
+  if (SPECIALIST_ALIAS_MAP[normalized]) return SPECIALIST_ALIAS_MAP[normalized];
+  // Also normalize the trimmed form (Arabic won't change with .toLowerCase()
+  // but we still want leading/trailing whitespace tolerated).
+  const trimmed = input.trim();
+  if (SPECIALIST_ALIAS_MAP[trimmed]) return SPECIALIST_ALIAS_MAP[trimmed];
+  return input;
+}
+
+// ─── Specialist identity resolution ───
+// Maps every registered specialist key (Arabic canonical + English id) to a
+// { arabic, transliteration } pair so the identity directive can name the
+// specialist in both scripts even when the caller passed an English id.
+const SPECIALIST_IDENTITY: Record<string, { arabic: string; transliteration: string }> = {
+  // Arabic canonical keys map to themselves + their transliteration
+  'الراعي': { arabic: 'الراعي', transliteration: "Al-Ra'i" },
+  'عبدان': { arabic: 'عبدان', transliteration: 'Abdan' },
+  'شواشة': { arabic: 'شواشة', transliteration: 'Shwasha' },
+  'رمّانة': { arabic: 'رمّانة', transliteration: 'Rammana' },
+  'الصفرا': { arabic: 'الصفرا', transliteration: 'Alsafra' },
+  'المصمم': { arabic: 'المصمم', transliteration: 'Al-Musammim' },
+  'الدبسا': { arabic: 'الدبسا', transliteration: 'Aldabsa' },
+  'الكرييتف': { arabic: 'الكرييتف', transliteration: 'Al-Creative' },
+  'مهام': { arabic: 'مهام', transliteration: 'Mahaam' },
+  'المشخّص': { arabic: 'المشخّص', transliteration: 'Al-Mushakhkhis' },
+  'المنظّم': { arabic: 'المنظّم', transliteration: 'Al-Munazzim' },
+  'المحلل': { arabic: 'المحلل', transliteration: 'Al-Muhallil' },
+  // English IDs map to the same identity as their Arabic counterpart
+  manager: { arabic: 'الراعي', transliteration: "Al-Ra'i" },
+  research: { arabic: 'عبدان', transliteration: 'Abdan' },
+  'reading-helper': { arabic: 'شواشة', transliteration: 'Shwasha' },
+  comparator: { arabic: 'رمّانة', transliteration: 'Rammana' },
+  'writing-critic': { arabic: 'الصفرا', transliteration: 'Alsafra' },
+  architect: { arabic: 'المصمم', transliteration: 'Al-Musammim' },
+  'content-creator': { arabic: 'الدبسا', transliteration: 'Aldabsa' },
+  creative: { arabic: 'الكرييتف', transliteration: 'Al-Creative' },
+  'tasks-agent': { arabic: 'مهام', transliteration: 'Mahaam' },
+  mushakhkhis: { arabic: 'المشخّص', transliteration: 'Al-Mushakhkhis' },
+  munazzim: { arabic: 'المنظّم', transliteration: 'Al-Munazzim' },
+  analyst: { arabic: 'المحلل', transliteration: 'Al-Muhallil' },
+};
+
+export function getSpecialistIdentity(specialist: string): { arabic: string; transliteration: string } {
+  return SPECIALIST_IDENTITY[specialist] ?? { arabic: specialist, transliteration: specialist };
+}
+
+/**
+ * Resolve a specialist key (Arabic, English id, or transliteration) to a
+ * display name. Useful for activity logs and UI labels that want a consistent
+ * Arabic-first name without reaching into the full identity record.
+ */
+export function getSpecialistDisplayName(specialist: string): string {
+  return getSpecialistIdentity(specialist).arabic;
+}
+
+/**
+ * Build the identity directive prepended to every system prompt when a prior
+ * transcript is present. Reinforces the specialist's own voice and warns
+ * against impersonating other agents visible in the transcript.
+ */
+export function buildIdentityDirective(specialist: string): string {
+  const { arabic, transliteration } = getSpecialistIdentity(specialist);
+  // BUG-2 FIX: directive strengthened — uppercase/emphasis on first three
+  // lines, explicit refusal-to-impersonate, role reminder. Always prepended
+  // to the specialist system prompt when priorMessages are non-empty so the
+  // tool_use-dispatched path cannot drift into another agent's voice.
+  return (
+    `=== هوية الوكيل / AGENT IDENTITY (CRITICAL — READ FIRST) ===\n` +
+    `أنت ${arabic} (${transliteration}) — ولا أحد غيره. هذا دورك الوحيد.\n` +
+    `YOU ARE ${arabic.toUpperCase?.() ? arabic : arabic} (${transliteration.toUpperCase()}). YOU ARE NOT ANY OTHER AGENT.\n\n` +
+    `ممنوع منعاً باتاً:\n` +
+    `- تقمّص أسلوب أو نبرة أي وكيل آخر في سجل الجولات أدناه.\n` +
+    `- التوقيع أو التقديم باسم وكيل آخر.\n` +
+    `- تقليد صياغة أو مفردات أو توقيع أي وكيل قرأت له.\n\n` +
+    `STRICTLY FORBIDDEN:\n` +
+    `- Adopting the voice, tone, phrasing, or signature of any other agent in the prior rounds transcript.\n` +
+    `- Signing or introducing yourself as any agent other than ${arabic}.\n` +
+    `- Mimicking vocabulary/catchphrases of agents you have read.\n\n` +
+    `القاعدة: أنت تقرأ كلام الآخرين لتبني عليه، لا لتقلّدهم. حافظ على صوت ${arabic} ونبرته وشخصيته المميزة.\n` +
+    `THE RULE: You read other agents' words to BUILD ON them, not to COPY them. Keep the voice, tone, and distinct personality of ${arabic}.\n` +
+    `=== نهاية بطاقة الهوية / END IDENTITY CARD ===`
+  );
+}
+
+/**
+ * Closing reinforcement appended after the prior-rounds transcript.
+ */
+export function buildClosingReinforcement(specialist: string): string {
+  const { arabic } = getSpecialistIdentity(specialist);
+  return (
+    `تذكير: أنت ${arabic}. أجب الآن بأسلوبك أنت بناءً على ما قرأت، لا بأسلوب من قرأت لهم.\n` +
+    `Reminder: You are ${arabic}. Respond now in YOUR voice based on what you read, NOT in the voice of whom you read.`
+  );
+}
+
+export interface DispatchLogger {
+  info: (obj: Record<string, unknown>, msg?: string) => void;
+  warn?: (obj: Record<string, unknown>, msg?: string) => void;
+  error?: (obj: Record<string, unknown>, msg?: string) => void;
+}
+
+export interface DispatchDeps {
+  /** A `UnifiedProvider` obtained from `pickProviderForModel(...)`. */
+  provider: UnifiedProvider;
+  /** Model id to run the task with (e.g. 'claude-sonnet-4-6'). */
+  model: string;
+  logger?: DispatchLogger;
+  /** Optional activity-log sink. If present, dispatch emits a single record. */
+  logActivity?: (fields: { from: string; to: string; task: string }) => void;
+  /** Optional `from` label for the activity record (defaults to 'system'). */
+  from?: string;
+  /** Optional token budget. */
+  maxTokens?: number;
+  /** Optional temperature override. */
+  temperature?: number;
+  /** Generation services made available to the specialist through tool_use. */
+  generationTools?: Omit<GenerationToolContext, 'specialist'>;
+}
+
+export interface DispatchArtifact {
+  type: 'image' | 'video' | 'audio' | 'file';
+  url: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface DispatchResult {
+  output: string;
+  usage: { inputTokens: number; outputTokens: number; cachedTokens: number; costUsd?: number };
+  durationMs: number;
+  /** Model id actually used for the call. Forwarded to workflow_steps.usage.model. */
+  model?: string;
+  /** Phase 4 forward-plumbing: artifact list for future tool-using specialists. */
+  artifacts?: DispatchArtifact[];
+}
+
+/** A prior message passed to the dispatcher for context threading (Phase 1). */
+export interface PriorMessage {
+  role: 'assistant' | 'user';
+  content: string;
+  /** Canonical agent id (e.g. `'abdan'`, `'shwasha'`). */
+  agent?: string;
+  /** Arabic display name (e.g. `'عبدان'`). */
+  agentDisplay?: string;
+  createdAt?: string;
+}
+
+/** Max characters included per prior message. */
+const PRIOR_MESSAGE_TRUNCATE = 600;
+/** Max prior messages included in the transcript. */
+const PRIOR_MESSAGE_MAX = 8;
+
+/**
+ * Build the Arabic/English "Prior Rounds" transcript that gets prepended to
+ * the specialist's system prompt. Returns an empty string when there are no
+ * prior messages to render.
+ */
+export function buildPriorRoundsTranscript(
+  priorMessages: PriorMessage[] | undefined,
+  specialist: string,
+  opts: { includeConversationHistory?: boolean } = {}
+): string {
+  if (!priorMessages || priorMessages.length === 0) return '';
+  const { includeConversationHistory = true } = opts;
+  const limited = priorMessages.slice(-PRIOR_MESSAGE_MAX);
+
+  const assistantRounds = limited.filter((m) => m.role === 'assistant');
+  const userTurns = limited.filter((m) => m.role === 'user');
+
+  const parts: string[] = [];
+
+  if (includeConversationHistory && userTurns.length > 0) {
+    const historyLines: string[] = ['--- سياق المحادثة / Conversation Context ---'];
+    for (const u of userTurns.slice(-2)) {
+      const excerpt = (u.content || '').slice(0, PRIOR_MESSAGE_TRUNCATE);
+      historyLines.push(`User: ${excerpt}`);
+    }
+    parts.push(historyLines.join('\n'));
+  }
+
+  if (assistantRounds.length > 0) {
+    const roundLines: string[] = [
+      '--- سجل الجولات السابقة (للسياق فقط — لا تقلّد أسلوبهم) ---',
+      '--- Prior Rounds (context only — DO NOT mimic their style) ---',
+    ];
+    assistantRounds.forEach((m, idx) => {
+      const round = idx + 1;
+      const display = m.agentDisplay || m.agent || 'specialist';
+      const excerpt = (m.content || '').slice(0, PRIOR_MESSAGE_TRUNCATE);
+      roundLines.push(
+        `[Round ${round} — قاله ${display} / said by ${display}]\n«${excerpt}»`
+      );
+    });
+    roundLines.push('--- نهاية السجل ---');
+    roundLines.push('');
+    roundLines.push(buildClosingReinforcement(specialist));
+    roundLines.push('');
+    roundLines.push(
+      `الآن، ${specialist}، أكمل بناءً على ما قيل سابقاً.\nNow, ${specialist}, continue building on what was said.`
+    );
+    parts.push(roundLines.join('\n\n'));
+  }
+
+  return parts.join('\n\n');
+}
+
+/**
+ * Look up the system prompt for a specialist. Returns `null` if unknown.
+ */
+export function getSpecialistPrompt(specialist: string): string | null {
+  return SPECIALIST_PROMPTS[specialist] ?? null;
+}
+
+/**
+ * Run a one-shot task against a specialist. Returns the collected output text,
+ * usage stats, and wall-clock duration.
+ *
+ * Phase 1 (context threading): if `priorMessages` is provided, a transcript of
+ * prior rounds is prepended to the system prompt so the specialist can build
+ * on earlier specialists' work within the same user turn.
+ */
+export async function dispatch(params: {
+  specialist: string;
+  task: string;
+  context?: string;
+  priorMessages?: PriorMessage[];
+  roundNumber?: number;
+  includeConversationHistory?: boolean;
+  deps: DispatchDeps;
+}): Promise<DispatchResult> {
+  const {
+    specialist: rawSpecialist,
+    task,
+    context,
+    priorMessages,
+    roundNumber,
+    includeConversationHistory = true,
+    deps,
+  } = params;
+  const specialist = resolveSpecialistId(rawSpecialist);
+  const basePrompt = getSpecialistPrompt(specialist);
+  if (!basePrompt) {
+    throw new Error(`Unknown specialist: ${specialist}`);
+  }
+
+  const transcript = buildPriorRoundsTranscript(priorMessages, specialist, {
+    includeConversationHistory,
+  });
+  // BUG-2 FIX: ALWAYS prepend the identity directive — not only when priorMessages
+  // are non-empty. Wave-B per-specialist dispatch + manager tool_use path both
+  // rely on this to prevent persona bleed. When there IS a transcript, append
+  // it after the base prompt as before so the model sees identity → role →
+  // prior rounds in that order.
+  const identity = buildIdentityDirective(specialist);
+  const systemPrompt = transcript
+    ? `${identity}\n\n${basePrompt}\n\n${transcript}`
+    : `${identity}\n\n${basePrompt}`;
+
+  const from = deps.from ?? 'system';
+  if (deps.logActivity) {
+    try { deps.logActivity({ from, to: specialist, task }); } catch { /* ignore */ }
+  } else if (deps.logger) {
+    deps.logger.info(
+      { from, to: specialist, task, roundNumber, priorRounds: priorMessages?.length ?? 0 },
+      'specialist-dispatch'
+    );
+  }
+
+  const userContent = context ? `${context}\n\n---\n\n${task}` : task;
+
+  const started = Date.now();
+  let output = '';
+  let usage = { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
+  const artifacts: WorkflowStepArtifact[] = [];
+
+  const tools = toolsForSpecialist(specialist);
+  const hasTools = tools.length > 0 && !!deps.generationTools;
+
+  // Conversation turns — seeded with the user content. If a tool_use lands,
+  // we append an assistant turn echoing the tool_use + a user turn carrying
+  // the tool_result so the model can continue narrating.
+  type Msg = { role: 'user' | 'assistant'; content: string | Array<{ type: string; [k: string]: unknown }> };
+  const messages: Msg[] = [{ role: 'user', content: userContent }];
+  const maxToolRounds = 3;
+
+  for (let round = 0; round <= maxToolRounds; round++) {
+    let roundText = '';
+    const toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
+    let roundUsage: { inputTokens: number; outputTokens: number; cachedTokens: number } | null = null;
+
+    for await (const chunk of deps.provider.chat({
+      model: deps.model,
+      systemPrompt,
+      messages,
+      maxTokens: deps.maxTokens,
+      temperature: deps.temperature,
+      ...(hasTools ? { tools } : {}),
+    } as Parameters<UnifiedProvider['chat']>[0])) {
+      if (chunk.type === 'text') roundText += chunk.content;
+      else if (chunk.type === 'usage') roundUsage = chunk.usage;
+      else if (chunk.type === 'tool_use') toolUses.push({ id: chunk.id, name: chunk.name, input: chunk.input });
+      else if (chunk.type === 'error') throw new Error(chunk.error);
+    }
+
+    output += roundText;
+    if (roundUsage) {
+      usage = {
+        inputTokens: usage.inputTokens + roundUsage.inputTokens,
+        outputTokens: usage.outputTokens + roundUsage.outputTokens,
+        cachedTokens: usage.cachedTokens + roundUsage.cachedTokens,
+      };
+    }
+
+    if (toolUses.length === 0 || !hasTools) break;
+
+    // Build the assistant turn with text + tool_use blocks.
+    const assistantBlocks: Array<{ type: string; [k: string]: unknown }> = [];
+    if (roundText) assistantBlocks.push({ type: 'text', text: roundText });
+    for (const tu of toolUses) {
+      assistantBlocks.push({ type: 'tool_use', id: tu.id, name: tu.name, input: tu.input });
+    }
+    messages.push({ role: 'assistant', content: assistantBlocks });
+
+    // Execute each tool_use, build tool_result blocks.
+    const toolResultBlocks: Array<{ type: string; [k: string]: unknown }> = [];
+    for (const tu of toolUses) {
+      try {
+        const ctx: GenerationToolContext = { ...(deps.generationTools || {}), specialist };
+        const res = await runGenerationTool(tu.name, tu.input, ctx);
+        artifacts.push(res.artifact);
+        toolResultBlocks.push({
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content: res.summary,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        deps.logger?.warn?.({ err: msg, tool: tu.name, specialist }, 'specialist.tool_use failed');
+        toolResultBlocks.push({
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content: `error: ${msg}`,
+          is_error: true,
+        });
+      }
+    }
+    messages.push({ role: 'user', content: toolResultBlocks });
+    // Continue loop for the model to narrate on top of the tool results.
+  }
+
+  return {
+    output,
+    usage,
+    durationMs: Date.now() - started,
+    model: deps.model,
+    ...(artifacts.length > 0 ? { artifacts } : {}),
+  };
+}

@@ -1,0 +1,13 @@
+{
+  "id": "desert-caravan",
+  "version": "1.0.0",
+  "type": "theme",
+  "name": { "en": "Desert Caravan", "ar": "قافلة الصحراء" },
+  "description": {
+    "en": "Inspired by the Ruhool — desert sand tones, caravan trails, warm amber glow",
+    "ar": "مستوحى من الرحول — ألوان رمال الصحراء ودروب القوافل ووهج العنبر الدافئ"
+  },
+  "author": "core",
+  "icon": "sunset",
+  "color": "amber"
+}

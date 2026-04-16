@@ -1,0 +1,13 @@
+{
+  "id": "claude-clean",
+  "version": "1.0.0",
+  "type": "theme",
+  "name": { "en": "Claude Clean", "ar": "كلود النظيف" },
+  "description": {
+    "en": "Minimalist, professional theme with warm tones and lots of whitespace",
+    "ar": "تصميم بسيط واحترافي بألوان دافئة ومساحات بيضاء واسعة"
+  },
+  "author": "core",
+  "icon": "sparkles",
+  "color": "purple"
+}

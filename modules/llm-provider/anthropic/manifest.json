@@ -1,0 +1,13 @@
+{
+  "id": "anthropic",
+  "version": "1.0.0",
+  "type": "llm-provider",
+  "name": { "en": "Anthropic Claude", "ar": "أنثروبيك كلود" },
+  "description": {
+    "en": "Claude AI models by Anthropic — Opus, Sonnet, Haiku",
+    "ar": "نماذج كلود الذكية من أنثروبيك — أوبوس، سونيت، هايكو"
+  },
+  "author": "core",
+  "icon": "sparkles",
+  "color": "purple"
+}

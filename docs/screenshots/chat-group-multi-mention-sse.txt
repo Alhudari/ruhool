@@ -1,0 +1,25 @@
+# SSE trace — multi-mention
+conversationId: 2f10da32-d134-4d2d-a450-71c4965c07f4
+event count: 11
+
+## event counts
+  conversation: 1
+  participants.update: 1
+  message.start: 2
+  message.delta: 2
+  text: 2
+  message.done: 2
+  done: 1
+
+## ordered events (t ms, event, data-summary)
+       6 conversation     {"conversationId":"2f10da32-d134-4d2d-a450-71c4965c07f4","agentId":"manager","participants":["manager","research","reading-helper"]}
+       6 participants.update {"conversationId":"2f10da32-d134-4d2d-a450-71c4965c07f4","participantAgentIds":["manager","research","reading-helper"]}
+       6 message.start    {"messageId":"54ac4fb1-f9b9-4507-9a78-fc080f4d0c76","agentId":"research","agentDisplay":{"ar":"عبدان","en":"research"},"kind":"text","replyToAgentId":"manager","createdAt":"2026-04-15T13:25:32.423Z"}
+    4001 message.delta    {"messageId":"54ac4fb1-f9b9-4507-9a78-fc080f4d0c76","text":"# التعريف\n\n## عبدان\nباحث دكتوراه في جامعة برمنغهام — تخصصي البحث العميق في عوائق تبني تقنية BIM في الكويت. أعمل في جمعية المهندسين الكويت
+    4001 text             +393ch
+    4001 message.done     {"messageId":"54ac4fb1-f9b9-4507-9a78-fc080f4d0c76","agentId":"research","usage":{"inputTokens":622,"outputTokens":248,"costUsd":0.001862,"model":"claude-haiku-4-5-20251001"},"artifacts":[],"durationM
+    4001 message.start    {"messageId":"893d383b-5c9d-4bcc-b06a-b40d096ff8c5","agentId":"reading-helper","agentDisplay":{"ar":"شواشة","en":"reading-helper"},"kind":"text","replyToAgentId":"manager","createdAt":"2026-04-15T13:2
+    7142 message.delta    {"messageId":"893d383b-5c9d-4bcc-b06a-b40d096ff8c5","text":"# التعريف\n\n## عبدان\nباحث دكتوراه في جامعة برمنغهام — تخصصي البحث العميق في عوائق تبني تقنية BIM في الكويت. أعمل في جمعية المهندسين الكويت
+    7142 text             +506ch
+    7142 message.done     {"messageId":"893d383b-5c9d-4bcc-b06a-b40d096ff8c5","agentId":"reading-helper","usage":{"inputTokens":1178,"outputTokens":342,"costUsd":0.002888,"model":"claude-haiku-4-5-20251001"},"artifacts":[],"du
+    7142 done             {}

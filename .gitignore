@@ -1,0 +1,48 @@
+# Environment & secrets
+.env
+.env.local
+.env.production
+.env.*.local
+
+# User data (persists locally, never in git)
+data/
+backups/
+
+# Private data (double-ignored for safety)
+data/private/
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+.next/
+.turbo/
+out/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker volumes
+postgres-data/
+redis-data/
+temporal-data/
+
+# Logs
+*.log
+logs/
+
+# Test
+coverage/
+
+# Misc
+*.tsbuildinfo

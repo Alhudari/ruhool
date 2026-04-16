@@ -1,0 +1,22 @@
+{
+  "id": "research-agent",
+  "version": "1.0.0",
+  "type": "agent",
+  "name": { "en": "Research Agent", "ar": "وكيل البحث" },
+  "description": {
+    "en": "Deep web research with citations — searches, fetches, analyzes, summarizes",
+    "ar": "بحث عميق في الإنترنت مع المراجع — يبحث ويجلب ويحلل ويلخص"
+  },
+  "author": "core",
+  "icon": "search",
+  "color": "purple",
+  "requires": {
+    "tools": ["web-search"],
+    "llm-provider": "any"
+  },
+  "permissions": [
+    "read:./data/research/**",
+    "write:./data/research/**",
+    "network:*"
+  ]
+}

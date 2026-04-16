@@ -1,0 +1,1086 @@
+'use client';
+
+import { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  CheckSquare, Plus, Search, List, LayoutGrid, Pin, PinOff,
+  Trash2, Loader2, Calendar, Clock, Tag, ChevronDown, ChevronRight,
+  X, Check, Circle, Square, Flag,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { useAppStore } from '@/store/app';
+import { apiFetch } from '@/lib/api';
+
+interface ChecklistItem {
+  id: string;
+  text: string;
+  done: boolean;
+  children?: ChecklistItem[];
+}
+
+interface TaskItem {
+  id: string;
+  title: string;
+  notes: string;
+  completed: boolean;
+  priority: 'high' | 'medium' | 'low' | 'none';
+  dueDate: string | null;
+  dueTime: string | null;
+  list: string;
+  tags: string[];
+  color: string;
+  pinned: boolean;
+  checklist: ChecklistItem[];
+  reminder: string | null;
+  order?: number;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+const PRIORITY_CONFIG: Record<string, { label: { en: string; ar: string }; color: string; dot: string }> = {
+  high: { label: { en: 'High', ar: '\u0639\u0627\u0644\u064a\u0629' }, color: 'text-red-500', dot: 'bg-red-500' },
+  medium: { label: { en: 'Medium', ar: '\u0645\u062a\u0648\u0633\u0637\u0629' }, color: 'text-amber-500', dot: 'bg-amber-500' },
+  low: { label: { en: 'Low', ar: '\u0645\u0646\u062e\u0641\u0636\u0629' }, color: 'text-blue-500', dot: 'bg-blue-500' },
+  none: { label: { en: 'None', ar: '\u0628\u062f\u0648\u0646' }, color: 'text-on-surface-tertiary', dot: 'bg-transparent' },
+};
+
+// TH-01 (AUDIT.md): hex values are the user-selectable card palette (data, not UI chrome).
+export const CARD_COLORS: Array<{ id: string; bg: string; label: string; hex?: string }> = [
+  { id: 'none', bg: 'bg-surface', label: '\u0628\u062f\u0648\u0646' },
+  { id: 'yellow', bg: 'bg-yellow-200', label: '\u0623\u0635\u0641\u0631', hex: '#FEF08A' },
+  { id: 'blue', bg: 'bg-blue-200', label: '\u0623\u0632\u0631\u0642', hex: '#BFDBFE' },
+  { id: 'green', bg: 'bg-green-200', label: '\u0623\u062e\u0636\u0631', hex: '#BBF7D0' },
+  { id: 'pink', bg: 'bg-pink-200', label: '\u0648\u0631\u062f\u064a', hex: '#FBCFE8' },
+  { id: 'purple', bg: 'bg-purple-200', label: '\u0628\u0646\u0641\u0633\u062c\u064a', hex: '#DDD6FE' },
+  { id: 'orange', bg: 'bg-orange-200', label: '\u0628\u0631\u062a\u0642\u0627\u0644\u064a', hex: '#FED7AA' },
+];
+
+export function getCardBg(color: string): string {
+  return CARD_COLORS.find(c => c.id === color)?.bg || 'bg-surface';
+}
+
+// Returns contrast-safe text classes for a given card color.
+// For the "none" color we keep the default on-surface tokens so the card
+// follows the active theme. For tinted backgrounds we force dark text so
+// the content stays readable across light/dark themes.
+export function getContrastColor(bgColor: string): { primary: string; secondary: string; tertiary: string; muted: string } {
+  if (!bgColor || bgColor === 'none') {
+    return {
+      primary: 'text-on-surface',
+      secondary: 'text-on-surface-secondary',
+      tertiary: 'text-on-surface-tertiary',
+      muted: 'bg-black/5',
+    };
+  }
+  // Tinted pastel backgrounds — always dark text for readability
+  return {
+    primary: 'text-neutral-900',
+    secondary: 'text-neutral-700',
+    tertiary: 'text-neutral-600',
+    muted: 'bg-white/40',
+  };
+}
+
+function formatDate(dateStr: string | null, isRTL: boolean): string {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const taskDate = new Date(d);
+  taskDate.setHours(0, 0, 0, 0);
+  const diff = taskDate.getTime() - today.getTime();
+  const days = diff / (1000 * 60 * 60 * 24);
+  if (days === 0) return isRTL ? '\u0627\u0644\u064a\u0648\u0645' : 'Today';
+  if (days === 1) return isRTL ? '\u063a\u062f\u0627\u064b' : 'Tomorrow';
+  if (days === -1) return isRTL ? '\u0623\u0645\u0633' : 'Yesterday';
+  return d.toLocaleDateString(isRTL ? 'ar-KW' : 'en-US', { month: 'short', day: 'numeric' });
+}
+
+function isOverdue(task: TaskItem): boolean {
+  if (!task.dueDate || task.completed) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return new Date(task.dueDate) < today;
+}
+
+export function TasksPage() {
+  const { language } = useAppStore();
+  const isRTL = language === 'ar';
+  const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [lists, setLists] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<'list' | 'grid'>('list');
+  const [activeList, setActiveList] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showCompleted, setShowCompleted] = useState(false);
+  const [editingTask, setEditingTask] = useState<TaskItem | null>(null);
+  const [quickAddText, setQuickAddText] = useState('');
+  const [newListName, setNewListName] = useState('');
+  const [showNewList, setShowNewList] = useState(false);
+  const quickAddRef = useRef<HTMLInputElement>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const [t, l] = await Promise.all([
+        apiFetch<TaskItem[]>('/api/tasks'),
+        apiFetch<string[]>('/api/tasks/lists'),
+      ]);
+      // Respect persisted order if present
+      t.sort((a, b) => {
+        const ao = a.order ?? Number.MAX_SAFE_INTEGER;
+        const bo = b.order ?? Number.MAX_SAFE_INTEGER;
+        if (ao !== bo) return ao - bo;
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
+      setTasks(t);
+      setLists(l);
+    } catch {} finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Load user preferences
+  useEffect(() => {
+    apiFetch<{ defaultView?: 'list' | 'grid'; showCompleted?: boolean }>('/api/task-prefs')
+      .then(p => {
+        if (p?.defaultView) setView(p.defaultView);
+        if (typeof p?.showCompleted === 'boolean') setShowCompleted(p.showCompleted);
+      })
+      .catch(() => { /* ignore */ });
+  }, []);
+
+  // Filter tasks
+  const filtered = tasks.filter(t => {
+    if (activeList && t.list !== activeList) return false;
+    if (!showCompleted && t.completed) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      return t.title.toLowerCase().includes(q) || t.notes.toLowerCase().includes(q) || t.tags.some(tag => tag.includes(q));
+    }
+    return true;
+  });
+
+  // Group for list view
+  const pinned = filtered.filter(t => t.pinned && !t.completed);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  const todayTasks = filtered.filter(t => !t.pinned && !t.completed && t.dueDate && new Date(t.dueDate) >= today && new Date(t.dueDate) < tomorrow);
+  const upcoming = filtered.filter(t => !t.pinned && !t.completed && t.dueDate && new Date(t.dueDate) >= tomorrow);
+  const noDate = filtered.filter(t => !t.pinned && !t.completed && !t.dueDate);
+  const completed = filtered.filter(t => t.completed);
+  const overdue = filtered.filter(t => !t.pinned && !t.completed && t.dueDate && new Date(t.dueDate) < today);
+
+  const toggleComplete = async (id: string) => {
+    try {
+      const updated = await apiFetch<TaskItem>(`/api/tasks/${id}/toggle`, { method: 'PUT' });
+      setTasks(prev => prev.map(t => t.id === id ? updated : t));
+    } catch {}
+  };
+
+  const togglePin = async (id: string) => {
+    try {
+      const updated = await apiFetch<TaskItem>(`/api/tasks/${id}/pin`, { method: 'PUT' });
+      setTasks(prev => prev.map(t => t.id === id ? updated : t));
+    } catch {}
+  };
+
+  const deleteTask = async (id: string) => {
+    try {
+      await apiFetch(`/api/tasks/${id}`, { method: 'DELETE' });
+      setTasks(prev => prev.filter(t => t.id !== id));
+      if (editingTask?.id === id) setEditingTask(null);
+    } catch {}
+  };
+
+  const saveTask = async (task: TaskItem) => {
+    try {
+      const updated = await apiFetch<TaskItem>(`/api/tasks/${task.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(task),
+      });
+      setTasks(prev => prev.map(t => t.id === task.id ? updated : t));
+      setEditingTask(null);
+    } catch {}
+  };
+
+  const quickAdd = async () => {
+    const text = quickAddText.trim();
+    if (!text) return;
+    // Smart parsing (basic)
+    let title = text;
+    let dueDate: string | null = null;
+    let dueTime: string | null = null;
+    let priority: 'high' | 'medium' | 'low' | 'none' = 'none';
+
+    // Detect tomorrow
+    if (/\u063a\u062f\u0627\u064b?|\u063a\u062f\u0627|tomorrow/i.test(text)) {
+      const tom = new Date(); tom.setDate(tom.getDate() + 1);
+      dueDate = tom.toISOString().split('T')[0];
+      title = title.replace(/\u063a\u062f\u0627\u064b?|\u063a\u062f\u0627|tomorrow/gi, '').trim();
+    }
+    // Detect today
+    if (/\u0627\u0644\u064a\u0648\u0645|today/i.test(text)) {
+      dueDate = new Date().toISOString().split('T')[0];
+      title = title.replace(/\u0627\u0644\u064a\u0648\u0645|today/gi, '').trim();
+    }
+    // Detect time patterns like 3 المساء or 10 صباحاً
+    const timeMatch = text.match(/(\d{1,2})\s*(\u0627\u0644\u0645\u0633\u0627\u0621|\u0645\u0633\u0627\u0621\u064b?|\u0635\u0628\u0627\u062d\u0627\u064b?|pm|am)/i);
+    if (timeMatch) {
+      let hour = parseInt(timeMatch[1]);
+      if (/\u0627\u0644\u0645\u0633\u0627\u0621|\u0645\u0633\u0627\u0621|pm/i.test(timeMatch[2]) && hour < 12) hour += 12;
+      dueTime = `${hour.toString().padStart(2, '0')}:00`;
+      title = title.replace(timeMatch[0], '').trim();
+    }
+    // Detect priority markers
+    if (/!\s*$|#\u0645\u0647\u0645|\u0639\u0627\u062c\u0644|urgent/i.test(text)) {
+      priority = 'high';
+      title = title.replace(/!\s*$|#\u0645\u0647\u0645|\u0639\u0627\u062c\u0644|urgent/gi, '').trim();
+    }
+
+    try {
+      const created = await apiFetch<TaskItem>('/api/tasks', {
+        method: 'POST',
+        body: JSON.stringify({
+          title,
+          dueDate,
+          dueTime,
+          priority,
+          list: activeList || '\u0639\u0627\u0645',
+        }),
+      });
+      setTasks(prev => [created, ...prev]);
+      setQuickAddText('');
+    } catch {}
+  };
+
+  const createList = async () => {
+    if (!newListName.trim()) return;
+    try {
+      const result = await apiFetch<{ lists: string[] }>('/api/tasks/lists', {
+        method: 'POST',
+        body: JSON.stringify({ name: newListName.trim() }),
+      });
+      setLists(result.lists);
+      setNewListName('');
+      setShowNewList(false);
+    } catch {}
+  };
+
+  // Drag & drop reordering
+  const dragIdRef = useRef<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    dragIdRef.current = id;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', id);
+    (e.currentTarget as HTMLElement).style.opacity = '0.5';
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    (e.currentTarget as HTMLElement).style.opacity = '1';
+    setDragOverId(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent, overId?: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (overId && overId !== dragOverId) setDragOverId(overId);
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetId: string, targetList?: string) => {
+    e.preventDefault();
+    const sourceId = dragIdRef.current;
+    dragIdRef.current = null;
+    setDragOverId(null);
+    if (!sourceId || sourceId === targetId) return;
+    const sourceTask = tasks.find(t => t.id === sourceId);
+    if (!sourceTask) return;
+    // Optimistic reorder within current filtered list
+    const newTasks = [...tasks];
+    const sIdx = newTasks.findIndex(t => t.id === sourceId);
+    const tIdx = newTasks.findIndex(t => t.id === targetId);
+    if (sIdx === -1 || tIdx === -1) return;
+    const [moved] = newTasks.splice(sIdx, 1);
+    if (targetList) moved.list = targetList;
+    newTasks.splice(tIdx, 0, moved);
+    setTasks(newTasks);
+    try {
+      await apiFetch('/api/tasks/reorder', {
+        method: 'PUT',
+        body: JSON.stringify({ orderedIds: newTasks.map(t => t.id), list: targetList }),
+      });
+    } catch { /* reload on error */ load(); }
+  };
+
+  // Drop onto list tab: move task to that list
+  const handleDropOnList = async (e: React.DragEvent, listName: string) => {
+    e.preventDefault();
+    const sourceId = dragIdRef.current;
+    dragIdRef.current = null;
+    if (!sourceId) return;
+    const t = tasks.find(x => x.id === sourceId);
+    if (!t || t.list === listName) return;
+    setTasks(prev => prev.map(x => x.id === sourceId ? { ...x, list: listName } : x));
+    try {
+      await apiFetch<TaskItem>(`/api/tasks/${sourceId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ list: listName }),
+      });
+    } catch { load(); }
+  };
+
+  const deleteList = async (name: string) => {
+    try {
+      const result = await apiFetch<{ lists: string[] }>(`/api/tasks/lists/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      setLists(result.lists);
+      if (activeList === name) setActiveList(null);
+      await load();
+    } catch {}
+  };
+
+  // Task group renderer for list view
+  const TaskGroup = ({ label, items, defaultOpen = true }: { label: string; items: TaskItem[]; defaultOpen?: boolean }) => {
+    const [open, setOpen] = useState(defaultOpen);
+    if (items.length === 0) return null;
+    return (
+      <div className="mb-4">
+        <button onClick={() => setOpen(!open)} className="flex items-center gap-2 text-sm font-medium text-on-surface-secondary mb-2 hover:text-on-surface transition-colors">
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          {label} ({items.length})
+        </button>
+        {open && (
+          <div className="space-y-1">
+            {items.map(task => (
+              <TaskListRow key={task.id} task={task} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const TaskListRow = ({ task }: { task: TaskItem }) => {
+    const overdue_ = isOverdue(task);
+    const isOver = dragOverId === task.id;
+    return (
+      <div
+        draggable
+        onDragStart={(e) => handleDragStart(e, task.id)}
+        onDragEnd={handleDragEnd}
+        onDragOver={(e) => handleDragOver(e, task.id)}
+        onDragLeave={() => setDragOverId(null)}
+        onDrop={(e) => handleDrop(e, task.id)}
+        className={cn(
+          'group flex items-center gap-3 px-3 py-2.5 rounded-lg border border-transparent hover:bg-surface-secondary/50 hover:border-border cursor-pointer transition-all',
+          task.pinned && 'bg-surface-secondary/30',
+          isOver && 'border-accent bg-accent/5',
+        )}
+        onClick={() => setEditingTask({ ...task })}
+      >
+        <button
+          onClick={(e) => { e.stopPropagation(); toggleComplete(task.id); }}
+          className="flex-shrink-0"
+        >
+          {task.completed ? (
+            <CheckSquare size={18} className="text-accent" />
+          ) : (
+            <Square size={18} className="text-on-surface-tertiary group-hover:text-on-surface-secondary" />
+          )}
+        </button>
+        <div className="flex-1 min-w-0">
+          <p className={cn('text-sm truncate', task.completed && 'line-through text-on-surface-tertiary')}>
+            {task.title}
+          </p>
+          <div className="flex items-center gap-2 mt-0.5">
+            {task.dueDate && (
+              <span className={cn('text-xs', overdue_ ? 'text-red-500' : 'text-on-surface-tertiary')}>
+                {formatDate(task.dueDate, isRTL)}
+                {task.dueTime && ` ${task.dueTime}`}
+              </span>
+            )}
+            {task.list !== '\u0639\u0627\u0645' && !activeList && (
+              <span className="text-xs text-on-surface-tertiary bg-surface-secondary px-1.5 py-0.5 rounded">{task.list}</span>
+            )}
+          </div>
+        </div>
+        {task.priority !== 'none' && PRIORITY_CONFIG[task.priority] && (
+          <div className={cn('w-2 h-2 rounded-full flex-shrink-0', PRIORITY_CONFIG[task.priority].dot)} />
+        )}
+        {task.pinned && <Pin size={14} className="text-on-surface-tertiary flex-shrink-0" />}
+      </div>
+    );
+  };
+
+  const countChecklist = (items: ChecklistItem[]): { done: number; total: number } => {
+    let done = 0, total = 0;
+    const walk = (arr: ChecklistItem[]) => {
+      for (const it of arr) {
+        total++;
+        if (it.done) done++;
+        if (it.children) walk(it.children);
+      }
+    };
+    walk(items);
+    return { done, total };
+  };
+
+  const TaskGridCard = ({ task, onDragStart, onDragOver, onDrop }: {
+    task: TaskItem;
+    onDragStart?: (e: React.DragEvent, id: string) => void;
+    onDragOver?: (e: React.DragEvent) => void;
+    onDrop?: (e: React.DragEvent, id: string) => void;
+  }) => {
+    const overdue_ = isOverdue(task);
+    const { done: checklistDone, total: checklistTotal } = countChecklist(task.checklist);
+    const colors = getContrastColor(task.color);
+    return (
+      <div
+        draggable
+        onDragStart={(e) => onDragStart?.(e, task.id)}
+        onDragOver={onDragOver}
+        onDrop={(e) => onDrop?.(e, task.id)}
+        className={cn(
+          'group relative rounded-xl border border-border p-4 cursor-pointer hover:shadow-md transition-all',
+          getCardBg(task.color),
+        )}
+        onClick={() => setEditingTask({ ...task })}
+      >
+        {task.pinned && (
+          <Pin size={14} className={cn('absolute top-2 end-2', colors.tertiary)} />
+        )}
+        <div className="flex items-start gap-2 mb-2">
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleComplete(task.id); }}
+            className="flex-shrink-0 mt-0.5"
+          >
+            {task.completed ? (
+              <CheckSquare size={16} className="text-accent" />
+            ) : (
+              <Square size={16} className={colors.tertiary} />
+            )}
+          </button>
+          <h3 className={cn('text-sm font-medium flex-1', colors.primary, task.completed && 'line-through opacity-60')}>
+            {task.title}
+          </h3>
+        </div>
+        {task.notes && (
+          <p className={cn('text-xs mb-2 line-clamp-3 ps-6', colors.secondary)}>{task.notes}</p>
+        )}
+        {task.checklist.length > 0 && (
+          <div className="ps-6 mb-2 space-y-1">
+            {task.checklist.slice(0, 3).map(item => (
+              <div key={item.id} className={cn('flex items-center gap-1.5 text-xs', colors.secondary)}>
+                {item.done ? <Check size={12} className="text-accent" /> : <Circle size={12} />}
+                <span className={cn(item.done && 'line-through opacity-60')}>{item.text}</span>
+              </div>
+            ))}
+            {task.checklist.length > 3 && (
+              <p className={cn('text-xs', colors.tertiary)}>+{task.checklist.length - 3} {isRTL ? '\u0639\u0646\u0627\u0635\u0631' : 'more'}</p>
+            )}
+          </div>
+        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {task.dueDate && (
+            <span className={cn('text-xs flex items-center gap-1', overdue_ ? 'text-red-600' : colors.tertiary)}>
+              <Calendar size={10} />
+              {formatDate(task.dueDate, isRTL)}
+            </span>
+          )}
+          {task.priority !== 'none' && (
+            <span className={cn('text-xs flex items-center gap-1', PRIORITY_CONFIG[task.priority].color)}>
+              <Flag size={10} />
+              {PRIORITY_CONFIG[task.priority].label[isRTL ? 'ar' : 'en']}
+            </span>
+          )}
+          {task.tags.map(tag => (
+            <span key={tag} className={cn('text-xs px-1.5 py-0.5 rounded', colors.muted, colors.tertiary)}>{tag}</span>
+          ))}
+          {task.checklist.length > 0 && (
+            <span className={cn('text-xs', colors.tertiary)}>{checklistDone}/{checklistTotal}</span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="animate-spin text-on-surface-tertiary" size={24} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 pb-24">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+            <CheckSquare size={18} className="text-emerald-500" />
+          </div>
+          <h1 className="text-xl font-semibold text-on-surface">
+            {isRTL ? '\u0645\u0647\u0627\u0645' : 'Tasks'}
+          </h1>
+          <span className="text-sm text-on-surface-tertiary">
+            ({tasks.filter(t => !t.completed).length})
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setView('list')}
+            className={cn('p-2 rounded-lg transition-colors', view === 'list' ? 'bg-surface-secondary text-on-surface' : 'text-on-surface-tertiary hover:text-on-surface')}
+          >
+            <List size={18} />
+          </button>
+          <button
+            onClick={() => setView('grid')}
+            className={cn('p-2 rounded-lg transition-colors', view === 'grid' ? 'bg-surface-secondary text-on-surface' : 'text-on-surface-tertiary hover:text-on-surface')}
+          >
+            <LayoutGrid size={18} />
+          </button>
+        </div>
+      </div>
+
+      {/* Search bar */}
+      <div className="relative mb-4">
+        <Search size={16} className="absolute start-3 top-1/2 -translate-y-1/2 text-on-surface-tertiary" />
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder={isRTL ? '\u0628\u062d\u062b \u0641\u064a \u0627\u0644\u0645\u0647\u0627\u0645...' : 'Search tasks...'}
+          className="w-full bg-input border border-border rounded-lg ps-9 pe-3 py-2 text-sm text-on-surface placeholder:text-on-surface-tertiary focus:outline-none focus:ring-2 focus:ring-ring"
+          dir={isRTL ? 'rtl' : 'ltr'}
+        />
+      </div>
+
+      {/* List tabs */}
+      <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-1 scrollbar-hide">
+        <button
+          onClick={() => setActiveList(null)}
+          className={cn(
+            'px-3 py-1.5 rounded-full text-sm whitespace-nowrap transition-colors border',
+            !activeList ? 'bg-accent text-white border-accent' : 'bg-surface border-border text-on-surface-secondary hover:bg-surface-secondary'
+          )}
+        >
+          {isRTL ? '\u0627\u0644\u0643\u0644' : 'All'}
+        </button>
+        {lists.map(list => (
+          <button
+            key={list}
+            onClick={() => setActiveList(activeList === list ? null : list)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => handleDropOnList(e, list)}
+            className={cn(
+              'px-3 py-1.5 rounded-full text-sm whitespace-nowrap transition-colors border group relative',
+              activeList === list ? 'bg-accent text-white border-accent' : 'bg-surface border-border text-on-surface-secondary hover:bg-surface-secondary'
+            )}
+          >
+            {list}
+            {activeList === list && lists.length > 1 && (
+              <button
+                onClick={(e) => { e.stopPropagation(); deleteList(list); }}
+                className="ms-1.5 opacity-70 hover:opacity-100"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </button>
+        ))}
+        {showNewList ? (
+          <div className="flex items-center gap-1">
+            <input
+              type="text"
+              value={newListName}
+              onChange={e => setNewListName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && createList()}
+              placeholder={isRTL ? '\u0627\u0633\u0645 \u0627\u0644\u0642\u0627\u0626\u0645\u0629' : 'List name'}
+              className="w-24 px-2 py-1 text-sm bg-input border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-ring"
+              autoFocus
+              dir={isRTL ? 'rtl' : 'ltr'}
+            />
+            <button onClick={createList} className="p-1 text-accent"><Check size={14} /></button>
+            <button onClick={() => { setShowNewList(false); setNewListName(''); }} className="p-1 text-on-surface-tertiary"><X size={14} /></button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowNewList(true)}
+            className="p-1.5 rounded-full border border-dashed border-border text-on-surface-tertiary hover:text-on-surface hover:border-on-surface-tertiary transition-colors"
+          >
+            <Plus size={14} />
+          </button>
+        )}
+      </div>
+
+      {/* Content */}
+      {view === 'list' ? (
+        <div>
+          <TaskGroup label={isRTL ? '\u0645\u062b\u0628\u062a\u0629' : 'Pinned'} items={pinned} />
+          <TaskGroup label={isRTL ? '\u0645\u062a\u0623\u062e\u0631\u0629' : 'Overdue'} items={overdue} />
+          <TaskGroup label={isRTL ? '\u0627\u0644\u064a\u0648\u0645' : 'Today'} items={todayTasks} />
+          <TaskGroup label={isRTL ? '\u0642\u0627\u062f\u0645\u0629' : 'Upcoming'} items={upcoming} />
+          <TaskGroup label={isRTL ? '\u0628\u062f\u0648\u0646 \u0645\u0648\u0639\u062f' : 'No date'} items={noDate} />
+          {completed.length > 0 && (
+            <div className="mt-4">
+              <button
+                onClick={() => setShowCompleted(!showCompleted)}
+                className="flex items-center gap-2 text-sm text-on-surface-tertiary hover:text-on-surface-secondary transition-colors"
+              >
+                {showCompleted ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                {isRTL ? '\u0645\u0643\u062a\u0645\u0644\u0629' : 'Completed'} ({tasks.filter(t => t.completed).length})
+              </button>
+              {showCompleted && (
+                <div className="mt-2 space-y-1 opacity-60">
+                  {completed.map(task => (
+                    <TaskListRow key={task.id} task={task} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {filtered.length === 0 && !tasks.some(t => t.completed) && (
+            <div className="text-center py-16 text-on-surface-tertiary">
+              <CheckSquare size={40} className="mx-auto mb-3 opacity-30" />
+              <p className="text-sm">{isRTL ? '\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0647\u0627\u0645 \u0628\u0639\u062f' : 'No tasks yet'}</p>
+              <p className="text-xs mt-1">{isRTL ? '\u0623\u0636\u0641 \u0645\u0647\u0645\u0629 \u062c\u062f\u064a\u062f\u0629 \u0645\u0646 \u0627\u0644\u0623\u0633\u0641\u0644' : 'Add a task from below'}</p>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div>
+          {pinned.length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-xs font-medium text-on-surface-tertiary uppercase mb-3">{isRTL ? '\u0645\u062b\u0628\u062a\u0629' : 'Pinned'}</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {pinned.map(task => <TaskGridCard key={task.id} task={task} onDragStart={handleDragStart} onDragOver={(e) => handleDragOver(e, task.id)} onDrop={(e) => handleDrop(e, task.id)} />)}
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[...overdue, ...todayTasks, ...upcoming, ...noDate].map(task => (
+              <div key={task.id} onDragEnd={handleDragEnd}>
+                <TaskGridCard task={task} onDragStart={handleDragStart} onDragOver={(e) => handleDragOver(e, task.id)} onDrop={(e) => handleDrop(e, task.id)} />
+              </div>
+            ))}
+          </div>
+          {showCompleted && completed.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-xs font-medium text-on-surface-tertiary uppercase mb-3">{isRTL ? '\u0645\u0643\u062a\u0645\u0644\u0629' : 'Completed'}</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 opacity-60">
+                {completed.map(task => <TaskGridCard key={task.id} task={task} onDragStart={handleDragStart} onDragOver={(e) => handleDragOver(e, task.id)} onDrop={(e) => handleDrop(e, task.id)} />)}
+              </div>
+            </div>
+          )}
+          {filtered.length === 0 && (
+            <div className="text-center py-16 text-on-surface-tertiary col-span-full">
+              <CheckSquare size={40} className="mx-auto mb-3 opacity-30" />
+              <p className="text-sm">{isRTL ? '\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0647\u0627\u0645' : 'No tasks'}</p>
+            </div>
+          )}
+          {!showCompleted && tasks.some(t => t.completed) && (
+            <button
+              onClick={() => setShowCompleted(true)}
+              className="mt-4 text-sm text-on-surface-tertiary hover:text-on-surface-secondary transition-colors"
+            >
+              {isRTL ? `\u0639\u0631\u0636 \u0627\u0644\u0645\u0643\u062a\u0645\u0644\u0629 (${tasks.filter(t => t.completed).length})` : `Show completed (${tasks.filter(t => t.completed).length})`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Quick Add (bottom floating) */}
+      <div className="fixed bottom-4 md:bottom-6 start-1/2 -translate-x-1/2 rtl:translate-x-1/2 w-full max-w-xl px-4">
+        <div className="flex items-center gap-2 bg-surface border border-border rounded-xl shadow-lg px-4 py-2.5">
+          <Plus size={18} className="text-on-surface-tertiary flex-shrink-0" />
+          <input
+            ref={quickAddRef}
+            type="text"
+            value={quickAddText}
+            onChange={e => setQuickAddText(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); quickAdd(); } }}
+            placeholder={isRTL ? '\u0623\u0636\u0641 \u0645\u0647\u0645\u0629 \u062c\u062f\u064a\u062f\u0629...' : 'Add a new task...'}
+            className="flex-1 bg-transparent text-sm text-on-surface placeholder:text-on-surface-tertiary focus:outline-none"
+            dir={isRTL ? 'rtl' : 'ltr'}
+          />
+          {quickAddText && (
+            <button onClick={quickAdd} className="p-1.5 rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors">
+              <Plus size={16} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Task Editor Modal */}
+      {editingTask && (
+        <TaskEditor
+          task={editingTask}
+          lists={lists}
+          isRTL={isRTL}
+          onSave={saveTask}
+          onDelete={deleteTask}
+          onTogglePin={togglePin}
+          onClose={() => setEditingTask(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function TaskEditor({
+  task, lists, isRTL, onSave, onDelete, onTogglePin, onClose,
+}: {
+  task: TaskItem;
+  lists: string[];
+  isRTL: boolean;
+  onSave: (task: TaskItem) => void;
+  onDelete: (id: string) => void;
+  onTogglePin: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState<TaskItem>({ ...task });
+  const [newCheckItem, setNewCheckItem] = useState('');
+  const [addingSubUnder, setAddingSubUnder] = useState<string | null>(null);
+  const [subText, setSubText] = useState('');
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [newTag, setNewTag] = useState('');
+  const subDragIdRef = useRef<string | null>(null);
+
+  const update = (fields: Partial<TaskItem>) => setForm(prev => ({ ...prev, ...fields }));
+  const colors = getContrastColor(form.color);
+
+  // Recursive helpers (2 levels supported by UI but safe to traverse deeper)
+  const mapItems = (items: ChecklistItem[], fn: (i: ChecklistItem) => ChecklistItem | null): ChecklistItem[] => {
+    const out: ChecklistItem[] = [];
+    for (const it of items) {
+      const mapped = fn(it);
+      if (mapped === null) continue;
+      const children = it.children ? mapItems(it.children, fn) : undefined;
+      out.push({ ...mapped, children });
+    }
+    return out;
+  };
+
+  const addCheckItem = () => {
+    if (!newCheckItem.trim()) return;
+    const item: ChecklistItem = { id: crypto.randomUUID(), text: newCheckItem.trim(), done: false };
+    update({ checklist: [...form.checklist, item] });
+    setNewCheckItem('');
+  };
+
+  const addSubItemUnder = (parentId: string) => {
+    if (!subText.trim()) return;
+    const newItem: ChecklistItem = { id: crypto.randomUUID(), text: subText.trim(), done: false };
+    const addTo = (items: ChecklistItem[], depth = 0): ChecklistItem[] =>
+      items.map(it => {
+        if (it.id === parentId && depth < 2) {
+          return { ...it, children: [...(it.children || []), newItem] };
+        }
+        if (it.children) return { ...it, children: addTo(it.children, depth + 1) };
+        return it;
+      });
+    update({ checklist: addTo(form.checklist) });
+    setSubText('');
+    setAddingSubUnder(null);
+  };
+
+  const toggleCheckItem = (id: string) => {
+    update({ checklist: mapItems(form.checklist, i => i.id === id ? { ...i, done: !i.done } : i) });
+  };
+
+  const removeCheckItem = (id: string) => {
+    update({ checklist: mapItems(form.checklist, i => i.id === id ? null : i) });
+  };
+
+  const toggleCollapse = (id: string) => setCollapsed(prev => ({ ...prev, [id]: !prev[id] }));
+
+  // Reorder sub-items via drag within the same siblings level
+  const handleSubDragStart = (e: React.DragEvent, id: string) => {
+    subDragIdRef.current = id;
+    e.stopPropagation();
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  const handleSubDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const sourceId = subDragIdRef.current;
+    subDragIdRef.current = null;
+    if (!sourceId || sourceId === targetId) return;
+    // Reorder within the same parent array
+    const reorderIn = (items: ChecklistItem[]): { items: ChecklistItem[]; done: boolean } => {
+      const sIdx = items.findIndex(i => i.id === sourceId);
+      const tIdx = items.findIndex(i => i.id === targetId);
+      if (sIdx !== -1 && tIdx !== -1) {
+        const copy = [...items];
+        const [moved] = copy.splice(sIdx, 1);
+        copy.splice(tIdx, 0, moved);
+        return { items: copy, done: true };
+      }
+      let done = false;
+      const newItems = items.map(it => {
+        if (done || !it.children) return it;
+        const r = reorderIn(it.children);
+        if (r.done) { done = true; return { ...it, children: r.items }; }
+        return it;
+      });
+      return { items: newItems, done };
+    };
+    const result = reorderIn(form.checklist);
+    if (result.done) update({ checklist: result.items });
+  };
+
+  const renderChecklistItems = (items: ChecklistItem[], depth = 0): React.ReactNode => {
+    return items.map(item => {
+      const hasChildren = item.children && item.children.length > 0;
+      const isCollapsed = collapsed[item.id];
+      return (
+        <div key={item.id} style={{ paddingInlineStart: depth * 16 }}>
+          <div
+            draggable
+            onDragStart={(e) => handleSubDragStart(e, item.id)}
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onDrop={(e) => handleSubDrop(e, item.id)}
+            className="flex items-center gap-2 group py-0.5"
+          >
+            {hasChildren ? (
+              <button onClick={() => toggleCollapse(item.id)} className={cn('flex-shrink-0', colors.tertiary)}>
+                {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+              </button>
+            ) : <span className="w-3" />}
+            <button onClick={() => toggleCheckItem(item.id)}>
+              {item.done ? <CheckSquare size={14} className="text-accent" /> : <Square size={14} className={colors.tertiary} />}
+            </button>
+            <span className={cn('text-sm flex-1', colors.primary, item.done && 'line-through opacity-60')}>{item.text}</span>
+            {depth < 2 && (
+              <button
+                onClick={() => { setAddingSubUnder(item.id); setSubText(''); }}
+                className={cn('opacity-0 group-hover:opacity-100 transition-opacity text-xs', colors.tertiary, 'hover:text-accent')}
+                title={isRTL ? '\u0623\u0636\u0641 \u0639\u0646\u0635\u0631 \u0641\u0631\u0639\u064a' : 'Add sub-item'}
+              >
+                <Plus size={12} />
+              </button>
+            )}
+            <button onClick={() => removeCheckItem(item.id)} className={cn('opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-500', colors.tertiary)}>
+              <X size={12} />
+            </button>
+          </div>
+          {addingSubUnder === item.id && (
+            <div className="flex items-center gap-2 ps-6 py-1">
+              <Plus size={12} className={colors.tertiary} />
+              <input
+                autoFocus
+                type="text"
+                value={subText}
+                onChange={(e) => setSubText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') addSubItemUnder(item.id);
+                  if (e.key === 'Escape') { setAddingSubUnder(null); setSubText(''); }
+                }}
+                onBlur={() => { if (!subText) setAddingSubUnder(null); }}
+                placeholder={isRTL ? '\u0639\u0646\u0635\u0631 \u0641\u0631\u0639\u064a...' : 'Sub-item...'}
+                className={cn('flex-1 text-sm bg-transparent border-b border-border focus:outline-none focus:border-accent', colors.primary)}
+              />
+            </div>
+          )}
+          {hasChildren && !isCollapsed && renderChecklistItems(item.children!, depth + 1)}
+        </div>
+      );
+    });
+  };
+
+  const addTag = () => {
+    if (!newTag.trim() || form.tags.includes(newTag.trim())) return;
+    update({ tags: [...form.tags, newTag.trim()] });
+    setNewTag('');
+  };
+
+  const removeTag = (tag: string) => {
+    update({ tags: form.tags.filter(t => t !== tag) });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className={cn('bg-surface border border-border rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] overflow-y-auto', getCardBg(form.color))}
+        onClick={e => e.stopPropagation()}
+        dir={isRTL ? 'rtl' : 'ltr'}
+      >
+        <div className="p-5 space-y-4">
+          {/* Title */}
+          <input
+            type="text"
+            value={form.title}
+            onChange={e => update({ title: e.target.value })}
+            placeholder={isRTL ? '\u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u0645\u0647\u0645\u0629' : 'Task title'}
+            className={cn('w-full text-lg font-medium bg-transparent placeholder:text-on-surface-tertiary focus:outline-none', colors.primary)}
+          />
+
+          {/* Notes */}
+          <textarea
+            value={form.notes}
+            onChange={e => update({ notes: e.target.value })}
+            placeholder={isRTL ? '\u0645\u0644\u0627\u062d\u0638\u0627\u062a...' : 'Notes...'}
+            rows={3}
+            className={cn('w-full bg-transparent text-sm placeholder:text-on-surface-tertiary focus:outline-none resize-none', colors.primary)}
+          />
+
+          {/* Checklist (nested, up to 2 levels) */}
+          <div>
+            <h4 className={cn('text-xs font-medium mb-2', colors.secondary)}>{isRTL ? '\u0642\u0627\u0626\u0645\u0629 \u0641\u0631\u0639\u064a\u0629' : 'Checklist'}</h4>
+            <div className="space-y-0.5 mb-2">
+              {renderChecklistItems(form.checklist)}
+            </div>
+            <div className="flex items-center gap-2">
+              <Plus size={14} className={colors.tertiary} />
+              <input
+                type="text"
+                value={newCheckItem}
+                onChange={e => setNewCheckItem(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addCheckItem()}
+                placeholder={isRTL ? '\u0639\u0646\u0635\u0631 \u062c\u062f\u064a\u062f...' : 'New item...'}
+                className={cn('flex-1 text-sm bg-transparent placeholder:text-on-surface-tertiary focus:outline-none', colors.primary)}
+              />
+            </div>
+          </div>
+
+          {/* Due date & time */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <label className="text-xs text-on-surface-secondary mb-1 block">{isRTL ? '\u0627\u0644\u062a\u0627\u0631\u064a\u062e' : 'Due date'}</label>
+              <input
+                type="date"
+                value={form.dueDate || ''}
+                onChange={e => update({ dueDate: e.target.value || null })}
+                className="w-full bg-input border border-border rounded-lg px-3 py-1.5 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-on-surface-secondary mb-1 block">{isRTL ? '\u0627\u0644\u0648\u0642\u062a' : 'Time'}</label>
+              <input
+                type="time"
+                value={form.dueTime || ''}
+                onChange={e => update({ dueTime: e.target.value || null })}
+                className="w-full bg-input border border-border rounded-lg px-3 py-1.5 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </div>
+          </div>
+
+          {/* Priority */}
+          <div>
+            <label className="text-xs text-on-surface-secondary mb-2 block">{isRTL ? '\u0627\u0644\u0623\u0648\u0644\u0648\u064a\u0629' : 'Priority'}</label>
+            <div className="flex items-center gap-2">
+              {(['none', 'low', 'medium', 'high'] as const).map(p => (
+                <button
+                  key={p}
+                  onClick={() => update({ priority: p })}
+                  className={cn(
+                    'px-3 py-1 rounded-lg text-xs border transition-colors',
+                    form.priority === p ? 'border-accent bg-accent/10 text-accent' : 'border-border text-on-surface-tertiary hover:text-on-surface'
+                  )}
+                >
+                  {PRIORITY_CONFIG[p].label[isRTL ? 'ar' : 'en']}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* List */}
+          <div>
+            <label className="text-xs text-on-surface-secondary mb-2 block">{isRTL ? '\u0627\u0644\u0642\u0627\u0626\u0645\u0629' : 'List'}</label>
+            <div className="flex items-center gap-2 flex-wrap">
+              {lists.map(l => (
+                <button
+                  key={l}
+                  onClick={() => update({ list: l })}
+                  className={cn(
+                    'px-3 py-1 rounded-lg text-xs border transition-colors',
+                    form.list === l ? 'border-accent bg-accent/10 text-accent' : 'border-border text-on-surface-tertiary hover:text-on-surface'
+                  )}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Tags */}
+          <div>
+            <label className="text-xs text-on-surface-secondary mb-2 block">{isRTL ? '\u0627\u0644\u0648\u0633\u0648\u0645' : 'Tags'}</label>
+            <div className="flex items-center gap-1.5 flex-wrap mb-2">
+              {form.tags.map(tag => (
+                <span key={tag} className={cn('flex items-center gap-1 px-2 py-0.5 rounded-full text-xs', colors.muted, colors.secondary)}>
+                  {tag}
+                  <button onClick={() => removeTag(tag)}><X size={10} /></button>
+                </span>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <Tag size={14} className="text-on-surface-tertiary" />
+              <input
+                type="text"
+                value={newTag}
+                onChange={e => setNewTag(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addTag()}
+                placeholder={isRTL ? '\u0648\u0633\u0645 \u062c\u062f\u064a\u062f...' : 'New tag...'}
+                className="flex-1 text-sm bg-transparent text-on-surface placeholder:text-on-surface-tertiary focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Color */}
+          <div>
+            <label className="text-xs text-on-surface-secondary mb-2 block">{isRTL ? '\u0627\u0644\u0644\u0648\u0646' : 'Color'}</label>
+            <div className="flex items-center gap-2">
+              {CARD_COLORS.map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => update({ color: c.id })}
+                  className={cn(
+                    'w-7 h-7 rounded-full border-2 transition-colors',
+                    c.bg,
+                    form.color === c.id ? 'border-accent ring-2 ring-accent/20' : 'border-border'
+                  )}
+                  title={c.label}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer actions */}
+        <div className="flex items-center justify-between px-5 py-3 border-t border-border">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { onTogglePin(form.id); onClose(); }}
+              className="p-2 rounded-lg text-on-surface-tertiary hover:text-on-surface hover:bg-surface-secondary transition-colors"
+              title={form.pinned ? (isRTL ? '\u0625\u0644\u063a\u0627\u0621 \u0627\u0644\u062a\u062b\u0628\u064a\u062a' : 'Unpin') : (isRTL ? '\u062a\u062b\u0628\u064a\u062a' : 'Pin')}
+            >
+              {form.pinned ? <PinOff size={16} /> : <Pin size={16} />}
+            </button>
+            <button
+              onClick={() => { if (confirm(isRTL ? '\u062d\u0630\u0641 \u0647\u0630\u0647 \u0627\u0644\u0645\u0647\u0645\u0629\u061f' : 'Delete this task?')) onDelete(form.id); }}
+              className="p-2 rounded-lg text-on-surface-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-1.5 rounded-lg text-sm text-on-surface-secondary hover:bg-surface-secondary transition-colors"
+            >
+              {isRTL ? '\u0625\u0644\u063a\u0627\u0621' : 'Cancel'}
+            </button>
+            <button
+              onClick={() => onSave(form)}
+              className="px-4 py-1.5 rounded-lg text-sm bg-accent text-white hover:bg-accent/90 transition-colors"
+            >
+              {isRTL ? '\u062d\u0641\u0638' : 'Save'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

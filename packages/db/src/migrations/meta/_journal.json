@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1776222551056,
+      "tag": "0000_sad_vance_astro",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1776248662723,
+      "tag": "0001_workflow_runs_steps",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776271000000,
+      "tag": "0002_workflow_step_controls",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1776499200000,
+      "tag": "0003_chat_group_messages",
+      "breakpoints": true
+    }
+  ]
+}

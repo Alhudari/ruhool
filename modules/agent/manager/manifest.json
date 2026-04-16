@@ -1,0 +1,17 @@
+{
+  "id": "manager",
+  "version": "1.0.0",
+  "type": "agent",
+  "name": { "en": "Al-Ra'i (Manager)", "ar": "الراعي" },
+  "description": {
+    "en": "The lead agent — routes requests, delegates to specialists, orchestrates workflows",
+    "ar": "الوكيل الرئيسي — يوجه الطلبات ويفوض المتخصصين وينسق سير العمل"
+  },
+  "author": "core",
+  "icon": "compass",
+  "color": "amber",
+  "requires": {
+    "llm-provider": "any"
+  },
+  "permissions": ["read:./data/**", "write:./data/**"]
+}

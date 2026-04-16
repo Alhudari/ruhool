@@ -1,0 +1,10 @@
+{
+  "id": "prisma-methodology",
+  "version": "1.0.0",
+  "type": "skill",
+  "name": { "en": "PRISMA 2020", "ar": "بريزما 2020" },
+  "description": { "en": "PRISMA 2020 systematic review methodology", "ar": "منهجية بريزما 2020 للمراجعة المنهجية" },
+  "author": "core",
+  "icon": "list-checks",
+  "color": "blue"
+}

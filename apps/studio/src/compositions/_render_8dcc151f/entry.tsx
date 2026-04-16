@@ -1,0 +1,1 @@
+import{registerRoot,Composition}from'remotion';import C from'./Comp';registerRoot(()=>(<Composition id="R8dcc151f" component={C} durationInFrames={210} fps={30} width={1080} height={1920}/>));

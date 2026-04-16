@@ -1,0 +1,55 @@
+# Ruhool API — Railway Deployment
+# Multi-stage build for minimal image size
+
+FROM node:20-slim AS base
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /app
+
+# ─── Dependencies ───
+FROM base AS deps
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY apps/api/package.json apps/api/
+COPY packages/core/package.json packages/core/
+COPY packages/db/package.json packages/db/
+COPY packages/shared/package.json packages/shared/
+RUN pnpm install --frozen-lockfile --prod=false
+
+# ─── Build ───
+FROM base AS build
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
+COPY --from=deps /app/packages/core/node_modules ./packages/core/node_modules
+COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
+COPY --from=deps /app/packages/shared/node_modules ./packages/shared/node_modules
+COPY . .
+RUN pnpm turbo build --filter=@ruhool/api
+
+# ─── Runtime ───
+FROM node:20-slim AS runtime
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /app
+
+# Copy built output and production deps
+COPY --from=build /app/apps/api/dist ./apps/api/dist
+COPY --from=build /app/apps/api/package.json ./apps/api/
+COPY --from=build /app/packages/core ./packages/core
+COPY --from=build /app/packages/db ./packages/db
+COPY --from=build /app/packages/shared ./packages/shared
+COPY --from=build /app/package.json ./
+COPY --from=build /app/pnpm-lock.yaml ./
+COPY --from=build /app/pnpm-workspace.yaml ./
+
+RUN pnpm install --frozen-lockfile --prod
+
+# Data directory for local storage
+RUN mkdir -p /app/data
+
+ENV NODE_ENV=production
+ENV APP_PORT=3001
+
+EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s \
+  CMD curl -f http://localhost:3001/api/health || exit 1
+
+CMD ["node", "apps/api/dist/index.js"]

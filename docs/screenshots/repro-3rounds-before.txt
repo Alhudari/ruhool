@@ -1,0 +1,12 @@
+status: 200
+events: 21
+legacy text: 0
+legacy content: 0
+legacy delegations: 0
+legacy tool_result: 3
+v2 message.start: 4
+v2 message.delta: 4
+v2 message.done: 4
+errors: 0
+pings: 0
+manager.start count: 1
