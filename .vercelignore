@@ -4,8 +4,3 @@ data
 backups
 *.log
 coverage
-apps/studio
-apps/data
-modules
-docs
-scripts
