@@ -4,7 +4,7 @@
     "web": {
       "routePrefix": "/",
       "framework": "nextjs",
-      "buildCommand": "npx pnpm@9.15.0 turbo run build --filter=@ruhool/web"
+      "buildCommand": "npx pnpm@9.15.0 turbo run build --filter=@ruhool/web && cp -r apps/web/.next .next && cp apps/web/next.config.js next.config.js"
     }
   }
 }
