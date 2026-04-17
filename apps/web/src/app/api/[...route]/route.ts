@@ -25,13 +25,13 @@ function getSupabase() {
 // ─── App State (JSON store in Supabase) ───
 async function getAppState(): Promise<Record<string, any>> {
   const sb = getSupabase();
-  const { data } = await sb.from('app_state').select('data').eq('id', 'main').single();
+  const { data } = await sb.from('app_state').select('data').eq('id', 'main').single() as { data: { data: Record<string, any> } | null };
   return data?.data || {};
 }
 
 async function saveAppState(state: unknown) {
   const sb = getSupabase();
-  await sb.from('app_state').update({ data: state, updated_at: new Date().toISOString() }).eq('id', 'main');
+  await (sb.from('app_state') as any).update({ data: state, updated_at: new Date().toISOString() }).eq('id', 'main');
 }
 
 // ─── Route matching with dynamic segments ───
@@ -210,7 +210,7 @@ const routes: Route[] = [
   // ─── Agents ───
   route('GET', '/api/agents', async () => {
     const sb = getSupabase();
-    const { data } = await sb.from('agents').select('*').order('created_at', { ascending: false });
+    const { data } = await (sb.from('agents') as any).select('*').order('created_at', { ascending: false });
     return NextResponse.json(data || []);
   }),
 
