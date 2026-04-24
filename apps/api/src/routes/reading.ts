@@ -19,7 +19,7 @@
  */
 import type { Hono } from 'hono';
 import crypto from 'node:crypto';
-import type { StoreData, NoteRecord, ReadingSession } from '../store/types.js';
+import type { StoreData, NoteRecord, ReadingSession, LibraryEntity, EntityType } from '../store/types.js';
 import { parseLocation } from '../services/citation/location-parser.js';
 import { formatInText, formatReference, type CitationStyle, type CitationMeta } from '../services/citation/citation-formatter.js';
 
@@ -388,6 +388,55 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   });
 
   // ── Citation: save/update session citationMeta ───────────────────────
+  // ── Snowballing: create Library entities from extracted references ─────
+  app.post('/api/reading/sessions/:id/snowball', async (c) => {
+    const store = getStore();
+    const id = c.req.param('id');
+    const session = store.readingNoteSessions?.find(s => s.id === id);
+    if (!session) return c.json({ error: 'session not found' }, 404);
+
+    const body = await c.req.json<{
+      references: Array<{ title: string; authors?: string; year?: number; doi?: string; url?: string }>;
+    }>();
+
+    if (!store.libraryEntities) store.libraryEntities = [];
+    const results: { entity: LibraryEntity; created: boolean }[] = [];
+    const now = new Date().toISOString();
+
+    for (const ref of (body.references ?? [])) {
+      if (!ref.title?.trim()) continue;
+      // Check if already exists by DOI or title
+      const existing = store.libraryEntities.find(e =>
+        (ref.doi && e.doi === ref.doi) ||
+        e.title.toLowerCase() === ref.title.toLowerCase()
+      );
+      if (existing) {
+        results.push({ entity: existing, created: false });
+        continue;
+      }
+      const entity: LibraryEntity = {
+        id: crypto.randomUUID(),
+        type: 'paper' as EntityType,
+        title: ref.title,
+        notes: '',
+        subNotes: [],
+        links: [],
+        tags: ['snowball'],
+        authors: ref.authors,
+        year: ref.year,
+        doi: ref.doi,
+        url: ref.url,
+        readingStatus: 'to-read',
+        createdAt: now,
+        updatedAt: now,
+      };
+      store.libraryEntities.push(entity);
+      results.push({ entity, created: true });
+    }
+    if (results.some(r => r.created)) saveStore();
+    return c.json({ ok: true, results, total: results.length, created: results.filter(r => r.created).length });
+  });
+
   app.post('/api/reading/sessions/:id/citationMeta', async (c) => {
     const store = getStore();
     ensure(store);

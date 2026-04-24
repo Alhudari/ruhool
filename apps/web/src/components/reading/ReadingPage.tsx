@@ -10,6 +10,7 @@ import {
   Loader2,
   Send,
   X,
+  Network,
 } from 'lucide-react';
 import { useAppStore } from '@/store/app';
 import { apiFetch, apiStream } from '@/lib/api';
@@ -155,6 +156,46 @@ export function ReadingPage({ sessionId }: ReadingPageProps) {
   const [sessionReadingDepth, setSessionReadingDepth] = useState<ReadingDepth | ''>('');
   const [pauseNote, setPauseNote] = useState('');
   const [statusBarOpen, setStatusBarOpen] = useState(false);
+
+  // J-14: Snowballing
+  const [snowballOpen, setSnowballOpen] = useState(false);
+  const [snowballRefs, setSnowballRefs] = useState<Array<{ title: string; authors?: string; year?: number; doi?: string; selected: boolean }>>([]);
+  const [snowballLoading, setSnowballLoading] = useState(false);
+  const [snowballDone, setSnowballDone] = useState(false);
+
+  const openSnowball = async () => {
+    setSnowballOpen(true);
+    setSnowballDone(false);
+    if (snowballRefs.length > 0) return;
+    setSnowballLoading(true);
+    try {
+      // Extract references from analysis notes in current session
+      const notes = await apiFetch<{ notes: Array<{ content: string }> }>(`/api/reading/sessions/${sessionId}/notes`).catch(() => ({ notes: [] }));
+      // Simple ref extraction: look for patterns like "Author (year)" or DOI
+      const text = notes.notes.map((n: { content: string }) => n.content).join('\n');
+      const doiMatches = [...text.matchAll(/10\.\d{4,}\/[\w./()-]+/g)].map(m => ({ title: m[0], doi: m[0], selected: true }));
+      const yearMatches = [...text.matchAll(/([A-Z][a-z]+(?:,?\s+[A-Z][a-z]+)*)\s+\((\d{4})\)/g)]
+        .map(m => ({ title: `${m[1]} (${m[2]})`, authors: m[1], year: Number(m[2]), selected: true }));
+      const combined = [...doiMatches, ...yearMatches].slice(0, 20);
+      setSnowballRefs(combined.length > 0 ? combined : [{ title: '', authors: '', year: undefined, doi: '', selected: true }]);
+    } finally { setSnowballLoading(false); }
+  };
+
+  const addSnowballRef = () => setSnowballRefs(prev => [...prev, { title: '', authors: '', year: undefined, doi: '', selected: true }]);
+
+  const submitSnowball = async () => {
+    const refs = snowballRefs.filter(r => r.selected && r.title.trim());
+    if (!refs.length) return;
+    setSnowballLoading(true);
+    try {
+      await apiFetch(`/api/reading/sessions/${sessionId}/snowball`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ references: refs }),
+      });
+      setSnowballDone(true);
+    } finally { setSnowballLoading(false); }
+  };
 
   const STATUS_LABELS: Record<ReadingStatus, { en: string; ar: string }> = {
     'to-read':  { en: 'To Read',  ar: 'للقراءة' },
@@ -796,7 +837,80 @@ export function ReadingPage({ sessionId }: ReadingPageProps) {
             {warningToast}
           </span>
         )}
+        {/* J-14: Snowballing button */}
+        <button onClick={openSnowball}
+          className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-border text-on-surface-tertiary hover:bg-surface-secondary transition-colors">
+          <Network size={11} />
+          {isRTL ? 'مراجع' : 'Refs'}
+        </button>
       </header>
+
+      {/* Snowballing dialog */}
+      {snowballOpen && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-40" onClick={() => setSnowballOpen(false)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" dir={isRTL ? 'rtl' : 'ltr'}>
+            <div className="bg-surface rounded-2xl border border-border shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                <h3 className="text-sm font-semibold text-on-surface flex items-center gap-2">
+                  <Network size={14} className="text-accent" />
+                  {isRTL ? 'استخراج المراجع (Snowballing)' : 'Extract References (Snowballing)'}
+                </h3>
+                <button onClick={() => setSnowballOpen(false)} className="p-1 text-on-surface-tertiary hover:text-on-surface">
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                {snowballLoading ? (
+                  <div className="py-8 text-center"><Loader2 size={20} className="animate-spin text-accent mx-auto" /></div>
+                ) : snowballDone ? (
+                  <div className="py-8 text-center text-success">
+                    <p className="text-sm font-medium">{isRTL ? 'تم إضافة المراجع إلى المكتبة ✓' : 'References added to Library ✓'}</p>
+                    <button onClick={() => setSnowballDone(false)} className="mt-3 text-xs text-accent hover:underline">
+                      {isRTL ? 'إضافة المزيد' : 'Add more'}
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {snowballRefs.map((ref, i) => (
+                      <div key={i} className="flex gap-2 items-start">
+                        <input type="checkbox" checked={ref.selected} onChange={e => setSnowballRefs(prev => prev.map((r, j) => j === i ? { ...r, selected: e.target.checked } : r))}
+                          className="mt-2 h-3.5 w-3.5 accent-accent shrink-0" />
+                        <div className="flex-1 space-y-1">
+                          <input value={ref.title} onChange={e => setSnowballRefs(prev => prev.map((r, j) => j === i ? { ...r, title: e.target.value } : r))}
+                            placeholder={isRTL ? 'عنوان المرجع' : 'Reference title'}
+                            className="w-full rounded border border-border bg-surface-secondary px-2 py-1 text-xs text-on-surface focus:outline-none focus:ring-1 focus:ring-accent" />
+                          <div className="flex gap-1">
+                            <input value={ref.authors ?? ''} onChange={e => setSnowballRefs(prev => prev.map((r, j) => j === i ? { ...r, authors: e.target.value } : r))}
+                              placeholder={isRTL ? 'المؤلفون' : 'Authors'}
+                              className="flex-1 rounded border border-border bg-surface-secondary px-2 py-1 text-xs text-on-surface focus:outline-none" />
+                            <input type="number" value={ref.year ?? ''} onChange={e => setSnowballRefs(prev => prev.map((r, j) => j === i ? { ...r, year: e.target.value ? Number(e.target.value) : undefined } : r))}
+                              placeholder="Year" className="w-16 rounded border border-border bg-surface-secondary px-2 py-1 text-xs text-on-surface focus:outline-none" />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    <button onClick={addSnowballRef} className="w-full py-2 text-xs text-accent border border-dashed border-accent/30 rounded-lg hover:bg-accent/5">
+                      + {isRTL ? 'مرجع جديد' : 'Add reference'}
+                    </button>
+                  </>
+                )}
+              </div>
+              {!snowballDone && !snowballLoading && (
+                <div className="px-5 py-3 border-t border-border flex justify-end gap-2">
+                  <button onClick={() => setSnowballOpen(false)} className="text-xs px-3 py-1.5 rounded-lg border border-border text-on-surface-secondary hover:bg-surface-tertiary">
+                    {isRTL ? 'إلغاء' : 'Cancel'}
+                  </button>
+                  <button onClick={submitSnowball} disabled={!snowballRefs.some(r => r.selected && r.title.trim())}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-accent text-on-accent hover:opacity-90 disabled:opacity-50">
+                    {isRTL ? 'أضف للمكتبة' : 'Add to Library'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       {readingMode === 'rolling' && runningSynthesis && (
         <div className="border-b border-border bg-accent/5 shrink-0">
