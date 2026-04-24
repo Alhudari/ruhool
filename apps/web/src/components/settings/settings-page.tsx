@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Settings, Key, Palette, Languages, Shield, HardDrive, FileText, DollarSign, Bell, CheckCircle, CheckSquare, Globe, Mic, Clock } from 'lucide-react';
+import { Settings, Key, Palette, Languages, Shield, HardDrive, FileText, DollarSign, Bell, CheckCircle, CheckSquare, Globe, Mic, Clock, Network } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { ProvidersSettings } from './providers-settings';
@@ -14,6 +14,7 @@ import { ExternalApisSettings } from './external-apis-settings';
 import { VoiceSettings } from './voice-settings';
 import { TimezoneSettings } from './timezone-settings';
 import { TasksNotesSettings } from './tasks-notes-settings';
+import { DispatchSettings } from './dispatch-settings';
 import { apiFetch } from '@/lib/api';
 
 const TABS = [
@@ -24,6 +25,7 @@ const TABS = [
   { id: 'appearance', icon: Palette, label: { en: 'Appearance', ar: 'المظهر' } },
   { id: 'language', icon: Languages, label: { en: 'Language', ar: 'اللغة' } },
   { id: 'privacy', icon: Shield, label: { en: 'Privacy', ar: 'الخصوصية' } },
+  { id: 'dispatch', icon: Network, label: { en: 'Dispatch', ar: 'الإسناد الهرمي' } },
   { id: 'budget', icon: DollarSign, label: { en: 'Budget', ar: 'الميزانية' } },
   { id: 'notifications', icon: Bell, label: { en: 'Notifications', ar: 'الإشعارات' } },
   { id: 'tasks-notes', icon: CheckSquare, label: { en: 'Tasks & Notes', ar: 'المهام والملاحظات' } },
@@ -81,6 +83,7 @@ export function SettingsPage() {
             <LanguageSettings />
           )}
           {activeTab === 'privacy' && <PrivacySettings />}
+          {activeTab === 'dispatch' && <DispatchSettings />}
           {activeTab === 'budget' && <BudgetSettings />}
           {activeTab === 'notifications' && <NotificationSettings />}
           {activeTab === 'tasks-notes' && <TasksNotesSettings />}
