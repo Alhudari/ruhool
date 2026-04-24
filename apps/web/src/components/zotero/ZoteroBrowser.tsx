@@ -7,7 +7,7 @@ import {
   Table2, LayoutGrid, List, Settings2, X, ExternalLink, Network,
   Sparkles, ArrowUp, ArrowDown, Star, Tag as TagIcon, Calendar,
   FileText, Copy, BookMarked, Info, Clock, ChevronLeft,
-  Bookmark, Trash2,
+  Bookmark, Trash2, FlaskConical,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
@@ -1926,6 +1926,12 @@ function ListView({ items, isRTL, onRowClick, onSync, syncing, synced, isAbstrac
 }
 
 // ── Detail drawer — shows all fields + tags + actions ───────────────
+interface ClusterMini { id: string; name: string; jurisdiction?: { code?: string }; zoteroKeys?: string[] }
+const CLUSTER_FLAG: Record<string, string> = {
+  QAT: '🇶🇦', ARE: '🇦🇪', GBR: '🇬🇧', KWT: '🇰🇼', SAU: '🇸🇦',
+  USA: '🇺🇸', DEU: '🇩🇪', AUS: '🇦🇺', SGP: '🇸🇬', NLD: '🇳🇱',
+};
+
 function DetailDrawer({ item, isRTL, onClose, onOpenRefs, onOpenSuggest, onClassify, classifying }: {
   item: ZoteroItemRich; isRTL: boolean; onClose: () => void;
   onOpenRefs: () => void; onOpenSuggest: () => void;
@@ -2053,7 +2059,106 @@ function DetailDrawer({ item, isRTL, onClose, onOpenRefs, onOpenSuggest, onClass
             </button>
           )}
         </div>
+
+        {/* Link to Research Cluster */}
+        <ClusterLinkSection itemKey={item.itemKey} isRTL={isRTL} />
       </div>
+    </div>
+  );
+}
+
+function ClusterLinkSection({ itemKey, isRTL }: { itemKey: string; isRTL: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [clusters, setClusters] = useState<ClusterMini[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [linked, setLinked] = useState<Set<string>>(new Set());
+
+  const load = async () => {
+    if (clusters.length) return;
+    setLoading(true);
+    try {
+      const res = await apiFetch<{ clusters: ClusterMini[] }>('/api/research/clusters');
+      setClusters(res.clusters ?? []);
+      setLinked(new Set(
+        (res.clusters ?? [])
+          .filter(c => c.zoteroKeys?.includes(itemKey))
+          .map(c => c.id)
+      ));
+    } catch { /* ignore */ }
+    setLoading(false);
+  };
+
+  const toggle = async (cluster: ClusterMini) => {
+    const isLinked = linked.has(cluster.id);
+    setSaving(cluster.id);
+    try {
+      const newKeys = isLinked
+        ? (cluster.zoteroKeys ?? []).filter(k => k !== itemKey)
+        : [...(cluster.zoteroKeys ?? []), itemKey];
+      await apiFetch(`/api/research/clusters/${cluster.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ zoteroKeys: newKeys }),
+      });
+      setLinked(prev => {
+        const next = new Set(prev);
+        if (isLinked) next.delete(cluster.id); else next.add(cluster.id);
+        // Update cluster local state
+        setClusters(cs => cs.map(c => c.id === cluster.id ? { ...c, zoteroKeys: newKeys } : c));
+        return next;
+      });
+    } catch { /* ignore */ }
+    setSaving(null);
+  };
+
+  return (
+    <div className="pt-3 border-t border-border">
+      <button
+        onClick={() => { setOpen(v => !v); if (!open) load(); }}
+        className="w-full flex items-center justify-between text-xs text-on-surface-secondary hover:text-on-surface transition-colors py-1"
+      >
+        <span className="flex items-center gap-1.5">
+          <FlaskConical className="h-3.5 w-3.5 text-accent" />
+          {isRTL ? 'ربط بمجموعة بحثية' : 'Link to Research Cluster'}
+          {linked.size > 0 && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent/15 text-accent">{linked.size}</span>
+          )}
+        </span>
+        <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="mt-2 space-y-1">
+          {loading && <Loader2 className="h-4 w-4 animate-spin text-on-surface-tertiary mx-auto" />}
+          {!loading && clusters.length === 0 && (
+            <p className="text-xs text-on-surface-tertiary text-center py-2">
+              {isRTL ? 'لا توجد مجموعات بعد' : 'No clusters yet'}
+            </p>
+          )}
+          {clusters.map(c => {
+            const isLinked = linked.has(c.id);
+            const isSaving = saving === c.id;
+            return (
+              <button
+                key={c.id}
+                onClick={() => toggle(c)}
+                disabled={isSaving}
+                className={cn(
+                  'w-full flex items-center gap-2 px-3 py-2 rounded text-xs transition-colors',
+                  isLinked ? 'bg-accent/10 text-accent' : 'hover:bg-surface-secondary text-on-surface-secondary'
+                )}
+              >
+                {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" /> : (
+                  <span className={cn('h-3.5 w-3.5 rounded-full border shrink-0 flex items-center justify-center', isLinked ? 'bg-accent border-accent text-on-accent' : 'border-border')}>
+                    {isLinked && <Check className="h-2.5 w-2.5" />}
+                  </span>
+                )}
+                <span className="truncate flex-1 text-start">{c.name}</span>
+                {c.jurisdiction?.code && <span className="shrink-0">{CLUSTER_FLAG[c.jurisdiction.code] ?? ''}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
