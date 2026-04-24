@@ -22,7 +22,8 @@ interface Note {
   themes: string[];
 }
 
-type NodeType = 'paper' | 'note' | 'person' | 'conference' | 'standard' | 'my-writing' | 'research-cluster';
+type NodeType = 'paper' | 'note' | 'person' | 'conference' | 'standard' | 'my-writing' | 'research-cluster'
+  | 'book' | 'report' | 'thesis-chapter' | 'atomic-note' | 'reading-session' | 'file' | 'webpage' | 'video' | 'code-repo';
 type EdgeType = 'paper-note' | 'theme' | 'authored-by' | 'cited-by' | 'part-of' | 'leads-to' | 'presented-at';
 
 interface GraphNode {
@@ -51,8 +52,17 @@ const NODE_COLORS: Record<NodeType, string> = {
   person: '#c084fc',           // purple
   conference: '#fb923c',       // orange
   standard: '#facc15',         // yellow
-  'my-writing': '#4ade80',     // green
+  'my-writing': '#4ade80',       // green
   'research-cluster': '#38bdf8', // sky
+  book: '#f472b6',               // pink
+  report: '#fb923c',             // orange
+  'thesis-chapter': '#a78bfa',   // violet
+  'atomic-note': '#34d399',      // green
+  'reading-session': '#38bdf8',  // sky
+  file: '#94a3b8',               // slate
+  webpage: '#22d3ee',            // cyan
+  video: '#f87171',              // red
+  'code-repo': '#4ade80',        // green
 };
 
 // Edge colors by type
@@ -83,6 +93,10 @@ export function KnowledgeGraph() {
 
   const [papers, setPapers] = useState<Paper[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
+
+  // J-16: Library entities
+  interface LibEntity { id: string; type: string; title: string; links: Array<{ targetId: string }> }
+  const [libEntities, setLibEntities] = useState<LibEntity[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
 
@@ -98,14 +112,16 @@ export function KnowledgeGraph() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [papersData, notesData] = await Promise.all([
-        apiFetch<Paper[]>('/api/papers'),
-        apiFetch<Note[]>('/api/notes'),
+      const [papersData, notesData, libData] = await Promise.all([
+        apiFetch<Paper[]>('/api/papers').catch(() => [] as Paper[]),
+        apiFetch<Note[]>('/api/notes').catch(() => [] as Note[]),
+        apiFetch<{ entities: LibEntity[] }>('/api/library/entities?limit=100').catch(() => ({ entities: [] })),
       ]);
       setPapers(papersData);
       setNotes(notesData);
+      setLibEntities(libData.entities ?? []);
     } catch {
-      // silent
+      setLibEntities([]);
     }
     setLoading(false);
   }, []);
@@ -116,7 +132,7 @@ export function KnowledgeGraph() {
 
   // Build graph layout
   useEffect(() => {
-    if (papers.length === 0 && notes.length === 0) return;
+    if (papers.length === 0 && notes.length === 0 && libEntities.length === 0) return;
 
     const nodes: GraphNode[] = [];
     const links: GraphLink[] = [];
@@ -183,6 +199,40 @@ export function KnowledgeGraph() {
         }
       }
     });
+
+    // J-16: Library entity nodes — arranged in outer ring
+    const libCount = libEntities.length;
+    if (libCount > 0) {
+      const outerRadius = Math.max(300, libCount * 25);
+      libEntities.forEach((e, i) => {
+        const angle = (2 * Math.PI * i) / Math.max(libCount, 1);
+        const nodeType = e.type as NodeType;
+        nodes.push({
+          id: `lib-${e.id}`,
+          type: nodeType,
+          label: e.title.length > 28 ? e.title.slice(0, 26) + '…' : e.title,
+          x: Math.cos(angle) * outerRadius * 1.4,
+          y: Math.sin(angle) * outerRadius * 1.4,
+          vx: 0, vy: 0,
+          radius: 14,
+          color: NODE_COLORS[nodeType] ?? '#94a3b8',
+          data: { id: e.id, title: e.title, noteCount: 0 } as Paper,
+        });
+      });
+
+      // Library entity links (from entity.links)
+      libEntities.forEach(e => {
+        (e.links ?? []).forEach(link => {
+          if (nodes.find(n => n.id === `lib-${link.targetId}`)) {
+            links.push({
+              source: `lib-${e.id}`,
+              target: `lib-${link.targetId}`,
+              type: 'part-of' as EdgeType,
+            });
+          }
+        });
+      });
+    }
 
     // Cap at MAX_VISIBLE_NODES to prevent browser slowdown
     const cappedNodes = nodes.slice(0, MAX_VISIBLE_NODES);
@@ -258,7 +308,7 @@ export function KnowledgeGraph() {
     return () => {
       if (animRef.current) cancelAnimationFrame(animRef.current);
     };
-  }, [papers, notes]);
+  }, [papers, notes, libEntities]);
 
   // Zoom
   const handleWheel = (e: React.WheelEvent) => {
@@ -308,6 +358,9 @@ export function KnowledgeGraph() {
         <div className="flex items-center gap-4 text-xs text-on-surface-tertiary">
           <span>{papers.length} {isRTL ? 'ورقة' : 'papers'}</span>
           <span>{notes.length} {isRTL ? 'ملاحظة' : 'notes'}</span>
+          {libEntities.length > 0 && (
+            <span>{libEntities.length} {isRTL ? 'مصدر' : 'sources'}</span>
+          )}
           <span>{themeLinks} {isRTL ? 'روابط' : 'connections'}</span>
         </div>
       </div>
@@ -316,7 +369,7 @@ export function KnowledgeGraph() {
         <div className="flex items-center justify-center py-16">
           <Loader2 size={24} className="animate-spin text-on-surface-tertiary" />
         </div>
-      ) : papers.length === 0 && notes.length === 0 ? (
+      ) : papers.length === 0 && notes.length === 0 && libEntities.length === 0 ? (
         <div className="text-center py-16 text-on-surface-tertiary">
           <Network size={48} className="mx-auto mb-4 opacity-30" />
           <p className="text-lg mb-2">{isRTL ? 'لا توجد بيانات' : 'No data yet'}</p>
