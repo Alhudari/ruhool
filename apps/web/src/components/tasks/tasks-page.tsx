@@ -10,6 +10,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
+import { useToast } from '@/components/shared/Toast';
 import { HabitStatsRing } from './HabitStatsRing';
 
 interface ChecklistItem {
@@ -134,6 +135,7 @@ function isOverdue(task: TaskItem): boolean {
 export function TasksPage() {
   const { language } = useAppStore();
   const isRTL = language === 'ar';
+  const { showToast } = useToast();
   const router = useRouter();
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [lists, setLists] = useState<string[]>([]);
@@ -327,12 +329,23 @@ export function TasksPage() {
     } catch {}
   };
 
-  const deleteTask = async (id: string) => {
+  const deleteTask = async (id: string, title?: string) => {
+    // Optimistic: hide immediately
+    setTasks(prev => prev.filter(t => t.id !== id));
+    if (editingTask?.id === id) setEditingTask(null);
     try {
       await apiFetch(`/api/tasks/${id}`, { method: 'DELETE' });
-      setTasks(prev => prev.filter(t => t.id !== id));
-      if (editingTask?.id === id) setEditingTask(null);
-    } catch {}
+      showToast({
+        message: isRTL ? `"${title ?? ''}" نُقلت للمحذوفات` : `"${title ?? ''}" moved to trash`,
+        type: 'info',
+        undo: async () => {
+          await apiFetch(`/api/tasks/${id}/restore`, { method: 'POST' });
+          await load();
+        },
+      });
+    } catch {
+      await load(); // revert on failure
+    }
   };
 
   const saveTask = async (task: TaskItem) => {
@@ -1008,6 +1021,20 @@ export function TasksPage() {
         </div>
       )}
 
+      {/* Trash section — soft-deleted tasks */}
+      {tasks.some(t => (t as { deletedAt?: string }).deletedAt) && (
+        <div className="mt-6 border-t border-border pt-4">
+          <button
+            onClick={() => {/* toggle trash visibility handled by todayView filter */}}
+            className="text-xs text-on-surface-tertiary hover:text-error transition-colors flex items-center gap-1"
+          >
+            <Trash2 size={12} />
+            {isRTL ? 'المحذوفات' : 'Trash'}
+            {' '}({tasks.filter(t => (t as { deletedAt?: string }).deletedAt).length})
+          </button>
+        </div>
+      )}
+
       {/* Quick Add (bottom floating) */}
       <div className="fixed bottom-4 md:bottom-6 start-1/2 -translate-x-1/2 rtl:translate-x-1/2 w-full max-w-xl px-4">
         <div className="flex items-center gap-2 bg-surface border border-amber-500/30 rounded-xl shadow-lg px-4 py-2.5">
@@ -1053,7 +1080,7 @@ function TaskEditor({
   lists: string[];
   isRTL: boolean;
   onSave: (task: TaskItem) => void;
-  onDelete: (id: string) => void;
+  onDelete: (id: string, title?: string) => void;
   onTogglePin: (id: string) => void;
   onClose: () => void;
 }) {
@@ -1381,7 +1408,7 @@ function TaskEditor({
               {form.pinned ? <PinOff size={16} /> : <Pin size={16} />}
             </button>
             <button
-              onClick={() => { if (confirm(isRTL ? '\u062d\u0630\u0641 \u0647\u0630\u0647 \u0627\u0644\u0645\u0647\u0645\u0629\u061f' : 'Delete this task?')) onDelete(form.id); }}
+              onClick={() => { if (confirm(isRTL ? '\u0646\u0642\u0644 \u0644\u0644\u0645\u062d\u0630\u0648\u0641\u0627\u062a\u061f' : 'Move to trash?')) onDelete(form.id, form.title); }}
               className="p-2 rounded-lg text-on-surface-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
             >
               <Trash2 size={16} />

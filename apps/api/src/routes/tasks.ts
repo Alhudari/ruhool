@@ -118,13 +118,37 @@ export function registerTasksRoutes(app: Hono, deps: TasksRoutesDeps): void {
     const store = getStore();
     if (!store.tasks) store.tasks = [];
     const id = c.req.param('id');
-    const idx = store.tasks.findIndex(t => t.id === id);
-    if (idx === -1) return c.json({ error: 'Not found' }, 404);
-    const deleted = store.tasks.splice(idx, 1)[0];
-    logActivity('task', `Task deleted: ${deleted.title}`, '', { agentId: 'tasks-agent', metadata: { taskId: deleted.id } });
+    const task = store.tasks.find(t => t.id === id);
+    if (!task) return c.json({ error: 'Not found' }, 404);
+    const hardDelete = c.req.query('permanent') === 'true';
+    if (hardDelete) {
+      const idx = store.tasks.findIndex(t => t.id === id);
+      const deleted = store.tasks.splice(idx, 1)[0];
+      logActivity('task', `Task hard-deleted: ${deleted.title}`, '', { agentId: 'tasks-agent', metadata: { taskId: deleted.id } });
+      saveStore();
+      triggerGoogleTasksSync();
+      return c.json({ ok: true, permanent: true });
+    }
+    // Soft delete
+    (task as { deletedAt?: string }).deletedAt = new Date().toISOString();
+    task.updatedAt = new Date().toISOString();
+    logActivity('task', `Task soft-deleted: ${task.title}`, '', { agentId: 'tasks-agent', metadata: { taskId: task.id } });
     saveStore();
     triggerGoogleTasksSync();
     return c.json({ ok: true });
+  });
+
+  // Restore soft-deleted task
+  app.post('/api/tasks/:id/restore', (c) => {
+    const store = getStore();
+    if (!store.tasks) store.tasks = [];
+    const id = c.req.param('id');
+    const task = store.tasks.find(t => t.id === id);
+    if (!task) return c.json({ error: 'Not found' }, 404);
+    delete (task as { deletedAt?: string }).deletedAt;
+    task.updatedAt = new Date().toISOString();
+    saveStore();
+    return c.json({ ok: true, task });
   });
 
   app.put('/api/tasks/:id/toggle', (c) => {
