@@ -3,8 +3,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import {
   Loader2, Users, Calendar, MapPin, FileText, Target, Award,
-  ChevronRight, ExternalLink, RefreshCw, Pencil, Layers, X,
-  ArrowRight, CheckCircle2, Clock,
+  ChevronRight, RefreshCw, Pencil, Layers, X,
+  ArrowRight, CheckCircle2, Clock, BookOpen, Microscope, Library,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -67,10 +67,22 @@ function encodeVaultPath(p: string): string {
   return p.split('/').map((seg) => encodeURIComponent(seg)).join('/');
 }
 
+interface VaultFileSummary {
+  path: string;
+  name: string;
+  title?: string;
+  category?: string;
+  status?: string;
+  preview: string;
+}
+
 interface SupervisionData {
   dashboard: { body: string; sections: { heading: string; level: number; content: string }[] } | null;
   meetings: MeetingSummary[];
   milestones: MilestoneSummary[];
+  detailedWork: VaultFileSummary[];
+  scopePoints: VaultFileSummary[];
+  materials: VaultFileSummary[];
 }
 
 interface FullSupervisionDoc {
@@ -101,7 +113,7 @@ function DocModal({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiFetch<FullSupervisionDoc>(`/api/vault/supervision/${encodeVaultPath(path)}`)
+    apiFetch<FullSupervisionDoc>(`/api/vault/supervision/file?path=${encodeURIComponent(path)}`)
       .then(setDoc)
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -186,12 +198,15 @@ function DocModal({
 }
 
 // ── Tabs ──────────────────────────────────────────────────────────────
-type Tab = 'overview' | 'meetings' | 'milestones' | 'dashboard';
+type Tab = 'overview' | 'meetings' | 'milestones' | 'detailed-work' | 'scope-points' | 'materials' | 'dashboard';
 const TABS: { id: Tab; icon: React.ElementType; label: { en: string; ar: string } }[] = [
-  { id: 'overview',   icon: Layers,  label: { en: 'Overview',    ar: 'نظرة عامة' } },
-  { id: 'meetings',   icon: Users,   label: { en: 'Meetings',    ar: 'الاجتماعات' } },
-  { id: 'milestones', icon: Award,   label: { en: 'Key Stations', ar: 'المحطات المهمة' } },
-  { id: 'dashboard',  icon: FileText, label: { en: 'Visual Dashboard', ar: 'اللوحة البصرية' } },
+  { id: 'overview',      icon: Layers,     label: { en: 'Overview',         ar: 'نظرة عامة' } },
+  { id: 'meetings',      icon: Users,      label: { en: 'Meetings',         ar: 'الاجتماعات' } },
+  { id: 'milestones',    icon: Award,      label: { en: 'Milestones',       ar: 'المحطات المهمة' } },
+  { id: 'detailed-work', icon: Microscope, label: { en: 'Detailed Work',    ar: 'العمل التفصيلي' } },
+  { id: 'scope-points',  icon: BookOpen,   label: { en: 'Scope Points',     ar: 'نقاط النطاق' } },
+  { id: 'materials',     icon: Library,    label: { en: 'Materials',        ar: 'المواد' } },
+  { id: 'dashboard',     icon: FileText,   label: { en: 'Visual Dashboard', ar: 'اللوحة البصرية' } },
 ];
 
 // ──────────────────────────────────────────────────────────────────────
@@ -259,10 +274,10 @@ export function SupervisionDashboard() {
 
           {/* Stat pills */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatPillar icon={Calendar}     value={data?.meetings.length ?? 0}    label={isRTL ? 'اجتماعات' : 'Meetings'}    color="accent" />
-            <StatPillar icon={Award}        value={data?.milestones.length ?? 0}  label={isRTL ? 'محطات مهمة' : 'Key Stations'}     color="info" />
-            <StatPillar icon={Target}       value={totalOpenActions}              label={isRTL ? 'بنود عمل مفتوحة' : 'Open Actions'} color="warning" />
-            <StatPillar icon={Clock}        value={formatDate(lastMeeting?.date)}  label={isRTL ? 'آخر اجتماع' : 'Last Meeting'}  color="success" />
+            <StatPillar icon={Calendar}   value={data?.meetings.length ?? 0}       label={isRTL ? 'اجتماعات' : 'Meetings'}         color="accent" />
+            <StatPillar icon={Award}      value={data?.milestones.length ?? 0}     label={isRTL ? 'محطات مهمة' : 'Milestones'}      color="info" />
+            <StatPillar icon={Target}     value={totalOpenActions}                 label={isRTL ? 'بنود عمل مفتوحة' : 'Open Actions'} color="warning" />
+            <StatPillar icon={BookOpen}   value={(data?.scopePoints.length ?? 0)}  label={isRTL ? 'نقاط نطاق' : 'Scope Points'}    color="success" />
           </div>
         </div>
       </div>
@@ -477,37 +492,238 @@ export function SupervisionDashboard() {
           </div>
         )}
 
-        {/* MILESTONES */}
+        {/* MILESTONES — timeline view */}
         {tab === 'milestones' && (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {data?.milestones.map((m) => (
-              <button
-                key={m.path}
-                onClick={() => setOpenDoc(m.path)}
-                className="text-start rounded-xl border border-border bg-surface-secondary p-5 hover:border-accent hover:bg-surface-tertiary transition-all"
-              >
-                <div className="flex items-start justify-between gap-2 mb-3">
-                  <Award className="h-5 w-5 text-info shrink-0" />
-                  {m.status && (
-                    <span className={cn(
-                      'text-[10px] px-2 py-0.5 rounded-full',
-                      m.status.toLowerCase().includes('done') || m.status.toLowerCase().includes('complete')
-                        ? 'bg-success/15 text-success'
-                        : 'bg-warning/15 text-warning'
-                    )}>
-                      {m.status}
-                    </span>
-                  )}
+          <div className="space-y-5">
+            {/* Timeline strip */}
+            <div className="rounded-xl border border-border bg-surface-secondary p-6 overflow-x-auto">
+              <h3 className="text-sm font-semibold text-on-surface mb-6 flex items-center gap-2">
+                <Award className="h-4 w-4 text-info" />
+                {isRTL ? 'خط الزمن للمحطات' : 'Milestone Timeline'}
+              </h3>
+              <div className="relative" dir="ltr">
+                {/* Horizontal connector line */}
+                <div className="absolute top-5 left-8 right-8 h-0.5 bg-gradient-to-r from-info/30 via-info/60 to-info/30" />
+                <div className="flex justify-between gap-2 min-w-[600px]">
+                  {data?.milestones.map((m, idx) => {
+                    const isDone = !!(m.status?.toLowerCase().match(/done|complete|pass/));
+                    const isInProgress = !!(m.status?.toLowerCase().match(/in.progress|upcoming|pending/));
+                    return (
+                      <button
+                        key={m.path}
+                        onClick={() => setOpenDoc(m.path)}
+                        className="flex-1 flex flex-col items-center gap-2 group"
+                        style={{ animationDelay: `${idx * 70}ms` }}
+                      >
+                        <div className={cn(
+                          'h-10 w-10 rounded-full border-2 flex items-center justify-center transition-all duration-300 group-hover:scale-110 z-10',
+                          isDone
+                            ? 'bg-success border-success text-white shadow-md shadow-success/30'
+                            : isInProgress
+                            ? 'bg-warning/20 border-warning text-warning animate-pulse'
+                            : 'bg-surface border-border text-on-surface-tertiary group-hover:border-info'
+                        )}>
+                          {isDone
+                            ? <CheckCircle2 className="h-5 w-5" />
+                            : <span className="text-xs font-bold">{idx}</span>
+                          }
+                        </div>
+                        <div className="text-center max-w-[90px]">
+                          <p className="text-[11px] font-semibold text-on-surface group-hover:text-accent transition-colors line-clamp-2">
+                            {m.name.replace(/^MS\d+\s*[-–]\s*/i, '')}
+                          </p>
+                          {m.date && (
+                            <p className="text-[10px] text-on-surface-tertiary mt-0.5">{formatDate(m.date)}</p>
+                          )}
+                          {m.status && (
+                            <span className={cn(
+                              'inline-block mt-1 text-[9px] px-1.5 py-0.5 rounded-full',
+                              isDone ? 'bg-success/15 text-success'
+                                : isInProgress ? 'bg-warning/15 text-warning'
+                                : 'bg-surface-tertiary text-on-surface-tertiary'
+                            )}>
+                              {m.status}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
-                <h4 className="text-sm font-bold text-on-surface mb-1">{m.title || m.name}</h4>
-                {m.date && (
-                  <p className="text-[11px] text-on-surface-tertiary mb-2">{formatDate(m.date)}</p>
-                )}
-                {m.preview && (
-                  <p className="text-xs text-on-surface-secondary line-clamp-3">{m.preview}</p>
-                )}
-              </button>
-            ))}
+              </div>
+            </div>
+            {/* Card grid */}
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {data?.milestones.map((m) => {
+                const isDone = !!(m.status?.toLowerCase().match(/done|complete|pass/));
+                return (
+                  <button
+                    key={m.path}
+                    onClick={() => setOpenDoc(m.path)}
+                    className="text-start rounded-xl border border-border bg-surface-secondary p-5 hover:border-accent hover:bg-surface-tertiary transition-all"
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <Award className={cn('h-5 w-5 shrink-0', isDone ? 'text-success' : 'text-info')} />
+                      {m.status && (
+                        <span className={cn(
+                          'text-[10px] px-2 py-0.5 rounded-full',
+                          isDone ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'
+                        )}>
+                          {m.status}
+                        </span>
+                      )}
+                    </div>
+                    <h4 className="text-sm font-bold text-on-surface mb-1">{m.title || m.name}</h4>
+                    {m.date && (
+                      <p className="text-[11px] text-on-surface-tertiary mb-2">{formatDate(m.date)}</p>
+                    )}
+                    {m.preview && (
+                      <p className="text-xs text-on-surface-secondary line-clamp-3">{m.preview}</p>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* DETAILED WORK */}
+        {tab === 'detailed-work' && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-border bg-surface-secondary overflow-hidden">
+              <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-on-surface flex items-center gap-2">
+                  <Microscope className="h-4 w-4 text-accent" />
+                  {isRTL ? 'العمل التفصيلي' : 'Detailed Work'}
+                </h3>
+                <span className="text-xs text-on-surface-tertiary">
+                  {data?.detailedWork.length ?? 0} {isRTL ? 'ملف' : 'files'}
+                </span>
+              </div>
+              {!data?.detailedWork.length ? (
+                <p className="text-sm text-on-surface-tertiary text-center py-10">
+                  {isRTL ? 'لا توجد ملفات' : 'No files found'}
+                </p>
+              ) : (
+                <div className="divide-y divide-border">
+                  {data.detailedWork.map((f) => (
+                    <button
+                      key={f.path}
+                      onClick={() => setOpenDoc(f.path)}
+                      className="w-full text-start px-5 py-4 hover:bg-surface-tertiary transition-colors group"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-sm font-semibold text-on-surface group-hover:text-accent transition-colors">
+                            {f.title || f.name}
+                          </h4>
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
+                            {f.category && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent">{f.category}</span>
+                            )}
+                            {f.status && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface-tertiary text-on-surface-tertiary">{f.status}</span>
+                            )}
+                          </div>
+                          {f.preview && (
+                            <p className="text-xs text-on-surface-secondary mt-2 line-clamp-2">{f.preview}</p>
+                          )}
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-on-surface-tertiary shrink-0 mt-1" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* SCOPE POINTS */}
+        {tab === 'scope-points' && (
+          <div className="space-y-4">
+            <p className="text-xs text-on-surface-tertiary">
+              {isRTL
+                ? 'النقاط التفصيلية لنطاق البحث — مستمدة من التوصيات مع المشرف.'
+                : 'Detailed scope points for the research — derived from supervisor recommendations.'}
+            </p>
+            <div className="grid md:grid-cols-2 gap-4">
+              {!data?.scopePoints.length ? (
+                <p className="text-sm text-on-surface-tertiary py-10 col-span-2 text-center">
+                  {isRTL ? 'لا توجد نقاط نطاق' : 'No scope points found'}
+                </p>
+              ) : (
+                data.scopePoints.map((f, idx) => (
+                  <button
+                    key={f.path}
+                    onClick={() => setOpenDoc(f.path)}
+                    style={{ animationDelay: `${idx * 40}ms` }}
+                    className="text-start rounded-xl border border-border bg-surface-secondary p-4 hover:border-accent hover:bg-surface-tertiary transition-all group animate-[fadeInUp_0.35s_ease-out_both]"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="h-8 w-8 rounded-lg bg-accent/10 text-accent flex items-center justify-center shrink-0 text-xs font-bold group-hover:scale-110 transition-transform">
+                        {f.name.match(/^S(\d+)/)?.[1] ?? (idx + 1)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h4 className="text-sm font-semibold text-on-surface group-hover:text-accent transition-colors line-clamp-2">
+                          {f.title || f.name}
+                        </h4>
+                        {f.preview && (
+                          <p className="text-xs text-on-surface-secondary mt-1 line-clamp-2">{f.preview}</p>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* MATERIALS */}
+        {tab === 'materials' && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-border bg-surface-secondary overflow-hidden">
+              <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-on-surface flex items-center gap-2">
+                  <Library className="h-4 w-4 text-info" />
+                  {isRTL ? 'مواد الإشراف' : 'Supervision Materials'}
+                </h3>
+                <span className="text-xs text-on-surface-tertiary">
+                  {data?.materials.length ?? 0} {isRTL ? 'مرجع' : 'references'}
+                </span>
+              </div>
+              {!data?.materials.length ? (
+                <p className="text-sm text-on-surface-tertiary text-center py-10">
+                  {isRTL ? 'لا توجد مواد' : 'No materials found'}
+                </p>
+              ) : (
+                <div className="divide-y divide-border">
+                  {data.materials.map((f) => (
+                    <button
+                      key={f.path}
+                      onClick={() => setOpenDoc(f.path)}
+                      className="w-full text-start px-5 py-4 hover:bg-surface-tertiary transition-colors group"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="h-9 w-9 rounded-lg bg-info/10 text-info flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                          <FileText className="h-4 w-4" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-sm font-semibold text-on-surface group-hover:text-accent transition-colors">
+                            {f.title || f.name}
+                          </h4>
+                          {f.preview && (
+                            <p className="text-xs text-on-surface-secondary mt-1 line-clamp-2">{f.preview}</p>
+                          )}
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-on-surface-tertiary shrink-0 mt-1" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

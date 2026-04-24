@@ -84,6 +84,13 @@ import { registerFreshStartRoutes } from './fresh-start.js';
 import { registerAutoBackupRoutes } from './backup-scheduler.js';
 import { registerVaultTrashRoutes } from './vault-trash.js';
 import { registerPhdFeaturesRoutes } from './phd-features.js';
+import { registerGrs2Routes } from './grs2.js';
+import { registerLinksRoutes } from './links.js';
+import { registerTagsRoutes } from './tags.js';
+import { registerResearchFilesRoutes } from './research-files.js';
+import { registerResearchClustersRoutes } from './research-clusters.js';
+import { registerGraphRoutes } from './graph.js';
+import { registerScopePointsRoutes } from './scope-points.js';
 
 // Accept a wide superset deps bag; each registrar picks what it needs.
 // Using `unknown` + cast inside to avoid re-declaring every registrar's typed Deps here.
@@ -182,6 +189,12 @@ export function registerAllRoutes(app: Hono, deps: Record<string, unknown>): voi
   registerAutoBackupRoutes(app, { getStore: d.getStore, backupsDir: d.backupsDir });
   registerVaultTrashRoutes(app);
   registerPhdFeaturesRoutes(app);
+  registerGrs2Routes(app, { getStore: d.getStore, saveStore: d.saveStore });
+  registerLinksRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
+  registerTagsRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
+  registerResearchFilesRoutes(app);
+  registerResearchClustersRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
+  registerScopePointsRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
   registerShwashaRoutes(app, {
     getStore: d.getStore,
     saveStore: d.saveStore,
@@ -194,6 +207,7 @@ export function registerAllRoutes(app: Hono, deps: Record<string, unknown>): voi
     ensurePapersDir: d.ensurePapersDir,
     papersDir: d.papersDir,
   });
+  registerGraphRoutes(app, { getStore: d.getStore });
   if (d.workflowOrchestrator && d.workflowGetRunChannel) {
     registerWorkflowRunsRoutes(app, {
       getStore: d.getStore,

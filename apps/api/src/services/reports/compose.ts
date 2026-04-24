@@ -243,6 +243,58 @@ function buildContext(store: StoreData, report: ReportDefinition): string {
     }
   }
 
+  // ── Always-on enrichment sources (R14 context expansion) ─────────
+
+  // Source 1: Zotero library status
+  const zoteroConfig = (store as unknown as { zoteroConfig?: { webUserId?: string; webApiKey?: string; mode?: string }; zoteroLastRefreshAt?: string }).zoteroConfig;
+  void zoteroConfig; // used only to detect presence; no API calls in compose
+  const zoteroLastRefresh = (store as unknown as { zoteroLastRefreshAt?: string }).zoteroLastRefreshAt;
+  if (zoteroLastRefresh) {
+    lines.push('');
+    lines.push('## Zotero Library');
+    lines.push(`Last synced: ${zoteroLastRefresh.slice(0, 10)}. Library connected.`);
+  }
+
+  // Source 2: Recent supervision meetings
+  const recentMeetings = ((store as unknown as { meetingSessions?: Array<{id:string;title:string;record?:{date?:string;Summary?:string;No?:number};updatedAt:string}> }).meetingSessions ?? [])
+    .filter(s => s.record?.date)
+    .sort((a, b) => (b.record?.date ?? '').localeCompare(a.record?.date ?? ''))
+    .slice(0, 3);
+  if (recentMeetings.length > 0) {
+    lines.push('');
+    lines.push('## Recent Supervision Meetings');
+    for (const m of recentMeetings) {
+      lines.push(`- Meeting #${m.record?.No ?? '?'} (${(m.record?.date ?? '').slice(0, 10)}): ${m.record?.Summary ?? m.title}`);
+    }
+  }
+
+  // Source 3: GRS2 status
+  const grs2Records = ((store as unknown as { grs2Records?: Array<{month:string;status:string;progress:number}> }).grs2Records ?? [])
+    .sort((a, b) => b.month.localeCompare(a.month))
+    .slice(0, 2);
+  if (grs2Records.length > 0) {
+    lines.push('');
+    lines.push('## GRS2 Status');
+    for (const g of grs2Records) {
+      lines.push(`- ${g.month}: ${g.status} (${g.progress}%)`);
+    }
+  }
+
+  // Source 4: LLM budget snapshot (this month)
+  const usageRecords = store.usage ?? [];
+  const nowBudget = new Date();
+  const monthStart = new Date(nowBudget.getFullYear(), nowBudget.getMonth(), 1).toISOString();
+  const thisMonthUsage = usageRecords.filter(u => u.timestamp >= monthStart);
+  const totalCostThisMonth = thisMonthUsage.reduce((sum, u) => sum + (u.totalCostUsd ?? 0), 0);
+  const budget = (store as unknown as { budget?: { monthlyBudget?: number } }).budget?.monthlyBudget;
+  if (budget || totalCostThisMonth > 0) {
+    lines.push('');
+    lines.push('## LLM Budget (this month)');
+    let budgetLine = `- Spent: $${totalCostThisMonth.toFixed(3)}`;
+    if (budget) budgetLine += ` of $${budget} budget (${Math.round(totalCostThisMonth / budget * 100)}%)`;
+    lines.push(budgetLine);
+  }
+
   return lines.join('\n');
 }
 

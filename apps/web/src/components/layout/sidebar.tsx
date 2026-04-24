@@ -112,7 +112,8 @@ const NAV_ITEMS_MAP: Record<string, NavItem> = {
   notes: { id: 'notes', icon: NotebookPen, label: { en: 'Atomic Notes', ar: 'الملاحظات الذرية' }, href: '/notes' },
   'notes-keep': { id: 'notes-keep', icon: StickyNote, label: { en: 'Quick Notes', ar: 'ملاحظات سريعة' }, href: '/notes-keep' },
   'reports-inbox': { id: 'reports-inbox', icon: Mail, label: { en: 'Reports Inbox', ar: 'صندوق التقارير' }, href: '/reports-inbox' },
-  knowledge: { id: 'knowledge', icon: Network, label: { en: 'Knowledge', ar: 'المعرفة' }, href: '/graph' },
+  knowledge: { id: 'knowledge', icon: Network, label: { en: 'Knowledge Graph', ar: 'خريطة المعرفة' }, href: '/graph' },
+  research: { id: 'research', icon: FlaskConical, label: { en: 'Research Hub', ar: 'مركز البحث' }, href: '/research' },
   content: { id: 'content', icon: Palette, label: { en: 'Content', ar: 'المحتوى' }, href: '/content' },
   studio: { id: 'studio', icon: Video, label: { en: 'Studio', ar: 'الاستوديو' }, href: '/studio' },
   captions: { id: 'captions', icon: Captions, label: { en: 'Captions', ar: 'كابشنز' }, href: '/captions' },
@@ -134,6 +135,7 @@ const NAV_ITEMS_MAP: Record<string, NavItem> = {
   triggers: { id: 'triggers', icon: Zap, label: { en: 'Triggers', ar: 'المحفّزات' }, href: '/triggers' },
   phd: { id: 'phd', icon: GraduationCap, label: { en: 'PhD Dashboard', ar: 'لوحة الدكتوراه' }, href: '/phd' },
   meetings: { id: 'meetings', icon: CalendarDays, label: { en: 'Meetings', ar: 'الاجتماعات' }, href: '/meetings' },
+  grs2: { id: 'grs2', icon: ClipboardList, label: { en: 'GRS2 Reports', ar: 'تقارير GRS2' }, href: '/grs2' },
   companion: { id: 'companion', icon: GraduationCap, label: { en: 'Al-Khuwy', ar: 'الخوي' }, href: '/companion' },
   mudawwin: { id: 'mudawwin', icon: ClipboardList, label: { en: 'Al-Mudawwin', ar: 'المُدوّن' }, href: '/mudawwin' },
   supervision: { id: 'supervision', icon: Bell, label: { en: 'Supervision', ar: 'الإشراف' }, href: '/supervision' },
@@ -179,7 +181,7 @@ const WORKSPACES: Workspace[] = [
       },
       {
         title: { en: 'Sources & Reading', ar: 'المصادر والقراءة' },
-        items: ['sources', 'zotero', 'reading-queue', 'shwasha', 'papers', 'knowledge'],
+        items: ['sources', 'zotero', 'reading-queue', 'shwasha', 'papers', 'knowledge', 'research'],
       },
       {
         title: { en: 'Writing', ar: 'الكتابة' },
@@ -187,7 +189,7 @@ const WORKSPACES: Workspace[] = [
       },
       {
         title: { en: 'Supervision', ar: 'الإشراف' },
-        items: ['supervision', 'meetings'],
+        items: ['supervision', 'meetings', 'grs2'],
       },
     ],
   },

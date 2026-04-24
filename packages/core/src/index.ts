@@ -74,6 +74,7 @@ export type { ZoteroSearchResult, ZoteroItemCreate, ZoteroItemRich } from './int
 export { patchItemTags as zoteroPatchItemTags, readItemVersion as zoteroReadItemVersion, VersionConflictError as ZoteroVersionConflictError } from './integrations/zotero/write-api.js';
 export type { WriteApiConfig as ZoteroWriteApiConfig } from './integrations/zotero/write-api.js';
 export { hasDirectionalMarks, stripBom, stripSurroundingDirectionalMarks, countDirectionalMarks } from './util/bidi.js';
+export { extractWikilinks, resolveWikilinkAlias } from './util/wikilinks.js';
 export type {
   ZoteroPaperMeta,
   ZoteroPaperFetch,

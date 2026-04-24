@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Plus, Send, Loader2, Save, Trash2, ChevronLeft,
-  Calendar, User, CheckSquare, FileText, Sparkles,
+  Calendar, CheckSquare, Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
+import { BacklinksPanel, WikilinkEditor } from '@/components/shared';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -28,6 +31,7 @@ interface MeetingRecord {
   action_plan_next: string[];
   arabic_summary: string[];
   tags: string[];
+  dateChangeReason?: string;
 }
 
 interface MeetingSession {
@@ -44,13 +48,6 @@ interface MeetingSession {
 interface ChatMsg { role: 'user' | 'assistant'; content: string }
 
 // ── helpers ──────────────────────────────────────────────────────────
-function parseSSE(line: string): { event: string; data: string } | null {
-  if (line.startsWith('event:')) {
-    return null; // handled below in stream loop
-  }
-  return null;
-}
-
 async function* readSSE(reader: ReadableStreamDefaultReader<Uint8Array>) {
   const decoder = new TextDecoder();
   let buf = '';
@@ -92,22 +89,15 @@ export function MeetingsPage() {
 
   const loadSessions = useCallback(async () => {
     try {
-      // Pull both: platform-recorded sessions + vault-stored supervision meetings
-      const [platformData, vaultData] = await Promise.all([
-        apiFetch<MeetingSession[]>('/api/meetings/sessions').catch(() => [] as MeetingSession[]),
-        apiFetch<{ meetings: Array<{ path: string; name: string; title?: string; date?: string; summary?: string }> }>('/api/vault/supervision').catch(() => ({ meetings: [] })),
-      ]);
-      // Convert vault meetings to MeetingSession shape (read-only display)
-      const vaultAsSessions: MeetingSession[] = (vaultData.meetings ?? []).map((m) => ({
-        id: `vault:${m.path}`,
-        title: m.title || m.name,
-        updatedAt: m.date ? String(m.date) : new Date().toISOString(),
-        record: { date: m.date ?? null, Summary: m.summary ?? '' },
-        savedToObsidian: true,
-      } as unknown as MeetingSession));
-      const combined = [...platformData, ...vaultAsSessions]
-        .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
-      setSessions(combined);
+      const data = await apiFetch<MeetingSession[]>('/api/meetings/sessions').catch(() => [] as MeetingSession[]);
+      // Sort by meeting number descending, then by date
+      const sorted = [...data].sort((a, b) => {
+        const noA = a.record?.No ?? 0;
+        const noB = b.record?.No ?? 0;
+        if (noB !== noA) return noB - noA;
+        return (b.record?.date ?? b.updatedAt ?? '').localeCompare(a.record?.date ?? a.updatedAt ?? '');
+      });
+      setSessions(sorted);
     } catch { /* ignore */ }
   }, []);
 
@@ -115,19 +105,38 @@ export function MeetingsPage() {
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMsgs]);
 
   const createSession = async () => {
-    const title = isRTL
-      ? `اجتماع ${new Date().toLocaleDateString('ar')}`
-      : `Meeting ${new Date().toLocaleDateString('en')}`;
+    // Get last meeting's data
+    const sorted = [...sessions].sort((a, b) => (b.record?.No ?? 0) - (a.record?.No ?? 0));
+    const last = sorted[0];
+    const nextNo = (last?.record?.No ?? 0) + 1;
+    const suggestedDate = last?.record?.Next_Meeting ?? null;
+    const suggestedLocation = last?.record?.Next_Location ?? null;
+    // Build suggested attendees: same as last meeting minus "(briefly)" people
+    const suggestedAttendees = Array.isArray(last?.record?.Attendees)
+      ? last.record.Attendees.filter((a: string) => !a.toLowerCase().includes('briefly'))
+      : ['Dr Davies'];
+
+    const title = `Meeting ${nextNo}`;
     const s = await apiFetch<MeetingSession>('/api/meetings/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({
+        title,
+        suggestedNo: nextNo,
+        suggestedDate,
+        suggestedLocation,
+        suggestedAttendees,
+      }),
     });
-    setSessions((prev) => [s, ...prev]);
-    setActive(s);
-    setDraft('');
-    setChatMsgs([]);
-    setTab('draft');
+
+    // Load full session (has chatHistory now)
+    const full = await apiFetch<MeetingSession>(`/api/meetings/sessions/${s.id}`);
+    setSessions(prev => [full, ...prev]);
+    setActive(full);
+    setDraft(full.draft ?? '');
+    // Pre-load chat with the confirmation message
+    setChatMsgs(full.chatHistory ?? []);
+    setTab('chat'); // Start in chat tab for confirmation
   };
 
   const selectSession = async (s: MeetingSession) => {
@@ -254,7 +263,7 @@ export function MeetingsPage() {
       <div className="w-64 shrink-0 border-e flex flex-col">
         <div className="p-4 border-b flex items-center justify-between">
           <h2 className="font-semibold text-sm">{isRTL ? 'الاجتماعات' : 'Meetings'}</h2>
-          <button onClick={createSession}
+          <button onClick={() => createSession()}
             className="rounded-md p-1 hover:bg-accent" title={isRTL ? 'جلسة جديدة' : 'New session'}>
             <Plus className="h-4 w-4" />
           </button>
@@ -274,7 +283,7 @@ export function MeetingsPage() {
               )}>
               <div className="truncate">{s.title}</div>
               <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2">
-                <span>{new Date(s.updatedAt).toLocaleDateString(isRTL ? 'ar' : 'en')}</span>
+                <span>{new Date(s.record?.date || s.createdAt).toLocaleDateString(isRTL ? 'ar' : 'en-GB')}</span>
                 {s.obsidianPath && <span className="text-emerald-500">✓ Obsidian</span>}
                 {s.record && !s.obsidianPath && <span className="text-amber-500">● pending</span>}
               </div>
@@ -289,7 +298,7 @@ export function MeetingsPage() {
           <div className="text-center space-y-2">
             <Calendar className="h-10 w-10 mx-auto opacity-30" />
             <p className="text-sm">{isRTL ? 'اختر أو أنشئ جلسة' : 'Select or create a meeting session'}</p>
-            <button onClick={createSession}
+            <button onClick={() => createSession()}
               className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">
               <Plus className="h-4 w-4" />
               {isRTL ? 'جلسة جديدة' : 'New meeting'}
@@ -356,14 +365,16 @@ export function MeetingsPage() {
                   ? 'اكتب ملاحظاتك بحرية — نقاط، فقرات، أي شي. ثم اضغط "استخرج" ليحوّلها المُلخِّص لسجل منظّم.'
                   : 'Write freely — bullets, paragraphs, anything. Then press Extract to convert them into a structured record.'}
               </p>
-              <textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onBlur={saveDraft}
-                dir="auto"
-                placeholder={isRTL ? 'ملاحظات الاجتماع…' : 'Meeting notes…'}
-                className="flex-1 min-h-[300px] resize-none rounded-lg border bg-background p-4 text-sm font-mono leading-relaxed focus:outline-none focus:ring-1 focus:ring-primary"
-              />
+              <div onBlur={saveDraft}>
+                <WikilinkEditor
+                  value={draft}
+                  onChange={setDraft}
+                  placeholder={isRTL ? 'اكتب ملاحظات الاجتماع... استخدم [[ للربط بمحتوى آخر' : 'Write meeting notes... use [[ to link to other content'}
+                  rows={12}
+                  dir="auto"
+                  className="min-h-[300px]"
+                />
+              </div>
               {isExtracting && streamText && (
                 <div className="rounded-lg border bg-muted p-3 text-xs font-mono text-muted-foreground max-h-32 overflow-auto">
                   <span className="text-xs text-primary font-medium">{isRTL ? 'جاري الاستخراج… ' : 'Extracting… '}</span>
@@ -388,7 +399,7 @@ export function MeetingsPage() {
                   {isRTL ? 'لا يوجد سجل بعد. اكتب ملاحظات في تبويب النصوص ثم استخرج.' : 'No record yet. Write notes and click Extract.'}
                 </p>
               ) : (
-                <MeetingRecordView record={active.record} isRTL={isRTL} />
+                <MeetingRecordView record={active.record} isRTL={isRTL} sessionId={active.id} />
               )}
             </div>
           )}
@@ -433,20 +444,36 @@ export function MeetingsPage() {
           )}
         </div>
       )}
+
     </div>
   );
 }
 
-function MeetingRecordView({ record: r, isRTL }: { record: MeetingRecord; isRTL: boolean }) {
+function MeetingRecordView({ record: r, isRTL, sessionId }: { record: MeetingRecord; isRTL: boolean; sessionId: string }) {
   return (
     <div className="space-y-6 max-w-2xl">
       {/* Meta */}
       <div className="grid grid-cols-2 gap-4 text-sm">
-        <Field label={isRTL ? 'التاريخ' : 'Date'} value={r.date} />
+        <Field label={isRTL ? 'التاريخ' : 'Date'} value={formatMeetingDate(r.date)} />
         <Field label={isRTL ? 'المكان' : 'Location'} value={r.Location} />
-        <Field label={isRTL ? 'الحضور' : 'Attendees'} value={r.Attendees.join(', ')} />
-        <Field label={isRTL ? 'الاجتماع التالي' : 'Next meeting'} value={r.Next_Meeting} />
+        <Field label={isRTL ? 'الحضور' : 'Attendees'} value={Array.isArray(r.Attendees) ? r.Attendees.join(', ') : (r.Attendees ?? '')} />
+        <Field label={isRTL ? 'رقم الاجتماع' : 'Meeting No.'} value={r.No ? `#${r.No}` : null} />
       </div>
+
+      {/* Next meeting callout */}
+      {r.Next_Meeting && (
+        <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 flex items-start gap-3">
+          <div className="mt-0.5 text-primary">📅</div>
+          <div>
+            <p className="text-xs font-semibold text-primary mb-0.5">{isRTL ? 'الاجتماع القادم' : 'Next Meeting'}</p>
+            <p className="text-sm font-medium">{formatMeetingDate(r.Next_Meeting)}</p>
+            {r.Next_Location && <p className="text-xs text-muted-foreground mt-0.5">📍 {r.Next_Location}</p>}
+            {(r as MeetingRecord & { dateChangeReason?: string }).dateChangeReason && (
+              <p className="text-xs text-amber-600 mt-1">⚠️ {(r as MeetingRecord & { dateChangeReason?: string }).dateChangeReason}</p>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="rounded-lg border bg-muted/30 p-4">
         <p className="text-xs font-semibold text-muted-foreground mb-1">{isRTL ? 'الملخص' : 'Summary'}</p>
@@ -456,33 +483,54 @@ function MeetingRecordView({ record: r, isRTL }: { record: MeetingRecord; isRTL:
       {r.discussion && (
         <div>
           <p className="text-xs font-semibold text-muted-foreground mb-2">{isRTL ? 'النقاش والملاحظات' : 'Discussion & Feedback'}</p>
-          <p className="text-sm whitespace-pre-wrap">{r.discussion}</p>
+          <div className="prose prose-sm dark:prose-invert max-w-none text-sm [&>ul]:list-disc [&>ul]:ps-4 [&>ol]:list-decimal [&>ol]:ps-4 [&_li]:my-0.5 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-sm [&_h3]:font-semibold [&_input[type=checkbox]]:me-1.5">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.discussion}</ReactMarkdown>
+          </div>
         </div>
       )}
 
-      <TaskList title={isRTL ? 'خطة العمل (التالية)' : 'Action Plan (next)'} items={r.action_plan_next} />
-      <TaskList title={isRTL ? 'جدول الأعمال' : 'Agenda'} items={r.agenda} />
+      {(r.action_plan_next ?? []).length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground mb-2">{isRTL ? 'خطة العمل (التالية)' : 'Action Plan (next)'}</p>
+          <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-2 text-xs text-primary">
+            ✅ {r.action_plan_next.length} {isRTL ? 'مهمة أُضيفت إلى "مهام من الاجتماعات"' : 'tasks added to "Meeting Tasks"'}
+          </div>
+        </div>
+      )}
+      <TaskList title={isRTL ? 'خطة العمل (السابقة)' : 'Previous Action Items'} items={r.action_plan_previous ?? []} />
+      <TaskList title={isRTL ? 'جدول الأعمال' : 'Agenda'} items={r.agenda ?? []} />
 
-      {r.arabic_summary.length > 0 && (
+      {(r.arabic_summary ?? []).length > 0 && (
         <div>
           <p className="text-xs font-semibold text-muted-foreground mb-2">ملخص</p>
           <ul className="space-y-1" dir="rtl">
-            {r.arabic_summary.map((b, i) => (
+            {(r.arabic_summary ?? []).map((b, i) => (
               <li key={i} className="text-sm before:content-['•'] before:me-2 before:text-primary">{b}</li>
             ))}
           </ul>
         </div>
       )}
 
-      {r.tags.length > 0 && (
+      {(r.tags ?? []).length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {r.tags.map((t) => (
+          {(r.tags ?? []).map((t) => (
             <span key={t} className="rounded-full bg-muted px-2.5 py-0.5 text-xs">{t}</span>
           ))}
         </div>
       )}
+
+      <BacklinksPanel nodeId={`meeting-${sessionId}`} className="mt-6 border-t border-border pt-4" />
     </div>
   );
+}
+
+function formatMeetingDate(iso: string | null | undefined): string {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+      + ' — ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  } catch { return iso; }
 }
 
 function Field({ label, value }: { label: string; value: string | null | undefined }) {

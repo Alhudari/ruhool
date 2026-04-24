@@ -163,14 +163,21 @@ export function registerVaultTasksRoutes(app: Hono): void {
   });
 
   // ── Supervision: full PhD supervision dashboard data ────────────────
-  // Reads from `01 PhD/01 Supervision/` — dashboard content, MOC files,
-  // meeting records (Supervision Interaction Points), and milestones.
+  // Reads from `01 PhD/04 Supervision/` (new vault) with fallback to `01 PhD/01 Supervision/` (legacy).
   app.get('/api/vault/supervision', async (c) => {
+    // Resolve which supervision root exists
+    const supRoots = ['01 PhD/04 Supervision', '01 PhD/01 Supervision'];
+    let supRoot = supRoots[0];
+    for (const r of supRoots) {
+      const probe = await listNotes({ subPath: r, recursive: false }).catch(() => [] as string[]);
+      if (probe.length > 0) { supRoot = r; break; }
+    }
+
     try {
-      // Try to read the central supervision dashboard
+      // Central supervision dashboard
       let dashboard: { body: string; sections: { heading: string; level: number; content: string }[] } | null = null;
       try {
-        const d = await readNote('01 PhD/01 Supervision/Supervision Dashboard.md');
+        const d = await readNote(`${supRoot}/Supervision Dashboard.md`);
         dashboard = {
           body: cleanObsidianMarkup(d.body),
           sections: d.sections.map((s) => ({
@@ -181,13 +188,13 @@ export function registerVaultTasksRoutes(app: Hono): void {
         };
       } catch { /* may not exist */ }
 
-      // Meeting records (numbered files 1.md, 2.md, ...)
-      const meetingPaths = await listNotes({ subPath: '01 PhD/01 Supervision/Supervision Interaction Points', recursive: false }).catch(() => [] as string[]);
+      // Meeting records — new vault: numbered files in Supervision Interaction Points/
+      const meetingSubPath = `${supRoot}/Supervision Interaction Points`;
+      const meetingPaths = await listNotes({ subPath: meetingSubPath, recursive: false }).catch(() => [] as string[]);
       const meetings = await Promise.all(
         meetingPaths.map(async (p) => {
           try {
             const n = await readNote(p);
-            // Smart title for meetings: prefer "Meeting #N — date"
             const no = n.frontmatter['No.'] ?? n.frontmatter.No ?? n.frontmatter.no ?? n.name;
             const dateStr = (() => {
               const d = n.frontmatter.date ?? n.frontmatter.Date;
@@ -203,7 +210,6 @@ export function registerVaultTasksRoutes(app: Hono): void {
               path: n.path,
               name: n.name,
               title: smartTitle,
-              // GRS2 tracking fields
               grs2: {
                 input: n.frontmatter.GRS2_Input as string | undefined,
                 respond: n.frontmatter.GRS2_Respond as string | undefined,
@@ -227,7 +233,7 @@ export function registerVaultTasksRoutes(app: Hono): void {
       );
 
       // Milestones
-      const milestonePaths = await listNotes({ subPath: '01 PhD/01 Supervision/Milestones', recursive: false }).catch(() => [] as string[]);
+      const milestonePaths = await listNotes({ subPath: `${supRoot}/Milestones`, recursive: false }).catch(() => [] as string[]);
       const milestones = await Promise.all(
         milestonePaths.map(async (p) => {
           try {
@@ -244,10 +250,63 @@ export function registerVaultTasksRoutes(app: Hono): void {
         })
       );
 
+      // Detailed Work — MD files in Detailed Work/ (excludes subdirectories and non-md)
+      const detailedWorkPaths = await listNotes({ subPath: `${supRoot}/Detailed Work`, recursive: false }).catch(() => [] as string[]);
+      const detailedWork = await Promise.all(
+        detailedWorkPaths.filter((p) => p.endsWith('.md')).map(async (p) => {
+          try {
+            const n = await readNote(p);
+            return {
+              path: n.path,
+              name: n.name,
+              title: extractTitle(n.name, n.body, n.frontmatter),
+              category: (n.frontmatter.category ?? n.frontmatter.type ?? '') as string,
+              status: (n.frontmatter.status ?? '') as string,
+              preview: cleanObsidianMarkup(n.body).split('\n').find((l) => l.trim() && !l.startsWith('#'))?.slice(0, 180) ?? '',
+            };
+          } catch { return null; }
+        })
+      );
+
+      // Scope Points — files under Detailed Work/Scope Points/
+      const scopePaths = await listNotes({ subPath: `${supRoot}/Detailed Work/Scope Points`, recursive: false }).catch(() => [] as string[]);
+      const scopePoints = await Promise.all(
+        scopePaths.filter((p) => p.endsWith('.md')).map(async (p) => {
+          try {
+            const n = await readNote(p);
+            return {
+              path: n.path,
+              name: n.name,
+              title: extractTitle(n.name, n.body, n.frontmatter),
+              preview: cleanObsidianMarkup(n.body).split('\n').find((l) => l.trim() && !l.startsWith('#'))?.slice(0, 180) ?? '',
+            };
+          } catch { return null; }
+        })
+      );
+
+      // Supervision Materials
+      const materialPaths = await listNotes({ subPath: `${supRoot}/Supervision Materials`, recursive: false }).catch(() => [] as string[]);
+      const materials = await Promise.all(
+        materialPaths.filter((p) => p.endsWith('.md')).map(async (p) => {
+          try {
+            const n = await readNote(p);
+            return {
+              path: n.path,
+              name: n.name,
+              title: extractTitle(n.name, n.body, n.frontmatter),
+              preview: cleanObsidianMarkup(n.body).split('\n').find((l) => l.trim() && !l.startsWith('#'))?.slice(0, 180) ?? '',
+            };
+          } catch { return null; }
+        })
+      );
+
       return c.json({
         dashboard,
         meetings: meetings.filter(Boolean).sort((a, b) => (b!.name).localeCompare(a!.name, undefined, { numeric: true })),
         milestones: milestones.filter(Boolean),
+        detailedWork: detailedWork.filter(Boolean),
+        scopePoints: scopePoints.filter(Boolean).sort((a, b) => a!.name.localeCompare(b!.name, undefined, { numeric: true })),
+        materials: materials.filter(Boolean),
       });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
@@ -255,8 +314,8 @@ export function registerVaultTasksRoutes(app: Hono): void {
   });
 
   // ── Read a single supervision meeting / milestone (cleaned) ──────────
-  app.get('/api/vault/supervision/*', async (c) => {
-    const relPath = decodeURIComponent(c.req.param('*') ?? '');
+  app.get('/api/vault/supervision/file', async (c) => {
+    const relPath = decodeURIComponent(c.req.query('path') ?? '');
     if (!relPath) return c.json({ error: 'path required' }, 400);
     try {
       const n = await readNote(relPath);

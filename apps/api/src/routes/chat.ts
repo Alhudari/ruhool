@@ -929,13 +929,13 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
               const litSessions = ((store as unknown as { readingSessions?: Array<{ id: string }> }).readingSessions ?? []).length;
               activeSystemPrompt += `**حالة منصة رحول**:\n`;
               activeSystemPrompt += `- الاجتماعات المسجّلة في رحول: ${meetings}\n`;
-              activeSystemPrompt += `- جلسات القراءة عبر شواشة: ${litSessions}\n`;
+              activeSystemPrompt += `- جلسات القراءة عبر المُلخِّص: ${litSessions}\n`;
               activeSystemPrompt += `\n`;
 
               activeSystemPrompt += `\n**روابط منصة رحول للإحالة المستخدم إليها**:\n`;
               activeSystemPrompt += `- لوحة الدكتوراه: \`/phd\`\n`;
               activeSystemPrompt += `- مكتبة Zotero: \`/zotero\`\n`;
-              activeSystemPrompt += `- مساعد القراءة (شواشة): \`/shwasha\`\n`;
+              activeSystemPrompt += `- مساعد القراءة (المُلخِّص): \`/shwasha\`\n`;
               activeSystemPrompt += `- الاجتماعات: \`/meetings\`\n`;
               activeSystemPrompt += `- المهام: \`/tasks\`\n`;
             } catch { /* vault not accessible — skip */ }

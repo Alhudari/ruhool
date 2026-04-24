@@ -179,6 +179,32 @@ export interface SourceRecord {
   updatedAt: string;
 }
 
+/** How the location was specified */
+export type LocationKind =
+  | 'page'           // p.45 or pp.45-52
+  | 'kindle'         // Kindle Loc. 1250 or Loc. 1200-1350
+  | 'chapter'        // Ch. 3 or Chapter 3
+  | 'paragraph'      // ¶12 or para.12
+  | 'custom';        // any free-text (e.g. "timestamp 00:23:15")
+
+export interface LocationRef {
+  kind: LocationKind;
+  /** raw input as typed by user, always preserved */
+  raw: string;
+  /** normalized display string for citations, e.g. "p. 45" or "loc. 1250" */
+  display: string;
+  /** start number if parseable (page start, Kindle loc start) */
+  start?: number;
+  /** end number if range, e.g. pp.45-52 → end=52 */
+  end?: number;
+  /** For Kindle: the stable location number (zoom-invariant). Always prefer this over page number for Kindle books. */
+  kindleLoc?: number;
+  /** For Kindle: the page number shown at this location (may change with zoom — store but don't rely on for citations). */
+  kindlePage?: number;
+  /** Source platform that generated this location */
+  platform?: 'kindle' | 'google-books' | 'pdf' | 'epub' | 'physical' | 'web';
+}
+
 export interface NoteRecord {
   id: string;
   paperId: string;
@@ -202,6 +228,9 @@ export interface NoteRecord {
   /** Zotero item key if imported from Zotero */
   zoteroKey?: string;
   updatedAt?: string;
+  /** Location reference — flexible format supporting pages, Kindle locations, chapters.
+   *  Use LocationRef type for structured access; raw string also accepted. */
+  location?: LocationRef;
 }
 
 export interface ReadingSessionPage {
@@ -212,6 +241,10 @@ export interface ReadingSessionPage {
   /** ids of NoteRecord produced for these pages */
   noteIds: string[];
   processedAt: string;
+  /** User's personal per-page note in their own words (Arabic, informal) */
+  impression?: string;
+  /** English impression for language practice */
+  impressionEn?: string;
 }
 
 export interface ReadingSession {
@@ -226,6 +259,29 @@ export interface ReadingSession {
   pages: ReadingSessionPage[];
   /** total pages in source — used to show progress */
   totalPages?: number;
+  /** Source metadata for citation generation */
+  citationMeta?: {
+    authors?: string;      // "Smith, J. and Jones, K."
+    year?: number;
+    publisher?: string;
+    edition?: string;
+    city?: string;
+    doi?: string;
+    journal?: string;
+    volume?: string;
+    issue?: string;
+    isKindleEdition?: boolean;
+    /** Kindle ASIN — stable identifier for the specific Kindle edition */
+    kindleAsin?: string;
+    /** Google Books volume ID */
+    googleBooksId?: string;
+    /** Print ISBN — if citing Kindle/digital edition that matches print */
+    printIsbn?: string;
+  };
+  /** User's overall impression of the entire source (Arabic, informal) */
+  impression?: string;
+  /** English impression for language practice */
+  impressionEn?: string;
   createdAt: string;
   updatedAt: string;
   archived?: boolean;
@@ -676,6 +732,135 @@ export interface MeetingSessionRecord {
   updatedAt: string;
 }
 
+export interface Grs2Record {
+  id: string;
+  month: string;           // 'YYYY-MM' format e.g. '2026-04'
+  status: 'not_started' | 'submitted' | 'supervisor_approved' | 'student_confirmed' | 'university_approved';
+  progress: number;        // 0 | 25 | 75 | 100
+  content?: string;        // what the user wrote in the GRS2
+  supervisorResponse?: string;  // Dr Richard's comments
+  submittedAt?: string;
+  supervisorApprovedAt?: string;
+  studentConfirmedAt?: string;
+  universityApprovedAt?: string;
+  reminderSent?: boolean;
+}
+
+export interface TagRecord {
+  id: string;
+  path: string;      // e.g. "BIM/Standards" — no # in storage
+  label?: string;
+  color?: string;
+  description?: string;
+  createdAt: string;
+}
+
+export interface TagAssignment {
+  nodeType: string;
+  nodeId: string;
+  tagPaths: string[];
+  updatedAt: string;
+}
+
+// ─── Research Clusters + File Provenance ──────────────────────────────────────
+
+export type FileCategory =
+  | 'technical-doc'   // BIM templates, CAD standards
+  | 'regulation'      // laws, government orders
+  | 'standard'        // ISO, BSI, FIDIC
+  | 'data'            // Excel, CSV, statistics
+  | 'presentation'    // PPT, slides
+  | 'template'        // document templates
+  | 'image'           // photos, scans
+  | 'correspondence'  // emails, letters from supervisors/colleagues
+  | 'report'          // industry reports, white papers
+  | 'thesis'          // dissertations
+  | 'other';
+
+export type SourceType =
+  | 'url'             // downloaded from a website
+  | 'person'          // sent by a person (supervisor, colleague)
+  | 'meeting'         // received in a meeting
+  | 'zotero'          // imported from Zotero
+  | 'email'           // received by email
+  | 'purchase'        // bought/licensed
+  | 'direct-download'; // direct download, no specific source
+
+export interface FileProvenance {
+  path: string;
+  name: string;
+  // Source tracking (academic chain-of-custody)
+  sourceType?: SourceType;
+  sourceUrl?: string;          // URL if downloaded from web
+  sourcePerson?: string;       // "Dr Richard Davies" or "Colleague Iis"
+  sourceMeetingId?: string;    // meeting session id (e.g. "sip-4")
+  sourceDate?: string;         // ISO date when obtained
+  sourceNotes?: string;        // any additional context
+  // Zotero linkage
+  zoteroKey?: string;          // linked Zotero item key
+  zoteroSnapshotKey?: string;  // Zotero webpage snapshot key
+  // Classification
+  tags?: string[];             // e.g. ["BIM/Standards", "GCC/Qatar"]
+  fileCategory?: FileCategory;
+  jurisdictionCode?: string;   // ISO 3166-1 alpha-3 e.g. "QAT", "ARE"
+  notes?: string;              // user notes on this specific file
+  addedAt?: string;
+  analyzedAt?: string;
+}
+
+export type ClusterDimension =
+  | 'bim-mandate' | 'contracts' | 'laws' | 'market' | 'standards'
+  | 'methodology' | 'writing' | 'training' | 'life' | 'other';
+
+export interface ResearchCluster {
+  id: string;
+  name: string;
+  description?: string;
+  // File paths (folders or specific files)
+  paths: string[];             // absolute folder/file paths
+  // Classification
+  tags?: string[];
+  jurisdiction?: {
+    type: 'country' | 'region' | 'international' | 'life';
+    code?: string;             // ISO 3166-1 alpha-3
+    name: string;
+  };
+  dimension?: ClusterDimension;
+  // File provenance metadata (path -> FileProvenance)
+  fileMetadata?: Record<string, FileProvenance>;
+  // Zotero
+  zoteroKeys?: string[];       // related Zotero item keys
+  zoteroCollectionKey?: string; // dedicated Zotero collection
+  // Content
+  notes?: string;              // general cluster notes
+  report?: string;             // synthesis report (markdown)
+  reportUpdatedAt?: string;
+  // External sync
+  externalSync?: {
+    projectId: string;
+    lastSyncAt?: string;
+    syncDirection: 'push' | 'pull' | 'both';
+  };
+  // Metadata
+  archived?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ResearchScopePoint {
+  id: string;
+  number: number;        // S1, S2, S3...
+  title: string;
+  description?: string;
+  phase?: string;        // 'literature' | 'survey' | 'analysis' | 'writing' | custom
+  status?: 'active' | 'completed' | 'paused' | 'dropped';
+  links?: string[];      // [[wikilinks]] to related content
+  notes?: string;
+  tags?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface StoreData {
   providers: ProviderRecord[];
   conversations: ConvRecord[];
@@ -755,6 +940,11 @@ export interface StoreData {
   phdSchedule?: PhDSchedule;
   companionMemory?: CompanionMemoryEntry[];
   meetingSessions?: MeetingSessionRecord[];
+  grs2Records?: Grs2Record[];
+  tags?: TagRecord[];
+  tagAssignments?: TagAssignment[];
+  researchClusters?: ResearchCluster[];
+  scopePoints?: ResearchScopePoint[];
   // R8 — Scheduled reports (daily digests, weekly PhD summaries, ad-hoc).
   reports?: ReportDefinition[];
   reportRuns?: ReportRunRecord[];

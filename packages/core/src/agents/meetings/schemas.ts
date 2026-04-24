@@ -17,6 +17,7 @@ export const MeetingRecordSchema = z.object({
   action_plan_next: z.array(z.string()).default([]),
   arabic_summary: z.array(z.string()).default([]),
   tags: z.array(z.string()).default([]),
+  dateChangeReason: z.string().optional(),
 });
 
 export type MeetingRecord = z.infer<typeof MeetingRecordSchema>;

@@ -8,31 +8,41 @@ import { GlobalSearch } from './global-search';
 import { WorkspaceSwitcher } from './workspace-switcher';
 import { NotificationBell } from '@/components/notifications/notification-bell';
 
-// Vintage analog-style digital clock — monospace + accent dot blinker
+// Vintage analog-style digital clock — monospace + sweep progress bar
 function VintageClock({ language }: { language: 'en' | 'ar' }) {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
-  // 12-hour format with AM/PM
   let h12 = now.getHours() % 12;
   if (h12 === 0) h12 = 12;
   const hh = String(h12).padStart(2, '0');
   const mm = String(now.getMinutes()).padStart(2, '0');
-  const ss = String(now.getSeconds()).padStart(2, '0');
   const ampm = now.getHours() >= 12 ? (language === 'ar' ? 'م' : 'PM') : (language === 'ar' ? 'ص' : 'AM');
   const date = now.toLocaleDateString(language === 'ar' ? 'ar-SA' : 'en-GB', { day: 'numeric', month: 'short' });
+  // Seconds progress: 0–59 → 0–100%
+  const secProgress = (now.getSeconds() / 59) * 100;
+
   return (
     <div
-      className="flex items-center gap-2 px-3 h-8 rounded-lg border border-border bg-surface text-on-surface"
+      className="flex items-center gap-2 px-3 h-8 rounded-lg border border-border bg-surface text-on-surface overflow-hidden relative"
       style={{
         fontFamily: 'var(--font-mono, "JetBrains Mono", monospace)',
         background: 'linear-gradient(180deg, var(--color-surface-secondary), var(--color-surface))',
         boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.1)',
       }}
     >
-      {/* Time block — always LTR, fixed-width digits via tabular-nums */}
+      {/* Seconds sweep bar — thin accent line at the bottom */}
+      <span
+        className="absolute bottom-0 left-0 h-[2px] transition-all duration-1000 ease-linear rounded-full"
+        style={{
+          width: `${secProgress}%`,
+          background: 'var(--color-accent)',
+          opacity: 0.6,
+        }}
+      />
+      {/* Time block */}
       <span
         dir="ltr"
         className="font-semibold tracking-wider tabular-nums"
@@ -41,7 +51,6 @@ function VintageClock({ language }: { language: 'en' | 'ar' }) {
         <span className="text-[11px]">{hh}</span>
         <span className="text-accent animate-pulse text-[11px]">:</span>
         <span className="text-[11px]">{mm}</span>
-        <span className="text-on-surface-tertiary text-[9px]">:{ss}</span>
         <span className="ms-1 text-[9px] text-on-surface-tertiary uppercase">{ampm}</span>
       </span>
       <span className="text-[10px] text-on-surface-tertiary border-s border-border ps-2 whitespace-nowrap">
