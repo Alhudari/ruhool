@@ -6,6 +6,7 @@ import {
   Grid3x3, List, Network, X, Pencil, Link2, Tag, Calendar, RefreshCw,
 } from 'lucide-react';
 import { SayyaqPanel } from '@/components/shared/SayyaqPanel';
+import { BacklinksPanel } from '@/components/shared';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
@@ -602,6 +603,12 @@ function ReadModal({
                   </div>
                 </div>
               )}
+
+              {/* Backlinks — what references THIS note */}
+              <BacklinksPanel
+                nodeId={`note-${data.path}`}
+                className="mt-6 pt-4 border-t border-border"
+              />
             </div>
           )}
         </div>
@@ -674,18 +681,20 @@ export function NotesPage() {
       <div className="border-b border-border bg-surface-secondary px-6 md:px-10 py-6 sticky top-0 z-10 backdrop-blur-sm bg-surface-secondary/95">
         <div className="max-w-7xl mx-auto">
           <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <Brain className="h-5 w-5 text-accent" />
-                <h1 className="text-xl md:text-2xl font-bold text-on-surface">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-[var(--radius-lg)] bg-accent/10 text-accent flex items-center justify-center shrink-0">
+                <Brain size={22} />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-on-surface">
                   {isRTL ? 'الملاحظات الذرية' : 'Atomic Notes'}
                 </h1>
+                <p className="text-xs text-on-surface-tertiary mt-0.5">
+                  {isRTL
+                    ? `${notes.length} فكرة ذرية مترابطة — مصدرها Obsidian`
+                    : `${notes.length} interconnected atomic ideas — sourced from Obsidian`}
+                </p>
               </div>
-              <p className="text-sm text-on-surface-tertiary mt-1">
-                {isRTL
-                  ? `${notes.length} فكرة ذرية مترابطة — مصدرها Obsidian`
-                  : `${notes.length} interconnected atomic ideas — sourced from Obsidian`}
-              </p>
             </div>
 
             {/* View mode switcher */}
