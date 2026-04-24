@@ -135,7 +135,7 @@ const NAV_ITEMS_MAP: Record<string, NavItem> = {
   triggers: { id: 'triggers', icon: Zap, label: { en: 'Triggers', ar: 'المحفّزات' }, href: '/triggers' },
   phd: { id: 'phd', icon: GraduationCap, label: { en: 'PhD Dashboard', ar: 'لوحة الدكتوراه' }, href: '/phd' },
   meetings: { id: 'meetings', icon: CalendarDays, label: { en: 'Meetings', ar: 'الاجتماعات' }, href: '/meetings' },
-  grs2: { id: 'grs2', icon: ClipboardList, label: { en: 'GRS2 Reports', ar: 'تقارير GRS2' }, href: '/grs2' },
+  grs2: { id: 'grs2', icon: ClipboardList, label: { en: 'GRS2 Reports', ar: 'تقارير GRS2' }, href: '/phd?tab=grs2' },
   companion: { id: 'companion', icon: GraduationCap, label: { en: 'Al-Khuwy', ar: 'الخوي' }, href: '/companion' },
   mudawwin: { id: 'mudawwin', icon: ClipboardList, label: { en: 'Al-Mudawwin', ar: 'المُدوّن' }, href: '/mudawwin' },
   supervision: { id: 'supervision', icon: Bell, label: { en: 'Supervision', ar: 'الإشراف' }, href: '/supervision' },
@@ -176,20 +176,17 @@ const WORKSPACES: Workspace[] = [
     // notes + papers.
     sections: [
       {
-        title: { en: 'Today', ar: 'اليوم' },
-        items: ['phd', 'companion', 'inbox', 'search'],
+        title: { en: 'PhD', ar: 'الدكتوراه' },
+        // MASTER_PROMPT_V2 Part 2: new navigation structure
+        items: ['phd', 'meetings', 'library', 'zotero', 'tasks', 'inbox'],
       },
       {
-        title: { en: 'Sources & Reading', ar: 'المصادر والقراءة' },
-        items: ['sources', 'zotero', 'reading-queue', 'shwasha', 'papers', 'knowledge', 'research'],
+        title: { en: 'Platform', ar: 'المنصة' },
+        items: ['knowledge', 'search', 'notifications', 'reports-inbox'],
       },
       {
-        title: { en: 'Writing', ar: 'الكتابة' },
-        items: ['notes', 'mudawwin', 'canvas'],
-      },
-      {
-        title: { en: 'Supervision', ar: 'الإشراف' },
-        items: ['supervision', 'meetings', 'grs2'],
+        title: { en: 'Companion', ar: 'المساعد' },
+        items: ['companion'],
       },
     ],
   },
@@ -334,6 +331,7 @@ function NavItemButton({
   language,
   pendingApprovals,
   unreadNotifications,
+  inboxUnprocessed,
   onNavigate,
 }: {
   item: NavItem;
@@ -343,9 +341,13 @@ function NavItemButton({
   language: 'en' | 'ar';
   pendingApprovals: number;
   unreadNotifications: number;
+  inboxUnprocessed?: number;
   onNavigate: (id: string, href: string) => void;
 }) {
-  const badge = item.id === 'approvals' ? pendingApprovals : item.id === 'notifications' ? unreadNotifications : 0;
+  const badge =
+    item.id === 'approvals' ? pendingApprovals :
+    item.id === 'notifications' ? unreadNotifications :
+    item.id === 'inbox' ? (inboxUnprocessed ?? 0) : 0;
   return (
     <a
       href={item.href}
@@ -403,6 +405,7 @@ export function Sidebar({ onMobileNavigate }: { onMobileNavigate?: () => void } 
   const [_pendingApprovals, setPendingApprovals] = useState(0);
   const pendingApprovals = _pendingApprovals;
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [inboxUnprocessed, setInboxUnprocessed] = useState(0);
   const [customAgentNames, setCustomAgentNames] = useState<Record<string, { en: string; ar: string }>>({});
   const [activeWorkspace, setActiveWorkspace] = useState<string>(loadActiveWorkspace);
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
@@ -419,6 +422,11 @@ export function Sidebar({ onMobileNavigate }: { onMobileNavigate?: () => void } 
       .catch(() => {});
     fetchUnread();
     const notifInterval = setInterval(fetchUnread, 30_000);
+    const fetchInbox = () => apiFetch<{ unprocessed: number }>('/api/inbox/count')
+      .then((d) => setInboxUnprocessed(d.unprocessed ?? 0))
+      .catch(() => {});
+    fetchInbox();
+    const inboxInterval = setInterval(fetchInbox, 60_000);
     apiFetch<Array<{ id: string; name: { en: string; ar: string } }>>('/api/custom-agents')
       .then((agents) => {
         const map: Record<string, { en: string; ar: string }> = {};
@@ -426,7 +434,7 @@ export function Sidebar({ onMobileNavigate }: { onMobileNavigate?: () => void } 
         setCustomAgentNames(map);
       })
       .catch(() => {});
-    return () => clearInterval(notifInterval);
+    return () => { clearInterval(notifInterval); clearInterval(inboxInterval); };
   }, []);
 
   // Sync workspace from localStorage on mount + whenever the top
@@ -595,6 +603,7 @@ export function Sidebar({ onMobileNavigate }: { onMobileNavigate?: () => void } 
               language={language}
               pendingApprovals={pendingApprovals}
               unreadNotifications={unreadNotifications}
+              inboxUnprocessed={inboxUnprocessed}
               onNavigate={handleNavigate}
             />
           );
@@ -626,6 +635,7 @@ export function Sidebar({ onMobileNavigate }: { onMobileNavigate?: () => void } 
                     language={language}
                     pendingApprovals={pendingApprovals}
                     unreadNotifications={unreadNotifications}
+              inboxUnprocessed={inboxUnprocessed}
                     onNavigate={handleNavigate}
                   />
                 );
