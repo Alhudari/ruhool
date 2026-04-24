@@ -5,7 +5,7 @@ import {
   StickyNote, Plus, Pin, PinOff, Archive, ArchiveRestore, Trash2, X, Check,
   Search, Tag, Palette, Bold, Italic, Underline as UnderlineIcon, List as ListIcon,
   ListOrdered, Heading1, Heading2, Quote, Code as CodeIcon, Link as LinkIcon,
-  CheckSquare, Square, Loader2, Type, ListChecks,
+  CheckSquare, Square, Loader2, Type, ListChecks, CheckCircle2,
 } from 'lucide-react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -227,6 +227,32 @@ export function KeepNotesPage() {
     } catch { /* ignore */ }
   };
 
+  const convertToTask = async (note: KeepNote) => {
+    const wsId = (typeof window !== 'undefined' && window.localStorage.getItem('ruhool.active-workspace')) || 'phd';
+    const title = note.title.trim() || htmlToText(note.content).slice(0, 80).trim() || 'ملاحظة';
+    const notesText = note.title.trim() ? htmlToText(note.content).trim() : '';
+    const checklist = (note.items || []).map((it) => ({ id: crypto.randomUUID(), text: it.text, done: it.done }));
+    try {
+      await apiFetch('/api/tasks', {
+        method: 'POST',
+        body: JSON.stringify({
+          title,
+          notes: notesText,
+          priority: 'none',
+          list: 'عام',
+          tags: note.labels,
+          color: note.color,
+          checklist,
+          workspaceId: wsId,
+        }),
+      });
+      // Archive the source note — user's intent is to promote, not duplicate.
+      await apiFetch(`/api/keep-notes/${note.id}/archive`, { method: 'PUT' });
+      setNotes((prev) => prev.filter((n) => n.id !== note.id));
+      if (editing?.id === note.id) setEditing(null);
+    } catch { /* ignore */ }
+  };
+
   const toggleArchive = async (id: string) => {
     try {
       const updated = await apiFetch<KeepNote>(`/api/keep-notes/${id}/archive`, { method: 'PUT' });
@@ -303,6 +329,13 @@ export function KeepNotesPage() {
           </div>
         )}
         <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={(e) => { e.stopPropagation(); convertToTask(note); }}
+            className={cn('p-1 rounded hover:bg-accent/10 hover:text-accent', colors.tertiary)}
+            title={isRTL ? 'تحويل إلى مهمة' : 'Convert to task'}
+          >
+            <CheckCircle2 size={13} />
+          </button>
           <button
             onClick={(e) => { e.stopPropagation(); toggleArchive(note.id); }}
             className={cn('p-1 rounded hover:bg-black/10', colors.tertiary)}
@@ -531,6 +564,7 @@ export function KeepNotesPage() {
           onDelete={deleteNote}
           onTogglePin={togglePin}
           onToggleArchive={toggleArchive}
+          onConvertToTask={convertToTask}
         />
       )}
     </div>
@@ -538,7 +572,7 @@ export function KeepNotesPage() {
 }
 
 function KeepEditor({
-  note, isRTL, onClose, onSave, onDelete, onTogglePin, onToggleArchive,
+  note, isRTL, onClose, onSave, onDelete, onTogglePin, onToggleArchive, onConvertToTask,
 }: {
   note: KeepNote;
   isRTL: boolean;
@@ -547,6 +581,7 @@ function KeepEditor({
   onDelete: (id: string) => void;
   onTogglePin: (id: string) => void;
   onToggleArchive: (id: string) => void;
+  onConvertToTask: (n: KeepNote) => void;
 }) {
   const [form, setForm] = useState<KeepNote>({ ...note });
   const [newLabel, setNewLabel] = useState('');
@@ -692,6 +727,9 @@ function KeepEditor({
             </button>
             <button onClick={() => { onToggleArchive(form.id); onClose(); }} className={cn('p-2 rounded-lg hover:bg-black/10', colors.secondary)} title="Archive">
               {form.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+            </button>
+            <button onClick={() => { onConvertToTask(form); onClose(); }} className={cn('p-2 rounded-lg hover:bg-accent/10 hover:text-accent', colors.secondary)} title={isRTL ? 'تحويل إلى مهمة' : 'Convert to task'}>
+              <CheckCircle2 size={16} />
             </button>
             <button onClick={() => { if (confirm(isRTL ? '\u062d\u0630\u0641\u061f' : 'Delete?')) onDelete(form.id); }} className="p-2 rounded-lg text-red-500 hover:bg-red-500/10" title="Delete">
               <Trash2 size={16} />

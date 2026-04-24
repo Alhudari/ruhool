@@ -14,7 +14,7 @@ const AGENT_LABELS: Record<string, { ar: string; en: string; emoji: string }> = 
   'reading-helper': { ar: 'المُلخِّص', en: 'Al-Mulakhkhis', emoji: '📖' },
   'writing-critic': { ar: 'الناقد', en: 'Al-Naqid', emoji: '✍️' },
   comparator: { ar: 'المُقارِن', en: 'Al-Muqarin', emoji: '⚖️' },
-  architect: { ar: 'المصمم', en: 'Al-Al-Musammim', emoji: '🏗️' },
+  architect: { ar: 'المصمم', en: 'Al-Musammim', emoji: '🏗️' },
   'content-creator': { ar: 'السارد', en: 'Al-Sarid', emoji: '🎨' },
   creative: { ar: 'المبدع', en: "Al-Mubdi'", emoji: '🎬' },
   'tasks-agent': { ar: 'مهام', en: 'Maham', emoji: '✅' },

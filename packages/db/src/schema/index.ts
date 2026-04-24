@@ -8,3 +8,5 @@ export * from './api-usage';
 export * from './audit-log';
 export * from './workflow-runs';
 export * from './workflow-steps';
+export * from './reading-sessions';
+export * from './page-analyses';

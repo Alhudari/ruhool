@@ -11,6 +11,10 @@ import { broadcastActivity } from '../state/activity-channel.js';
 
 export const MAX_ACTIVITY_RECORDS = 500;
 
+// Canonical Arabic display names — post trait-based rename (2026-04-23).
+// Single source of truth; UI/prompts/logs all import from here. Old
+// camel-herd names (عبدان/شواشة/رمّانة/الصفرا/الدبسا/الكرييتف/السياق/رمّان)
+// are retired — any remaining references in the codebase are bugs.
 export const AGENT_DISPLAY_NAMES: Record<string, string> = {
   manager: 'الراعي',
   doctor: 'الدكتور',

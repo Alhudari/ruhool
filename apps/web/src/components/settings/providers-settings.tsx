@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
+import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
 
 interface Provider {
   id: string;
@@ -143,6 +144,13 @@ function ProviderCard({
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
+
+  const editDirty = isEditing && (
+    apiKey.length > 0 ||
+    baseUrl !== (existing?.baseUrl || '') ||
+    model !== (existing?.defaultModel || providerType.defaultModel)
+  );
+  useUnsavedChanges(editDirty);
 
   const Icon = providerType.icon;
 

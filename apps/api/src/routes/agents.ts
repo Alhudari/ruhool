@@ -362,13 +362,13 @@ export function registerAgentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           icon: ws.icon,
           color: ws.color,
           ceo: ws.ceo,
-          departments: ws.departments.map((d) => ({
+          departments: (ws.departments ?? []).map((d) => ({
             id: d.id,
             label: d.label ?? { ar: d.id, en: d.id },
             icon: d.icon,
             color: d.color,
             manager: d.manager,
-            workers: d.workers,
+            workers: d.workers ?? [],
           })),
         })),
         sharedServices: body.sharedServices ?? [],

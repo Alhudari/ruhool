@@ -135,6 +135,7 @@ const CANONICAL_ARABIC: Record<string, string> = {
   'المُمرر': 'playmaker',
   'الخوي': 'research-companion',
   'المُدوّن': 'mudawwin',
+  'المُدوِّن': 'mudawwin',
   'الكاتب': 'sayyaq',
 };
 

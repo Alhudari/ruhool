@@ -13,6 +13,7 @@ import { ResultCard, isResearchResult } from './result-card';
 import { TaskProgressCard } from './task-progress-card';
 import { ChatGroupHeader } from './chat-group-header';
 import { TypingIndicator } from './typing-indicator';
+import { CostPill } from './CostPill';
 import { ArtifactPreview } from '@/components/workflow-runs/artifact-preview';
 import type { WorkflowArtifact } from '@/hooks/use-workflow-sse';
 
@@ -65,6 +66,7 @@ const ALL_BUILTIN_AGENTS = [
   { id: 'mudawwin', name: { en: 'Al-Mudawwin', ar: 'المُدوّن' }, desc: { en: 'Meeting tracker', ar: 'متابع الاجتماعات' } },
   { id: 'sayyaq', name: { en: 'Al-Katib', ar: 'الكاتب' }, desc: { en: 'Writing assistant', ar: 'مساعد الكتابة' } },
   { id: 'clippy', name: { en: 'Clippy', ar: 'Clippy' }, desc: { en: 'Onboarding assistant', ar: 'مساعد الإعداد' } },
+
 ];
 
 const COLOR_OPTIONS = [
@@ -99,8 +101,13 @@ interface Message {
   artifacts?: WorkflowArtifact[];
   streaming?: boolean;
   errored?: boolean;
-  dispatchStep?: 'dept-selected' | 'worker' | 'synthesis' | 'final';
   dispatchId?: string;
+  dispatchStep?: 'route' | 'dept-selected' | 'worker' | 'synthesis' | 'final';
+  dispatchChain?: string[];
+  costUsd?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+
 }
 
 /** CHAT_V2 Wave D client-side feature flag. Default ON — Wave B's backend is live,
@@ -170,7 +177,7 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
   // Targeted agents for next message (multi-select via participant chips)
   const [targetedAgents, setTargetedAgents] = useState<Set<string>>(new Set());
   // Chain context: when an agent @mentions another, track depth + reason
-  const chainContextRef = useRef<{ depth: number; reason: string; calledBy: string; replyToMessageId?: string } | null>(null);
+  const chainContextRef = useRef<{ depth: number; reason: string; calledBy: string; replyToMessageId?: string; chainMentions?: string[] } | null>(null);
   // Reply-to state: when set, next message is scoped to that specific message
   const [replyingTo, setReplyingTo] = useState<{ id: string; authorName: string; authorAgentId?: string; preview: string } | null>(null);
   // Ref mirror of isStreaming so chain follow-ups see the real-time value and aren't
@@ -220,6 +227,14 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
   const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<Set<string>>(new Set());
   const nameDetectAbortRef = useRef<AbortController | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<Array<{ id: string; type: string; title: { ar: string; en: string }; description: string; payload?: Record<string, unknown> }>>([]);
+  const [reportToasts, setReportToasts] = useState<Array<{ id: string; kind: 'success' | 'error'; msg: string }>>([]);
+
+  // Each report toast auto-dismisses after 6s. Errors stay 10s.
+  const showToast = useCallback((kind: 'success' | 'error', msg: string) => {
+    const id = crypto.randomUUID();
+    setReportToasts((prev) => [...prev, { id, kind, msg }]);
+    setTimeout(() => setReportToasts((prev) => prev.filter((t) => t.id !== id)), kind === 'error' ? 10_000 : 6_000);
+  }, []);
 
   const resolveApproval = useCallback(async (id: string, action: 'approve' | 'reject') => {
     try {
@@ -238,6 +253,7 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
   const [mentionFilter, setMentionFilter] = useState('');
   const [mentionStartIndex, setMentionStartIndex] = useState(-1);
   const [activeParticipantMenu, setActiveParticipantMenu] = useState<string | null>(null);
+  const [responseLength, setResponseLength] = useState<'short' | 'medium' | 'long'>('medium');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const cancelRef = useRef<(() => void) | null>(null);
@@ -248,6 +264,23 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
   const addAgentRef = useRef<HTMLDivElement>(null);
   const mentionPopupRef = useRef<HTMLDivElement>(null);
   const isRTL = language === 'ar';
+
+  // Load + sync response length preference
+  useEffect(() => {
+    apiFetch<{ responseLength: 'short' | 'medium' | 'long' }>('/api/settings/response-length')
+      .then((d) => setResponseLength(d.responseLength))
+      .catch(() => {});
+  }, []);
+
+  const cycleResponseLength = useCallback(() => {
+    setResponseLength((prev) => {
+      const next = prev === 'short' ? 'medium' : prev === 'medium' ? 'long' : 'short';
+      apiFetch('/api/settings/response-length', {
+        method: 'PUT', body: JSON.stringify({ responseLength: next }),
+      }).catch(() => {});
+      return next;
+    });
+  }, []);
 
   // Fetch custom agents to merge into display map
   useEffect(() => {
@@ -475,7 +508,7 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
   }, [participants]);
 
   const sendMessage = useCallback(
-    (text: string, overrideAgentId?: string, chainDepth?: number, replyToOverride?: { id: string; authorAgentId?: string } | null) => {
+    async (text: string, overrideAgentId?: string, chainDepth?: number, replyToOverride?: { id: string; authorAgentId?: string } | null, chainMentionsOverride?: string[]) => {
       // Use the ref so chain follow-ups scheduled via setTimeout see the CURRENT state,
       // not the stale `isStreaming` closure value from when the callback was created.
       if (isStreamingRef.current) return;
@@ -523,6 +556,48 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
       let sawV2 = false;
 
       const effectiveAgentId = overrideAgentId || agentId;
+
+      // Round 5 — hierarchical dispatch branch.
+      // When target is the CEO of a workspace (manager = PhD, doctor = Life)
+      // and no @mention is present in the final text, route through the
+      // dispatcher. It persists each step as a conversation message
+      // server-side, so we just refetch the message list after.
+      const isCeoTarget = effectiveAgentId === 'manager' || effectiveAgentId === 'doctor';
+      const hasMention = /@[؀-ۿa-zA-Z_-]+/.test(finalText);
+      if (isCeoTarget && !hasMention) {
+        try {
+          const cfg = await apiFetch<{ enabled?: boolean }>('/api/dispatch/config').catch(() => ({ enabled: false }));
+          if (cfg.enabled) {
+            let activeWs: string | null = null;
+            try { activeWs = window.localStorage.getItem('ruhool.active-workspace'); } catch { /* noop */ }
+            const resp = await apiFetch<{ conversationId?: string }>('/api/dispatch/chat', {
+              method: 'POST',
+              body: JSON.stringify({
+                message: finalText,
+                language,
+                conversationId: convId,
+                targetAgentId: effectiveAgentId,
+                workspaceId: activeWs ?? (effectiveAgentId === 'doctor' ? 'life' : 'phd'),
+              }),
+            });
+            const newId = resp.conversationId ?? convId;
+            if (newId && newId !== convId) {
+              setConvId(newId);
+              onConversationCreated?.(newId);
+            }
+            if (newId) {
+              const fresh = await apiFetch<Message[]>(`/api/conversations/${newId}/messages`).catch(() => null);
+              if (fresh) setMessages(fresh);
+            }
+            setIsStreaming(false);
+            setStreamingContent('');
+            return;
+          }
+        } catch {
+          // Fall through to legacy path on any failure.
+        }
+      }
+
       const cancel = apiStream(
         '/api/chat',
         {
@@ -531,6 +606,7 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
           ...(effectiveAgentId ? { agentId: effectiveAgentId } : {}),
           ...(projectId ? { projectId } : {}),
           ...(chainDepth ? { chainDepth } : {}),
+          ...(chainMentionsOverride && chainMentionsOverride.length > 0 ? { chainMentions: chainMentionsOverride } : {}),
           ...(activeReply?.id ? { replyToMessageId: activeReply.id } : {}),
           ...(pendingImages.length > 0 ? { images: pendingImages.map((img) => ({ base64: img.base64, mimeType: img.mimeType })) } : {}),
         },
@@ -562,6 +638,22 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
           } else if (event === 'approval_request') {
             const list = (d.approvals as Array<{ id: string; type: string; title: { ar: string; en: string }; description: string; payload?: Record<string, unknown> }>) || [];
             setPendingApprovals((prev) => [...prev, ...list]);
+          } else if (event === 'reports') {
+            const results = (d.results as Array<{ action: string; name?: string; id?: string; error?: string }>) || [];
+            for (const r of results) {
+              const verb = r.action === 'create' ? 'أُنشئ' : r.action === 'update' ? 'حُدِّث' : r.action === 'toggle' ? 'تبدّل حالة' : r.action === 'send' ? 'أُرسل' : r.action === 'delete' ? 'حُذف' : r.action;
+              const label = r.name ?? r.id ?? '';
+              const msg = r.error ? `فشل ${r.action}: ${r.error}` : `تقرير: ${verb} ${label ? `"${label}"` : ''}`.trim();
+              showToast(r.error ? 'error' : 'success', msg);
+            }
+          } else if (event === 'tasks') {
+            const list = (d.tasks as Array<{ title?: string; id?: string }>) || [];
+            if (list.length === 1) showToast('success', `📋 أُضيفت مهمة: "${list[0].title ?? ''}"`);
+            else if (list.length > 1) showToast('success', `📋 أُضيفت ${list.length} مهام`);
+          } else if (event === 'notifications') {
+            const list = (d.notifications as Array<{ title?: string; id?: string }>) || [];
+            if (list.length === 1) showToast('success', `🔔 تنبيه: "${list[0].title ?? ''}"`);
+            else if (list.length > 1) showToast('success', `🔔 ${list.length} تنبيهات جديدة`);
           } else if (event === 'next_agent_queued') {
             nextAgentToTriggerRef.current = d.agentId as string;
             chainContextRef.current = {
@@ -569,6 +661,7 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
               reason: (d.reason as string) || 'multi-mention',
               calledBy: (d.calledBy as string) || '',
               replyToMessageId: (d.replyToMessageId as string) || undefined,
+              chainMentions: Array.isArray(d.chainMentions) ? (d.chainMentions as string[]) : undefined,
             };
           } else if (event === 'message.start' && isChatV2Enabled()) {
             // BUG-1 FIX: mark v2 active so we drop any subsequent legacy `text`
@@ -691,7 +784,13 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
                 ? `(تلقائي) دور ${agentDisplay[next]?.name[language] || next}: راجع آخر ردّ من ${prevName} وقم بدورك.`
                 : `(auto) ${agentDisplay[next]?.name[language] || next}: review ${prevName}'s last reply and do your part.`);
             setTimeout(() => {
-              sendMessage(followUp, next, ctx?.depth, ctx?.replyToMessageId ? { id: ctx.replyToMessageId, authorAgentId: responseAgentId } : null);
+              sendMessage(
+                followUp,
+                next,
+                ctx?.depth,
+                ctx?.replyToMessageId ? { id: ctx.replyToMessageId, authorAgentId: responseAgentId } : null,
+                ctx?.chainMentions,
+              );
             }, 600);
           }
         },
@@ -1000,6 +1099,30 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
         </div>
       )}
 
+      {/* Report action toasts — transient confirmations when an agent
+          executes [REPORT:*] intents. */}
+      {reportToasts.length > 0 && (
+        <div className="fixed top-4 inset-x-0 z-50 flex flex-col items-center gap-2 pointer-events-none">
+          {reportToasts.map((t) => (
+            <div
+              key={t.id}
+              className={`pointer-events-auto max-w-md px-4 py-2.5 rounded-lg shadow-lg text-sm border animate-in fade-in slide-in-from-top-2 flex items-center gap-3 ${
+                t.kind === 'error'
+                  ? 'bg-red-50 border-red-200 text-red-800'
+                  : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              }`}
+            >
+              <span className="flex-1">📨 {t.msg}</span>
+              <button
+                onClick={() => setReportToasts((prev) => prev.filter((x) => x.id !== t.id))}
+                aria-label="إغلاق التنبيه"
+                className="opacity-60 hover:opacity-100 leading-none text-lg"
+              >×</button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Approval popup — appears in chat when an agent requests permission */}
       {pendingApprovals.length > 0 && (
         <div className="px-4 pt-4">
@@ -1053,13 +1176,23 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
             const isHandoff = msg.kind === 'handoff';
             const isProgress = msg.kind === 'progress' || (msg.streaming && !msg.content);
             const isArtifact = msg.kind === 'artifact';
+            // Round 5 — dispatch-in-chat bubble variants.
+            const isDispatchRoute = msg.dispatchStep === 'dept-selected' || msg.dispatchStep === 'route';
+            const isDispatchWorker = msg.dispatchStep === 'worker';
+            const isDispatchSynth = msg.dispatchStep === 'synthesis';
             const timestamp = formatRelativeTime(msg.createdAt, isRTL);
             return (
               <div
                 key={msg.id}
                 className={cn(
                   'group flex gap-3 relative',
-                  isHandoff && 'opacity-75'
+                  isHandoff && 'opacity-75',
+                  // Route captions: indent, no avatar, small muted text.
+                  isDispatchRoute && 'ms-10 opacity-70',
+                  // Worker drafts: indent, slightly muted background.
+                  isDispatchWorker && 'ms-10',
+                  // Synthesis: bolder left border to stand out.
+                  isDispatchSynth && 'border-s-2 border-accent/40 ps-3',
                 )}
               >
                 <div
@@ -1136,6 +1269,21 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
                       {msg.artifacts.map((a, i) => (
                         <ArtifactPreview key={a.id || `${msg.id}-a-${i}`} artifact={a} isRTL={isRTL} />
                       ))}
+                    </div>
+                  )}
+                  {/* Round 5 — dispatch synthesis meta: cost + chain */}
+                  {isDispatchSynth && (
+                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      <CostPill
+                        inputTokens={msg.tokensIn}
+                        outputTokens={msg.tokensOut}
+                        usd={msg.costUsd}
+                      />
+                      {Array.isArray(msg.dispatchChain) && msg.dispatchChain.length > 0 && (
+                        <span className="text-[10px] text-on-surface-tertiary inline-flex items-center gap-1 font-mono">
+                          <bdi>{msg.dispatchChain.join(' ← ')}</bdi>
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1494,6 +1642,28 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
               )}
               style={{ minHeight: '48px', maxHeight: '120px' }}
             />
+            {/* Response length toggle — bottom left corner */}
+            <div className={cn(
+              'absolute bottom-2 flex items-center',
+              isRTL ? 'right-2' : 'left-2'
+            )}>
+              <button
+                onClick={cycleResponseLength}
+                title={isRTL
+                  ? `طول الرد: ${responseLength === 'short' ? 'مختصر' : responseLength === 'medium' ? 'متوسط' : 'مطوّل'}`
+                  : `Response: ${responseLength}`}
+                className="flex items-center gap-1 px-2 py-1 rounded-[var(--radius)] text-[10px] font-medium transition-colors hover:bg-surface-secondary"
+                style={{
+                  color: responseLength === 'short' ? 'var(--color-amber-400, #f59e0b)'
+                    : responseLength === 'long' ? 'var(--color-blue-400, #60a5fa)'
+                    : 'var(--color-on-surface-tertiary)',
+                  background: responseLength !== 'medium' ? 'var(--color-surface-secondary, rgba(0,0,0,0.1))' : undefined,
+                }}
+              >
+                {responseLength === 'short' ? (isRTL ? 'م↓' : 'S') : responseLength === 'medium' ? (isRTL ? 'م↔' : 'M') : (isRTL ? 'م↑' : 'L')}
+              </button>
+            </div>
+
             <div className={cn(
               'absolute bottom-2 flex items-center gap-1',
               isRTL ? 'left-2' : 'right-2'

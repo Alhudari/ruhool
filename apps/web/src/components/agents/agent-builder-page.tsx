@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useGuardedRouter } from '@/lib/navigation/guarded-router';
 import {
   ArrowLeft,
   Bot,
@@ -44,7 +44,7 @@ const MODELS = [
 
 export function AgentBuilderPage() {
   const { language } = useAppStore();
-  const router = useRouter();
+  const router = useGuardedRouter();
   const isRTL = language === 'ar';
 
   const [nameEn, setNameEn] = useState('');

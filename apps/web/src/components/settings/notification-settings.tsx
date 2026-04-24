@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Bell, Mail, MessageSquare, Save, Loader2, Send } from 'lucide-react';
+import { Bell, Mail, MessageSquare, Loader2, Send } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
+import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
+import { SaveBar, useSaveBarHeight } from '@/components/settings/save-bar';
 
 interface NotificationData {
   smtpHost: string;
@@ -16,34 +18,57 @@ interface NotificationData {
   hasSmtpPass: boolean;
 }
 
+type FormValues = {
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpPass: string;
+  smtpFrom: string;
+  slackWebhookUrl: string;
+  desktopEnabled: boolean;
+};
+
 export function NotificationSettings() {
   const { language } = useAppStore();
   const isRTL = language === 'ar';
 
-  const [smtpHost, setSmtpHost] = useState('');
-  const [smtpPort, setSmtpPort] = useState(587);
-  const [smtpUser, setSmtpUser] = useState('');
-  const [smtpPass, setSmtpPass] = useState('');
-  const [smtpFrom, setSmtpFrom] = useState('');
-  const [slackWebhookUrl, setSlackWebhookUrl] = useState('');
-  const [desktopEnabled, setDesktopEnabled] = useState(true);
+  const [values, setValues] = useState<FormValues>({
+    smtpHost: '',
+    smtpPort: 587,
+    smtpUser: '',
+    smtpPass: '',
+    smtpFrom: '',
+    slackWebhookUrl: '',
+    desktopEnabled: true,
+  });
+  const [original, setOriginal] = useState<FormValues | null>(null);
   const [hasSmtpPass, setHasSmtpPass] = useState(false);
 
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ type: string; ok: boolean; msg: string } | null>(null);
+
+  const setField = <K extends keyof FormValues>(key: K, value: FormValues[K]) => {
+    setValues((v) => ({ ...v, [key]: value }));
+  };
 
   const fetchSettings = useCallback(async () => {
     setLoading(true);
     try {
       const data = await apiFetch<NotificationData>('/api/settings/notifications');
-      setSmtpHost(data.smtpHost);
-      setSmtpPort(data.smtpPort);
-      setSmtpUser(data.smtpUser);
-      setSmtpFrom(data.smtpFrom);
-      setSlackWebhookUrl(data.slackWebhookUrl);
-      setDesktopEnabled(data.desktopEnabled);
+      const loaded: FormValues = {
+        smtpHost: data.smtpHost,
+        smtpPort: data.smtpPort,
+        smtpUser: data.smtpUser,
+        smtpPass: '',
+        smtpFrom: data.smtpFrom,
+        slackWebhookUrl: data.slackWebhookUrl,
+        desktopEnabled: data.desktopEnabled,
+      };
+      setValues(loaded);
+      setOriginal(loaded);
       setHasSmtpPass(data.hasSmtpPass);
     } catch {
       // defaults
@@ -55,28 +80,51 @@ export function NotificationSettings() {
     fetchSettings();
   }, [fetchSettings]);
 
+  const dirty =
+    original !== null &&
+    (values.smtpHost !== original.smtpHost ||
+      values.smtpPort !== original.smtpPort ||
+      values.smtpUser !== original.smtpUser ||
+      values.smtpPass !== original.smtpPass ||
+      values.smtpFrom !== original.smtpFrom ||
+      values.slackWebhookUrl !== original.slackWebhookUrl ||
+      values.desktopEnabled !== original.desktopEnabled);
+  useUnsavedChanges(dirty);
+  const saveBarPad = useSaveBarHeight(dirty || !!successMessage);
+
   const handleSave = async () => {
     setSaving(true);
+    setErrorMessage(null);
     try {
       await apiFetch('/api/settings/notifications', {
         method: 'PUT',
         body: JSON.stringify({
-          smtpHost,
-          smtpPort,
-          smtpUser,
-          smtpPass: smtpPass || undefined,
-          smtpFrom,
-          slackWebhookUrl,
-          desktopEnabled,
+          smtpHost: values.smtpHost,
+          smtpPort: values.smtpPort,
+          smtpUser: values.smtpUser,
+          smtpPass: values.smtpPass || undefined,
+          smtpFrom: values.smtpFrom,
+          slackWebhookUrl: values.slackWebhookUrl,
+          desktopEnabled: values.desktopEnabled,
         }),
       });
-      setSaved(true);
-      setHasSmtpPass(hasSmtpPass || !!smtpPass);
-      setTimeout(() => setSaved(false), 2000);
-    } catch {
-      // silently fail
+      setHasSmtpPass(hasSmtpPass || !!values.smtpPass);
+      // Keep smtpPass blank in the form after save; password field is write-only
+      const newOriginal: FormValues = { ...values, smtpPass: '' };
+      setValues(newOriginal);
+      setOriginal(newOriginal);
+      setSuccessMessage(isRTL ? 'حُفظ' : 'Saved');
+      setTimeout(() => setSuccessMessage(null), 2000);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : (isRTL ? 'فشل الحفظ' : 'Save failed'));
     }
     setSaving(false);
+  };
+
+  const discard = () => {
+    if (!original) return;
+    setValues(original);
+    setErrorMessage(null);
   };
 
   const handleTest = async (type: 'desktop' | 'email' | 'slack') => {
@@ -140,16 +188,16 @@ export function NotificationSettings() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setDesktopEnabled(!desktopEnabled)}
+              onClick={() => setField('desktopEnabled', !values.desktopEnabled)}
               className={cn(
                 'relative w-10 h-5 rounded-full transition-colors',
-                desktopEnabled ? 'bg-accent' : 'bg-surface-tertiary'
+                values.desktopEnabled ? 'bg-accent' : 'bg-surface-tertiary'
               )}
             >
               <span
                 className={cn(
                   'absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform',
-                  desktopEnabled ? 'translate-x-5' : 'translate-x-0.5'
+                  values.desktopEnabled ? 'translate-x-5' : 'translate-x-0.5'
                 )}
               />
             </button>
@@ -166,7 +214,7 @@ export function NotificationSettings() {
           {isRTL ? 'عرض إشعارات المتصفح للأحداث المهمة' : 'Show browser notifications for important events'}
         </p>
         {testResult?.type === 'desktop' && (
-          <p className={cn('text-xs', testResult.ok ? 'text-green-400' : 'text-red-400')}>{testResult.msg}</p>
+          <p className={cn('text-xs', testResult.ok ? 'text-success' : 'text-error')}>{testResult.msg}</p>
         )}
       </div>
 
@@ -194,8 +242,8 @@ export function NotificationSettings() {
               {isRTL ? 'خادم SMTP' : 'SMTP Host'}
             </label>
             <input
-              value={smtpHost}
-              onChange={(e) => setSmtpHost(e.target.value)}
+              value={values.smtpHost}
+              onChange={(e) => setField('smtpHost', e.target.value)}
               placeholder="smtp.gmail.com"
               className="w-full px-3 py-2 rounded-[var(--radius)] border border-border bg-surface text-on-surface text-sm focus:outline-none focus:ring-1 focus:ring-accent"
             />
@@ -206,8 +254,8 @@ export function NotificationSettings() {
             </label>
             <input
               type="number"
-              value={smtpPort}
-              onChange={(e) => setSmtpPort(Number(e.target.value))}
+              value={values.smtpPort}
+              onChange={(e) => setField('smtpPort', Number(e.target.value))}
               className="w-full px-3 py-2 rounded-[var(--radius)] border border-border bg-surface text-on-surface text-sm focus:outline-none focus:ring-1 focus:ring-accent"
             />
           </div>
@@ -216,8 +264,8 @@ export function NotificationSettings() {
               {isRTL ? 'اسم المستخدم' : 'Username'}
             </label>
             <input
-              value={smtpUser}
-              onChange={(e) => setSmtpUser(e.target.value)}
+              value={values.smtpUser}
+              onChange={(e) => setField('smtpUser', e.target.value)}
               className="w-full px-3 py-2 rounded-[var(--radius)] border border-border bg-surface text-on-surface text-sm focus:outline-none focus:ring-1 focus:ring-accent"
             />
           </div>
@@ -227,8 +275,8 @@ export function NotificationSettings() {
             </label>
             <input
               type="password"
-              value={smtpPass}
-              onChange={(e) => setSmtpPass(e.target.value)}
+              value={values.smtpPass}
+              onChange={(e) => setField('smtpPass', e.target.value)}
               placeholder={hasSmtpPass ? '********' : ''}
               className="w-full px-3 py-2 rounded-[var(--radius)] border border-border bg-surface text-on-surface text-sm focus:outline-none focus:ring-1 focus:ring-accent"
             />
@@ -238,8 +286,8 @@ export function NotificationSettings() {
               {isRTL ? 'عنوان المرسل' : 'From Address'}
             </label>
             <input
-              value={smtpFrom}
-              onChange={(e) => setSmtpFrom(e.target.value)}
+              value={values.smtpFrom}
+              onChange={(e) => setField('smtpFrom', e.target.value)}
               placeholder="noreply@example.com"
               className="w-full px-3 py-2 rounded-[var(--radius)] border border-border bg-surface text-on-surface text-sm focus:outline-none focus:ring-1 focus:ring-accent"
             />
@@ -247,7 +295,7 @@ export function NotificationSettings() {
         </div>
 
         {testResult?.type === 'email' && (
-          <p className={cn('text-xs', testResult.ok ? 'text-green-400' : 'text-red-400')}>{testResult.msg}</p>
+          <p className={cn('text-xs', testResult.ok ? 'text-success' : 'text-error')}>{testResult.msg}</p>
         )}
       </div>
 
@@ -274,38 +322,27 @@ export function NotificationSettings() {
             {isRTL ? 'رابط Webhook' : 'Webhook URL'}
           </label>
           <input
-            value={slackWebhookUrl}
-            onChange={(e) => setSlackWebhookUrl(e.target.value)}
+            value={values.slackWebhookUrl}
+            onChange={(e) => setField('slackWebhookUrl', e.target.value)}
             placeholder="https://hooks.slack.com/services/..."
             className="w-full px-3 py-2 rounded-[var(--radius)] border border-border bg-surface text-on-surface text-sm focus:outline-none focus:ring-1 focus:ring-accent"
           />
         </div>
 
         {testResult?.type === 'slack' && (
-          <p className={cn('text-xs', testResult.ok ? 'text-green-400' : 'text-red-400')}>{testResult.msg}</p>
+          <p className={cn('text-xs', testResult.ok ? 'text-success' : 'text-error')}>{testResult.msg}</p>
         )}
       </div>
 
-      {/* Save Button */}
-      <button
-        onClick={handleSave}
-        disabled={saving}
-        className={cn(
-          'flex items-center gap-2 px-4 py-2 rounded-[var(--radius)] text-sm font-medium transition-colors',
-          saved
-            ? 'bg-green-500/20 text-green-400'
-            : 'bg-accent text-on-accent hover:bg-accent-hover'
-        )}
-      >
-        {saving ? (
-          <Loader2 size={16} className="animate-spin" />
-        ) : (
-          <Save size={16} />
-        )}
-        {saved
-          ? isRTL ? 'تم الحفظ!' : 'Saved!'
-          : isRTL ? 'حفظ' : 'Save'}
-      </button>
+      <div style={{ height: saveBarPad }} aria-hidden="true" />
+      <SaveBar
+        dirty={dirty}
+        saving={saving}
+        onSave={handleSave}
+        onDiscard={discard}
+        successMessage={successMessage}
+        errorMessage={errorMessage}
+      />
     </div>
   );
 }

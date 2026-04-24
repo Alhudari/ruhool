@@ -69,10 +69,18 @@ export interface MsgRecord {
   replyToAgentId?: string;
   /** CHAT_V2 P1: attachments produced by this message. */
   artifacts?: MessageArtifact[];
-  /** Hierarchical dispatch — which step produced this message. */
-  dispatchStep?: 'dept-selected' | 'worker' | 'synthesis' | 'final';
+  /** Round 5: hierarchical dispatch fields. A group of messages with the
+   *  same `dispatchId` represents one dispatcher run. `dispatchStep`
+   *  tells the UI how to render each one (route caption, collapsible
+   *  worker draft, or bold synthesis). */
   dispatchId?: string;
-  dispatchChain?: unknown[];
+  dispatchStep?: 'route' | 'dept-selected' | 'worker' | 'synthesis' | 'final';
+  dispatchChain?: string[];
+  costUsd?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  /** Round 4: workspace scoping. Legacy rows backfilled to 'phd' via
+   *  migration 003. New rows should set it explicitly. */
   workspaceId?: string;
   agentDisplay?: { ar: string; en: string };
 }
@@ -128,6 +136,47 @@ export interface PaperRecord {
   sections: { title: string; content: string }[];
   archived?: boolean;
   createdAt: string;
+}
+
+/**
+ * R18 — Unified Sources model. Every item in the Sources hub
+ * (Zotero/document/book/writing) is a SourceRecord. Papers (older
+ * model) stays for backward compat but new reading goes here.
+ */
+export type SourceKind = 'zotero' | 'document' | 'book' | 'writing';
+
+export interface SourceRecord {
+  id: string;
+  kind: SourceKind;
+  title: string;
+  authors?: string;
+  year?: number;
+  /** For books: ISBN. For Zotero: cached DOI/URL. */
+  identifier?: string;
+  /** Free-form notes by the user. */
+  notes?: string;
+  tags?: string[];
+  /** Zotero-synced: stable item key so we can refresh from the library
+   *  and avoid duplicates when the user imports the same item twice. */
+  zoteroKey?: string;
+  /** For `document` / `book` with uploaded PDF — relative path under
+   *  `data/sources/` the platform can stream back to the reader. */
+  filePath?: string;
+  /** Original filename for display + downloads. */
+  fileName?: string;
+  /** `application/pdf`, etc. — lets the UI decide how to render. */
+  mimeType?: string;
+  /** Size in bytes — for file-management UI. */
+  sizeBytes?: number;
+  /** Page count (books + docs). */
+  pages?: number;
+  /** Is this source in the reading queue? */
+  inReadingQueue?: boolean;
+  readingStatus?: 'to-read' | 'reading' | 'read' | 'skimmed';
+  archived?: boolean;
+  workspaceId?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface NoteRecord {
@@ -295,6 +344,11 @@ export interface TaskItem {
   priority: 'high' | 'medium' | 'low' | 'none';
   dueDate: string | null;
   dueTime: string | null;
+  /** R19: optional time window — both null means "no time", use dueTime instead.
+   *  When allDay is true the window is ignored (full-day event). */
+  startTime?: string | null;
+  endTime?: string | null;
+  allDay?: boolean;
   list: string;
   tags: string[];
   color: string;
@@ -313,6 +367,47 @@ export interface TaskItem {
   lastAttemptAt?: string;
   output?: string;
   metadata?: { conversationId?: string; [k: string]: unknown };
+  /** Subtask hierarchy — null/undefined for root tasks. Multi-level allowed. */
+  parentId?: string | null;
+  /** Round 4: workspace scope (phd | life | …). */
+  workspaceId?: string;
+  /** Round 6: is this a habit template (repeats on a schedule)?
+   *  Habits are not completed directly; completing them creates a
+   *  dated instance and rolls the next-due forward. */
+  isHabit?: boolean;
+  /** Round 6: habit spawn schedule.
+   *  - 'daily': every day
+   *  - 'skip-weekends': Sun–Thu (Kuwaiti weekend) — configurable via user prefs
+   *  - 'weekly': one specific day in `habitDays`
+   *  - 'custom': specific days in `habitDays` */
+  habitFrequency?: 'daily' | 'skip-weekends' | 'weekly' | 'custom';
+  /** Round 6: for 'weekly' or 'custom' — days-of-week (0=Sun..6=Sat). */
+  habitDays?: number[];
+  /** Round 6: for habit instances, points back to the template task. */
+  habitTemplateId?: string;
+  /** Round 6: target duration per instance in minutes (optional).
+   *  Used for "read 30 min", "exercise 45 min" style habits. */
+  durationMinutes?: number;
+  /** Round 6: optional habit lifespan. Spawner stops after endDate. */
+  habitStartDate?: string | null;
+  habitEndDate?: string | null;
+  /** Round 6: scheduled date (ISO yyyy-mm-dd). Different from dueDate:
+   *  `scheduledFor` is "I plan to do it on this day"; `dueDate` is "it
+   *  must be done by this day". Tasks with scheduledFor=today appear
+   *  in the Today view. */
+  scheduledFor?: string | null;
+  /** Round 6: explicit "today" pin that ignores workspace scoping.
+   *  Useful for ad-hoc items the user wants in the Today view without
+   *  touching dates. */
+  isToday?: boolean;
+  /** Round 6: if true, this task appears in every workspace's view
+   *  regardless of the workspace filter. For platform-wide commitments
+   *  like "work on Ruhool". */
+  crossWorkspace?: boolean;
+  /** Round 7: external system mapping (Google Tasks, Outlook, ...). */
+  externalId?: string;
+  externalProvider?: 'google-tasks' | 'outlook' | 'todoist';
+  externalUpdatedAt?: string;
 }
 
 export interface ConversationMemoryEntry {
@@ -442,6 +537,145 @@ export interface TaskRecord {
   updatedAt: string;
 }
 
+export type ReadingSessionStatus = 'active' | 'paused' | 'completed' | 'archived';
+export type ReadingSessionSource =
+  | 'upload'
+  | 'zotero'
+  | 'obsidian'
+  | 'paste'
+  | 'link'
+  | 'kindle-clippings'
+  | 'kindle-book'
+  | 'camera'
+  | 'drive'
+  | 'screen-capture'
+  | 'standalone'; // free notes session — no source file
+
+export type ReadingMode = 'page' | 'rolling' | 'full' | 'tac';
+
+export interface ReadingSessionRecord {
+  id: string;
+  paperId: string;
+  paperTitle: string;
+  paperMeta?: {
+    authors?: string;
+    year?: number | null;
+    journal?: string;
+    doi?: string;
+    abstractNote?: string;
+    [k: string]: unknown;
+  };
+  source: ReadingSessionSource;
+  sourceRef?: string | null;
+  totalPages: number;
+  currentPage: number;
+  language: 'en' | 'ar';
+  status: ReadingSessionStatus;
+  mindOverride?: string | null;
+  totalCost?: number;
+  /** Default 'rolling' at creation. Controls how /analyze is run. */
+  readingMode?: ReadingMode;
+  /** Updated on each page in rolling mode; injected into subsequent analyses. */
+  runningSynthesis?: string;
+  /** User-authored markdown notes, keyed by page number (as string). */
+  userNotes?: Record<string, string>;
+  /** Auto-save draft notes — free-form text before Obsidian commit. */
+  draftNotes?: string;
+  /** Timestamp of last auto-save. */
+  draftSavedAt?: string;
+  /** Undo stack: list of { field, previousValue } snapshots, newest last. */
+  undoStack?: Array<{ id: string; ts: string; field: string; previousValue: unknown }>;
+  /** Zotero item key linked to this session (if any). */
+  linkedZoteroKey?: string | null;
+  /**
+   * Raw page text captured at session-create time.
+   * Indexed from 0; page N in the UI maps to `pages[N-1]`.
+   * For upload sources, populated from the PDF parse (one entry per section).
+   * For Zotero/link/Kindle/Drive sources this is currently empty — those
+   * pipelines aren't wired yet.
+   */
+  pages?: string[];
+  /**
+   * Inline page images, keyed by page number (as string).
+   * Populated by screenshot/camera sources and used by PaperView to render
+   * image-only pages (and by `/api/shwasha/vision` for vision analysis).
+   */
+  pageImages?: Record<string, { base64: string; mimeType: string }>;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+}
+
+export interface PageAnalysisRecord {
+  id: string;
+  sessionId: string;
+  pageNumber: number;
+  version: number;
+  parentVersionId?: string | null;
+  analysis: Record<string, unknown>;
+  refinementRequest?: string | null;
+  modelUsed: string;
+  providerUsed: string;
+  tokenCostUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  rawText?: string | null;
+  createdAt: string;
+  /** Set when the user edits the record directly via PATCH /analyses/:id. */
+  humanEdited?: boolean;
+  /** Last mutation time — only present when the record has been updated. */
+  updatedAt?: string;
+}
+
+export interface ShwashaSettings {
+  mindBlock: string;
+  agentIntegrations: string;
+  defaultLanguage: 'en' | 'ar';
+  ollamaEnabled?: boolean;
+  ollamaBaseUrl?: string;
+}
+
+// Working schedule for the PhD — shared across all research agents.
+// Manager updates this via [PHD_SCHEDULE] action tags; everyone else reads it.
+export interface PhDSchedule {
+  workStart: string;          // e.g. '09:00'
+  workEnd: string;            // e.g. '17:00'
+  breakStart: string;         // e.g. '13:00'
+  breakDurationMinutes: number; // e.g. 60
+  timezone: string;           // IANA tz, e.g. 'Europe/London'
+  workingDays: Array<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'>;
+  /** Free-form override that takes precedence today only — e.g. "Today: in Kuwait, working 14:00-22:00 Asia/Kuwait" */
+  todayOverride?: string | null;
+  /** Date the override was set (YYYY-MM-DD) — auto-cleared when day changes */
+  todayOverrideDate?: string | null;
+  updatedAt: string;
+}
+
+export type CompanionMemoryCategory = 'insight' | 'idea' | 'decision' | 'concern' | 'goal' | 'progress' | 'note';
+
+export interface CompanionMemoryEntry {
+  id: string;
+  category: CompanionMemoryCategory;
+  content: string;
+  date: string; // ISO date string
+  conversationId?: string;
+  tags?: string[];
+  createdAt: string;
+  agentId?: string;
+  importance?: number;
+}
+
+export interface MeetingSessionRecord {
+  id: string;
+  title: string;
+  draft?: string;
+  language?: string;
+  record?: Record<string, unknown> | null;
+  savedToObsidian?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface StoreData {
   providers: ProviderRecord[];
   conversations: ConvRecord[];
@@ -450,6 +684,9 @@ export interface StoreData {
   customAgents: CustomAgentRecord[];
   memories: MemoryRecord[];
   papers: PaperRecord[];
+  /** R18 — unified sources hub. Reading material from any origin
+   *  (Zotero sync, uploaded PDF/doc, book metadata, user's writing). */
+  sources?: SourceRecord[];
   notes: NoteRecord[];
   workflows: WorkflowRecord[];
   workflowRuns?: WorkflowRunRecord[];
@@ -459,7 +696,13 @@ export interface StoreData {
   activityLog: ActivityRecord[];
   schedules: ScheduleRecord[];
   tasks: TaskItem[];
+  /** Legacy flat categories (pre-R17). Kept for migration compat;
+   *  new code should read/write `taskListsByWorkspace` instead. */
   taskLists: string[];
+  /** R17 — per-workspace task categories. Keys are workspace ids
+   *  (`'phd'`, `'life'`, or custom). Each workspace sees only its
+   *  own lists in the tasks UI. */
+  taskListsByWorkspace?: Record<string, string[]>;
   keepNotes?: KeepNote[];
   taskPrefs?: {
     defaultView?: 'list' | 'grid';
@@ -489,7 +732,10 @@ export interface StoreData {
   watcherAlerts?: WatcherAlert[];
   // ---- Additional optional fields used by routes/services (progressively typed) ----
   projects?: ProjectRecord[];
-  readingSessions?: ReadingSession[];
+  /** R9-R18 Shwasha paper-analysis sessions (ReadingSessionRecord). */
+  readingSessions?: ReadingSessionRecord[];
+  /** Reading note-taking sessions (simpler model for any source). */
+  readingNoteSessions?: ReadingSession[];
   pinnedConversations?: string[];
   promptOverrides?: Record<string, string>;
   permissionOverrides?: Record<string, AgentPermissions>;
@@ -498,17 +744,45 @@ export interface StoreData {
   apiKeys?: Record<string, string>;
   costTier?: 'zero-cost' | 'saving' | 'medium' | 'max' | string;
   voicePreferences?: { elevenlabsVoiceId?: string; [k: string]: unknown };
+  pageAnalyses?: PageAnalysisRecord[];
+  agentNameOverrides?: Record<string, { en: string; ar: string } | string>;
+  shwashaSettings?: ShwashaSettings;
+  // Free-form, long-form description of the user's writing voice — style,
+  // tone, common phrases, even spelling/grammar quirks. Injected into all
+  // writing agents so generated text mimics the user's actual register.
+  userVoiceProfile?: { content: string; updatedAt: string };
+  responseLength?: 'short' | 'medium' | 'long';
+  phdSchedule?: PhDSchedule;
+  companionMemory?: CompanionMemoryEntry[];
+  meetingSessions?: MeetingSessionRecord[];
+  // R8 — Scheduled reports (daily digests, weekly PhD summaries, ad-hoc).
+  reports?: ReportDefinition[];
+  reportRuns?: ReportRunRecord[];
+  /** R16 — in-platform inbox for reports + onboarding messages.
+   *  Always written on successful compose (even when Resend isn't
+   *  configured, so Abdullah still has a way to read the output).
+   *  Abdullah's request: "اجعل صفحة للايميلات كأنني مستلمها بالمنصة". */
+  reportInbox?: ReportInboxItem[];
+  resend?: {
+    apiKey?: string;
+    fromEmail?: string;      // e.g. "Ruhool <reports@mydomain.com>"
+    defaultRecipient?: string;
+    /** R14 — optional override for send retry backoff (milliseconds
+     *  per attempt). Default: [30000, 60000, 120000] = 3.5min ceiling.
+     *  Set to small values in CI, longer for aggressive recovery. */
+    retryDelays?: number[];
+    /** R14-#6 — same idea but for the LLM compose path. Default
+     *  [5000, 10000] = ~15s ceiling; CI overrides to `[10, 10]`. */
+    composeRetryDelays?: number[];
+  };
   __apiPort?: number;
   // ---- Dispatch + workspace ----
   limits?: { hierarchicalDispatchUsd?: number; dispatchMaxFanout?: number };
   activeWorkspaceId?: string;
   // ---- Subscriptions + overrides ----
-  subscriptions?: Array<{ id: string; name: string; linkedApiField?: string; cost?: number; [k: string]: unknown }>;
-  agentNameOverrides?: Record<string, { en: string; ar: string } | string>;
+  subscriptions?: unknown[];
   // ---- Time + timezone ----
   timezones?: { primary: string; secondary?: string };
-  phdSchedule?: { semester?: string; supervisorMeetings?: Array<{ date: string; notes?: string }>; deadlines?: Array<{ date: string; label: string }> };
-  companionMemory?: CompanionMemoryEntry[];
 }
 
 export interface ProjectFile {
@@ -535,11 +809,122 @@ export interface ProjectRecord {
   updatedAt: string;
 }
 
-export interface CompanionMemoryEntry {
+// ─── R8: Reports ──────────────────────────────────────────────────
+export type ReportSchedule =
+  | { type: 'daily';   hour: number; minute: number; timezone: string }
+  | { type: 'weekly';  dayOfWeek: number; hour: number; minute: number; timezone: string }  // 0=Sun..6=Sat
+  | { type: 'monthly'; dayOfMonth: number; hour: number; minute: number; timezone: string }
+  | { type: 'once';    at: string }  // ISO datetime, fires once
+  | { type: 'manual' };              // no auto-fire, user sends on demand
+
+export interface ReportDefinition {
   id: string;
-  content: string;
-  tags?: string[];
+  name: string;
+  prompt: string;            // Instructions the signing agent uses to write the report
+  signedBy: string;          // agentId (e.g. 'architect', 'doctor', 'manager')
+  schedule: ReportSchedule;
+  recipients: string[];      // email addresses
+  /** R15-#16 — output language. Default Arabic; set to 'en' for
+   *  supervisor/partner reports. Also controls the HTML shell `dir`
+   *  attribute and greeting. */
+  language?: 'ar' | 'en';
+  /** R15-#18 — access control. `owner` (default) = only the account
+   *  owner can see/edit. `shared` = listed emails in `sharedWith`
+   *  can read (and only read; edit stays with owner). Ruhool is
+   *  local-first and has no login layer yet, so this is structurally
+   *  in place for when auth gets wired — today it's advisory. */
+  visibility?: 'owner' | 'shared';
+  sharedWith?: string[];
+  /** R15-#25 — display order in the settings list. Lower = higher
+   *  up. When missing, we sort by createdAt so legacy reports still
+   *  have a deterministic position. */
+  order?: number;
+  enabled: boolean;
+  lastSentAt?: string | null;
+  lastError?: string | null;
+  lastRunId?: string | null;
+  nextRunAt?: string | null; // ISO — computed by scheduler, read-only for clients
+  includeContext?: {
+    tasks?: boolean;         // completed/open task stats
+    dispatches?: boolean;    // recent dispatch activity
+    changelog?: boolean;     // recent CHANGELOG diff
+    agentQuotes?: boolean;   // quotes from agents today
+    zotero?: boolean;        // R12b: new papers this week
+    vault?: boolean;         // R12b: Obsidian notes activity
+    meetings?: boolean;      // R12b: meetings + phdSchedule
+    budget?: boolean;        // R12b: LLM spend vs monthly cap
+  };
+  /**
+   * Optional multi-agent composition. When present, each section is
+   * written by its own signer — the top-level `signedBy` then acts as
+   * the EDITOR: they receive the raw sections and produce a final
+   * bundled report. When absent, `signedBy` + `prompt` produce the
+   * whole report directly (the original single-agent flow).
+   */
+  sections?: Array<{
+    signedBy: string;
+    title: string;            // e.g. "ملاحظات الراعي"
+    prompt: string;
+  }>;
+  /**
+   * User feedback accumulated over time — what to avoid, what to add,
+   * tone preferences, etc. Injected into the compose context every
+   * time the report runs so the agent applies corrections.
+   */
+  feedback?: Array<ReportFeedbackEntry>;
   createdAt: string;
-  agentId?: string;
-  importance?: number;
+  updatedAt: string;
+}
+
+export interface ReportFeedbackEntry {
+  id: string;
+  text: string;
+  source: 'chat' | 'settings' | 'auto';  // where it was recorded
+  addedBy?: string;                       // 'user' or agentId
+  createdAt: string;
+  active: boolean;                        // soft-disable instead of delete
+}
+
+/** R16 — in-platform inbox entry. Mirror of a sent (or would-be-sent)
+ *  report, stored so it's readable inside Ruhool without needing a real
+ *  email provider. */
+export interface ReportInboxItem {
+  id: string;
+  /** Source report, or null for ad-hoc messages (onboarding welcome, etc.) */
+  reportId: string | null;
+  /** Associated run record (when the item came from a scheduled send). */
+  runId?: string | null;
+  subject: string;
+  html: string;
+  bodyMarkdown?: string;
+  /** agentId of the sender (e.g. 'manager', 'architect') or 'system'. */
+  from: string;
+  sentAt: string;
+  read: boolean;
+  starred?: boolean;
+  /** Optional free-form tags for filtering ('onboarding', 'daily', ...). */
+  tags?: string[];
+}
+
+export interface ReportRunRecord {
+  id: string;
+  reportId: string;
+  triggeredBy: 'schedule' | 'manual' | 'chat';
+  status: 'pending' | 'composing' | 'sending' | 'sent' | 'failed';
+  error?: string | null;
+  subject?: string;
+  /** First ~800 chars of the rendered markdown body. Used by
+   *  compose memory (avoid repetition) + preview. */
+  bodySnippet?: string;
+  /** R15-#17 — full HTML body of the sent email, retained so a
+   *  run can be re-mailed without re-running the LLM. Present
+   *  only for `status === 'sent'` runs. */
+  html?: string;
+  htmlBytes?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  costUsd?: number;
+  startedAt: string;
+  finishedAt?: string | null;
+  recipients: string[];
 }

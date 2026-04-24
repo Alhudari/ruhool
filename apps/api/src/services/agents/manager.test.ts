@@ -54,8 +54,8 @@ describe('parseToolUseDelegations', () => {
 });
 
 describe('parseTextMarkerDelegations (legacy)', () => {
-  it('extracts from "أحلتها لعبدان"', () => {
-    const result = parseTextMarkerDelegations('تم. أحلتها لعبدان ✓');
+  it('extracts from "أحلتها لالباحث"', () => {
+    const result = parseTextMarkerDelegations('تم. أحلتها لالباحث ✓');
     expect(result.length).toBeGreaterThan(0);
     expect(result[0].specialist).toBe('research');
     expect(result[0].source).toBe('text_marker');

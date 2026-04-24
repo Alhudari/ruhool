@@ -19,7 +19,7 @@
  */
 import type { Hono } from 'hono';
 import crypto from 'node:crypto';
-import type { StoreData, NoteRecord, ReadingSession, ReadingSessionPage } from '../store/types.js';
+import type { StoreData, NoteRecord, ReadingSession } from '../store/types.js';
 
 export interface ReadingRoutesDeps {
   getStore: () => StoreData;
@@ -30,7 +30,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   const { getStore, saveStore } = deps;
 
   function ensure(store: StoreData) {
-    if (!store.readingSessions) store.readingSessions = [];
+    if (!store.readingNoteSessions) store.readingNoteSessions = [];
     if (!store.notes) store.notes = [];
   }
 
@@ -38,7 +38,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   app.get('/api/reading/sessions', (c) => {
     const store = getStore();
     ensure(store);
-    const sessions = (store.readingSessions || [])
+    const sessions = (store.readingNoteSessions || [])
       .filter(s => !s.archived)
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
     return c.json(sessions);
@@ -48,7 +48,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   app.get('/api/reading/sessions/:id', (c) => {
     const store = getStore();
     ensure(store);
-    const s = store.readingSessions!.find(x => x.id === c.req.param('id'));
+    const s = store.readingNoteSessions!.find(x => x.id === c.req.param('id'));
     if (!s) return c.json({ error: 'not found' }, 404);
 
     // Attach notes to their pages
@@ -68,7 +68,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   app.post('/api/reading/sessions', async (c) => {
     const store = getStore();
     ensure(store);
-    const body = await c.req.json<Partial<ReadingSession> & { title: string }>().catch(() => ({ title: '' }));
+    const body = await c.req.json<Partial<ReadingSession> & { title: string }>().catch(() => ({ title: '' }) as Partial<ReadingSession> & { title: string });
     if (!body.title?.trim()) return c.json({ error: 'title required' }, 400);
 
     const session: ReadingSession = {
@@ -83,7 +83,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
       updatedAt: new Date().toISOString(),
     };
 
-    store.readingSessions!.push(session);
+    store.readingNoteSessions!.push(session);
     saveStore();
     return c.json(session, 201);
   });
@@ -92,7 +92,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   app.put('/api/reading/sessions/:id', async (c) => {
     const store = getStore();
     ensure(store);
-    const s = store.readingSessions!.find(x => x.id === c.req.param('id'));
+    const s = store.readingNoteSessions!.find(x => x.id === c.req.param('id'));
     if (!s) return c.json({ error: 'not found' }, 404);
     const body = await c.req.json<Partial<ReadingSession>>().catch(() => ({}));
     Object.assign(s, body, { id: s.id, createdAt: s.createdAt, updatedAt: new Date().toISOString() });
@@ -104,7 +104,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   app.delete('/api/reading/sessions/:id', (c) => {
     const store = getStore();
     ensure(store);
-    const s = store.readingSessions!.find(x => x.id === c.req.param('id'));
+    const s = store.readingNoteSessions!.find(x => x.id === c.req.param('id'));
     if (!s) return c.json({ error: 'not found' }, 404);
     s.archived = true; s.updatedAt = new Date().toISOString();
     saveStore();
@@ -115,7 +115,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   app.post('/api/reading/sessions/:id/notes', async (c) => {
     const store = getStore();
     ensure(store);
-    const s = store.readingSessions!.find(x => x.id === c.req.param('id'));
+    const s = store.readingNoteSessions!.find(x => x.id === c.req.param('id'));
     if (!s) return c.json({ error: 'session not found' }, 404);
 
     const body = await c.req.json<{
@@ -213,7 +213,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   app.put('/api/reading/sessions/:id/adopt-range', async (c) => {
     const store = getStore();
     ensure(store);
-    const body = await c.req.json<{ pageRange?: string }>().catch(() => ({}));
+    const body = await c.req.json<{ pageRange?: string }>().catch(() => ({}) as { pageRange?: string });
     const sid = c.req.param('id');
 
     const drafts = (store.notes || []).filter(
@@ -240,7 +240,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
     );
     if (!note) return c.json({ error: 'not found' }, 404);
 
-    const body = await c.req.json<{ content?: string; type?: NoteRecord['type']; themes?: string[]; source?: NoteRecord['source'] }>().catch(() => ({}));
+    const body = await c.req.json<{ content?: string; type?: NoteRecord['type']; themes?: string[]; source?: NoteRecord['source'] }>().catch(() => ({}) as { content?: string; type?: NoteRecord['type']; themes?: string[]; source?: NoteRecord['source'] });
 
     // Editing is always allowed — user explicitly chose to edit
     if (body.content !== undefined) note.content = body.content;
@@ -272,7 +272,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   app.get('/api/reading/sessions/:id/progress', (c) => {
     const store = getStore();
     ensure(store);
-    const s = store.readingSessions!.find(x => x.id === c.req.param('id'));
+    const s = store.readingNoteSessions!.find(x => x.id === c.req.param('id'));
     if (!s) return c.json({ error: 'not found' }, 404);
 
     const notesByPage = new Map<string, { count: number; adopted: number; draft: number; manual: number }>();

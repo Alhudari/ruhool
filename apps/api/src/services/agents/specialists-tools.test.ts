@@ -96,7 +96,7 @@ describe('specialists dispatcher — generation tools (Phase 5)', () => {
       estimateCost: () => 0,
     };
     const res = await dispatch({
-      specialist: 'عبدان',
+      specialist: 'الباحث',
       task: 'ابحث',
       deps: { provider, model: 'claude-sonnet-4-5' },
     });

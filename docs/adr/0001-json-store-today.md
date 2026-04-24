@@ -1,7 +1,7 @@
 # ADR 0001 — Dual-mode store: JSON today, Postgres where it matters
 
 **Date:** 2026-04-15
-**Status:** Accepted
+**Status:** Active — dual-mode is permanent by design (local-first promise)
 **Supersedes:** —
 **Superseded by:** —
 

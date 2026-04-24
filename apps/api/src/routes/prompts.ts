@@ -1,6 +1,7 @@
 import type { Hono } from 'hono';
 import type { StoreData } from '../store/types.js';
 import type { PromptVersion } from '../phase2.js';
+import { BUILTIN_AGENTS } from '../state/builtin-agents.js';
 
 export interface PromptRoutesDeps {
   getStore: () => StoreData;
@@ -19,16 +20,24 @@ export interface PromptRoutesDeps {
 export function registerPromptRoutes(app: Hono, deps: PromptRoutesDeps): void {
   const { getStore, saveStore, builtinSystemPrompts, builtInLibrary } = deps;
 
-  // ─── Prompts library (built-in agents + custom agents) ───
-  if (builtInLibrary) {
-    app.get('/api/prompts', (c) => {
-      const store = getStore();
-      const custom = store.customAgents.map((a) => ({
-        id: a.id, name: a.name, type: 'custom', prompt: a.systemPrompt,
-      }));
-      return c.json([...builtInLibrary, ...custom]);
-    });
-  }
+  // ─── Prompts library: every built-in agent (auto-derived from BUILTIN_AGENTS
+  // + the runtime BUILTIN_SYSTEM_PROMPTS map) plus all custom agents. The
+  // hard-coded `builtInLibrary` is preserved as a fallback for any agent that
+  // doesn't have a runtime prompt entry.
+  app.get('/api/prompts', (c) => {
+    const store = getStore();
+    const fallback = new Map(builtInLibrary?.map((p) => [p.id, p]) ?? []);
+    const builtIn = BUILTIN_AGENTS.map((a) => ({
+      id: a.id,
+      name: a.name,
+      type: 'built-in' as const,
+      prompt: builtinSystemPrompts[a.id] ?? fallback.get(a.id)?.prompt ?? '',
+    }));
+    const custom = store.customAgents.map((a) => ({
+      id: a.id, name: a.name, type: 'custom' as const, prompt: a.systemPrompt,
+    }));
+    return c.json([...builtIn, ...custom]);
+  });
 
   app.get('/api/prompts/versions/:agentId', (c) => {
     const store = getStore();

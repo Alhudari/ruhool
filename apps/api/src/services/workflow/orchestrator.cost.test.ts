@@ -33,7 +33,7 @@ describe('workflow cost rollup', () => {
 
     const stepIds = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
     const steps: WorkflowStepRecord[] = stepIds.map((id, i) => ({
-      id, runId, stepIndex: i, specialist: 'عبدان', task: `t${i}`,
+      id, runId, stepIndex: i, specialist: 'الباحث', task: `t${i}`,
       status: 'pending', timeoutMs: 5000, maxAttempts: 3, attemptCount: 0,
       createdAt: now, updatedAt: now,
     }));
@@ -85,7 +85,7 @@ describe('workflow cost rollup', () => {
       totalCostUsd: 0, createdAt: now, updatedAt: now,
     }];
     store.workflowSteps = [{
-      id: stepId, runId, stepIndex: 0, specialist: 'عبدان', task: 't',
+      id: stepId, runId, stepIndex: 0, specialist: 'الباحث', task: 't',
       status: 'pending', timeoutMs: 5000, maxAttempts: 3, attemptCount: 0,
       createdAt: now, updatedAt: now,
     }];

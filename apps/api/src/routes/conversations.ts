@@ -52,7 +52,10 @@ export function registerConversationRoutes(app: Hono, deps: ConversationRoutesDe
     const store = getStore();
     const conv = store.conversations.find((cv) => cv.id === c.req.param('id'));
     if (!conv) return c.json({ error: 'Conversation not found' }, 404);
-    return c.json(conv.participants || ['manager']);
+    // Return the stored list as-is. Do NOT auto-prepend 'manager' —
+    // that caused الراعي to appear in every conversation even when the
+    // user explicitly wanted a solo specialist chat.
+    return c.json(conv.participants ?? []);
   });
 
   app.post('/api/conversations/:id/participants', async (c) => {
@@ -60,7 +63,7 @@ export function registerConversationRoutes(app: Hono, deps: ConversationRoutesDe
     const conv = store.conversations.find((cv) => cv.id === c.req.param('id'));
     if (!conv) return c.json({ error: 'Conversation not found' }, 404);
     const body = await c.req.json<{ agentId: string }>();
-    if (!conv.participants) conv.participants = ['manager'];
+    if (!conv.participants) conv.participants = [];
     if (!conv.participants.includes(body.agentId)) {
       conv.participants.push(body.agentId);
       conv.updatedAt = new Date().toISOString();
@@ -74,9 +77,10 @@ export function registerConversationRoutes(app: Hono, deps: ConversationRoutesDe
     const conv = store.conversations.find((cv) => cv.id === c.req.param('id'));
     if (!conv) return c.json({ error: 'Conversation not found' }, 404);
     const agentId = c.req.param('agentId');
-    if (!conv.participants) conv.participants = ['manager'];
+    if (!conv.participants) conv.participants = [];
     conv.participants = conv.participants.filter((p) => p !== agentId);
-    if (conv.participants.length === 0) conv.participants = ['manager'];
+    // No auto-refill with 'manager' — allow empty participant list so
+    // the user can truly clear a conversation's roster.
     conv.updatedAt = new Date().toISOString();
     saveStore();
     return c.json(conv.participants);

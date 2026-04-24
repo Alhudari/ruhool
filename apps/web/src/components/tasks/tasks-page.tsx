@@ -10,6 +10,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
+import { HabitStatsRing } from './HabitStatsRing';
 
 interface ChecklistItem {
   id: string;
@@ -26,6 +27,9 @@ interface TaskItem {
   priority: 'high' | 'medium' | 'low' | 'none';
   dueDate: string | null;
   dueTime: string | null;
+  startTime?: string | null;
+  endTime?: string | null;
+  allDay?: boolean;
   list: string;
   tags: string[];
   color: string;
@@ -36,6 +40,20 @@ interface TaskItem {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  /** Round 4: workspace this task belongs to ('phd' | 'life' | …). Legacy
+   *  rows default to 'phd' via migration 003. */
+  workspaceId?: string;
+  /** Round 6: habit / today / cross-workspace flags. */
+  isHabit?: boolean;
+  habitFrequency?: 'daily' | 'skip-weekends' | 'weekly' | 'custom';
+  habitDays?: number[];
+  habitTemplateId?: string;
+  durationMinutes?: number;
+  habitStartDate?: string | null;
+  habitEndDate?: string | null;
+  scheduledFor?: string | null;
+  isToday?: boolean;
+  crossWorkspace?: boolean;
 }
 
 const PRIORITY_CONFIG: Record<string, { label: { en: string; ar: string }; color: string; dot: string }> = {
@@ -115,6 +133,21 @@ export function TasksPage() {
   const [activeList, setActiveList] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showCompleted, setShowCompleted] = useState(false);
+  // Round 4: workspace filter. 'all' = unscoped; otherwise show only
+  // tasks tagged with that workspace. Persists to localStorage.
+  const [workspaceFilter, setWorkspaceFilter] = useState<'all' | 'phd' | 'life'>('all');
+  // Round 6: top-level view filter — 'all' is flat task list, 'today'
+  // is today's focus, 'habits' is habit templates only.
+  const [todayView, setTodayView] = useState<'all' | 'today' | 'habits'>('all');
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem('ruhool.tasks.workspace-filter');
+      if (v === 'all' || v === 'phd' || v === 'life') setWorkspaceFilter(v);
+    } catch { /* noop */ }
+  }, []);
+  useEffect(() => {
+    try { window.localStorage.setItem('ruhool.tasks.workspace-filter', workspaceFilter); } catch { /* noop */ }
+  }, [workspaceFilter]);
   const [editingTask, setEditingTask] = useState<TaskItem | null>(null);
   const [quickAddText, setQuickAddText] = useState('');
   const [newListName, setNewListName] = useState('');
@@ -123,9 +156,20 @@ export function TasksPage() {
 
   const load = useCallback(async () => {
     try {
+      // R17 — fetch categories for the ACTIVE workspace. When filter is
+      // 'all', union both phd + life categories so the user can still
+      // pick any category when creating a cross-workspace task.
+      const listsEndpoint = workspaceFilter === 'all'
+        ? null
+        : `/api/tasks/lists?workspaceId=${workspaceFilter}`;
       const [t, l] = await Promise.all([
         apiFetch<TaskItem[]>('/api/tasks'),
-        apiFetch<string[]>('/api/tasks/lists'),
+        listsEndpoint
+          ? apiFetch<string[]>(listsEndpoint)
+          : Promise.all([
+              apiFetch<string[]>('/api/tasks/lists?workspaceId=phd').catch(() => []),
+              apiFetch<string[]>('/api/tasks/lists?workspaceId=life').catch(() => []),
+            ]).then(([a, b]) => Array.from(new Set([...a, ...b]))),
       ]);
       // Respect persisted order if present
       t.sort((a, b) => {
@@ -137,7 +181,7 @@ export function TasksPage() {
       setTasks(t);
       setLists(l);
     } catch {} finally { setLoading(false); }
-  }, []);
+  }, [workspaceFilter]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -151,10 +195,74 @@ export function TasksPage() {
       .catch(() => { /* ignore */ });
   }, []);
 
+  // ── Google Tasks fast-sync: 30s poll when tab is visible, plus
+  //    immediate pull on tab focus / visibility return. When the tab
+  //    is hidden we back off — the backend scheduler picks up the
+  //    slack every 5 min.
+  useEffect(() => {
+    let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const tick = async () => {
+      if (cancelled || document.hidden) return;
+      try {
+        const r = await apiFetch<{ ok?: boolean; skipped?: boolean }>(
+          '/api/google-tasks/sync/tick',
+          { method: 'POST' },
+        );
+        if (r?.ok && !cancelled) await load();
+      } catch { /* silent — sync errors surface on the settings page */ }
+    };
+
+    const startLoop = () => {
+      if (intervalId) return;
+      void tick();  // immediate pull on (re)gain focus
+      intervalId = setInterval(tick, 30_000);
+    };
+    const stopLoop = () => {
+      if (intervalId) { clearInterval(intervalId); intervalId = null; }
+    };
+
+    const onVisibility = () => {
+      if (document.hidden) stopLoop();
+      else startLoop();
+    };
+    const onFocus = () => { if (!document.hidden) void tick(); };
+
+    if (!document.hidden) startLoop();
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      stopLoop();
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [load]);
+
   // Filter tasks
+  const todayIso = new Date().toISOString().slice(0, 10);
+
   const filtered = tasks.filter(t => {
+    // Round 6 view: Habits = templates only; Today = today's focus.
+    if (todayView === 'habits') {
+      if (!t.isHabit) return false;
+    } else if (todayView === 'today') {
+      if (t.isHabit) return false;
+      const inToday = t.isToday || t.scheduledFor === todayIso || t.dueDate === todayIso;
+      if (!inToday) return false;
+    } else {
+      // 'all' — hide habit templates (they're in Habits tab) and
+      // habit-instance clutter unless they're scheduled today.
+      if (t.isHabit) return false;
+    }
     if (activeList && t.list !== activeList) return false;
     if (!showCompleted && t.completed) return false;
+    if (workspaceFilter !== 'all') {
+      const wsId = t.workspaceId ?? 'phd';
+      // Cross-workspace tasks show in every filter.
+      if (!t.crossWorkspace && wsId !== workspaceFilter) return false;
+    }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       return t.title.toLowerCase().includes(q) || t.notes.toLowerCase().includes(q) || t.tags.some(tag => tag.includes(q));
@@ -248,6 +356,7 @@ export function TasksPage() {
           dueTime,
           priority,
           list: activeList || '\u0639\u0627\u0645',
+          workspaceId: workspaceFilter !== 'all' ? workspaceFilter : ((typeof window !== 'undefined' && window.localStorage.getItem('ruhool.active-workspace')) || 'phd'),
         }),
       });
       setTasks(prev => [created, ...prev]);
@@ -257,10 +366,17 @@ export function TasksPage() {
 
   const createList = async () => {
     if (!newListName.trim()) return;
+    // R17 — new category belongs to the currently-active workspace.
+    // When the filter is 'all', use the user's active workspace from
+    // localStorage (defaults to 'phd') — we can't create a "universal"
+    // category since it conflates phd + life.
+    const activeWs = workspaceFilter !== 'all'
+      ? workspaceFilter
+      : ((typeof window !== 'undefined' && window.localStorage.getItem('ruhool.active-workspace')) || 'phd');
     try {
       const result = await apiFetch<{ lists: string[] }>('/api/tasks/lists', {
         method: 'POST',
-        body: JSON.stringify({ name: newListName.trim() }),
+        body: JSON.stringify({ name: newListName.trim(), workspaceId: activeWs }),
       });
       setLists(result.lists);
       setNewListName('');
@@ -333,8 +449,13 @@ export function TasksPage() {
   };
 
   const deleteList = async (name: string) => {
+    // R17 — pass the active workspace so the server deletes the
+    // category from the right bucket (phd/life/...).
+    const activeWs = workspaceFilter !== 'all'
+      ? workspaceFilter
+      : ((typeof window !== 'undefined' && window.localStorage.getItem('ruhool.active-workspace')) || 'phd');
     try {
-      const result = await apiFetch<{ lists: string[] }>(`/api/tasks/lists/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      const result = await apiFetch<{ lists: string[] }>(`/api/tasks/lists/${encodeURIComponent(name)}?workspaceId=${activeWs}`, { method: 'DELETE' });
       setLists(result.lists);
       if (activeList === name) setActiveList(null);
       await load();
@@ -564,6 +685,56 @@ export function TasksPage() {
           className="w-full bg-input border border-border rounded-lg ps-9 pe-3 py-2 text-sm text-on-surface placeholder:text-on-surface-tertiary focus:outline-none focus:ring-2 focus:ring-ring"
           dir={isRTL ? 'rtl' : 'ltr'}
         />
+      </div>
+
+      {/* Today filter — Round 6 */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-[11px] text-on-surface-tertiary shrink-0">
+          {isRTL ? 'العرض:' : 'View:'}
+        </span>
+        {([
+          { id: 'all' as const, labelAr: 'الكل', labelEn: 'All' },
+          { id: 'today' as const, labelAr: 'اليوم', labelEn: 'Today' },
+          { id: 'habits' as const, labelAr: 'العادات', labelEn: 'Habits' },
+        ]).map((v) => (
+          <button
+            key={v.id}
+            onClick={() => setTodayView(v.id)}
+            className={cn(
+              'px-2.5 py-1 rounded-full text-xs whitespace-nowrap transition-colors border',
+              todayView === v.id
+                ? 'bg-accent/10 text-accent border-accent/30'
+                : 'bg-surface border-border text-on-surface-tertiary hover:bg-surface-secondary',
+            )}
+          >
+            {isRTL ? v.labelAr : v.labelEn}
+          </button>
+        ))}
+      </div>
+
+      {/* Workspace filter — Round 4 */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-[11px] text-on-surface-tertiary shrink-0">
+          {isRTL ? 'الغرفة:' : 'Workspace:'}
+        </span>
+        {([
+          { id: 'all' as const, labelAr: 'الكل', labelEn: 'All' },
+          { id: 'phd' as const, labelAr: 'الدكتوراه', labelEn: 'PhD' },
+          { id: 'life' as const, labelAr: 'الحياة', labelEn: 'Life' },
+        ]).map((ws) => (
+          <button
+            key={ws.id}
+            onClick={() => setWorkspaceFilter(ws.id)}
+            className={cn(
+              'px-2.5 py-1 rounded-full text-xs whitespace-nowrap transition-colors border',
+              workspaceFilter === ws.id
+                ? 'bg-accent/10 text-accent border-accent/30'
+                : 'bg-surface border-border text-on-surface-tertiary hover:bg-surface-secondary',
+            )}
+          >
+            {isRTL ? ws.labelAr : ws.labelEn}
+          </button>
+        ))}
       </div>
 
       {/* List tabs */}
@@ -954,8 +1125,8 @@ function TaskEditor({
             </div>
           </div>
 
-          {/* Due date & time */}
-          <div className="flex items-center gap-3">
+          {/* Due date + time window (R19) */}
+          <div className="space-y-2">
             <div className="flex-1">
               <label className="text-xs text-on-surface-secondary mb-1 block">{isRTL ? '\u0627\u0644\u062a\u0627\u0631\u064a\u062e' : 'Due date'}</label>
               <input
@@ -974,6 +1145,7 @@ function TaskEditor({
                 className="w-full bg-input border border-border rounded-lg px-3 py-1.5 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
+            <AllDayAndWindow form={form} update={update} isRTL={isRTL} />
           </div>
 
           {/* Priority */}
@@ -1013,6 +1185,9 @@ function TaskEditor({
               ))}
             </div>
           </div>
+
+          {/* Habit / Today / Cross-workspace — Round 6 */}
+          <HabitSection form={form} update={update} isRTL={isRTL} />
 
           {/* Tags */}
           <div>
@@ -1091,6 +1266,231 @@ function TaskEditor({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Round 6 — Habit editor section ────────────────────────────────
+function HabitSection({
+  form, update, isRTL,
+}: {
+  form: TaskItem;
+  update: (fields: Partial<TaskItem>) => void;
+  isRTL: boolean;
+}) {
+  const dayNames = isRTL
+    ? ['أحد', 'إثن', 'ثلا', 'أرب', 'خمس', 'جمع', 'سبت']
+    : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const freq = form.habitFrequency ?? 'daily';
+  const days = form.habitDays ?? [];
+
+  const toggleDay = (d: number) => {
+    const next = days.includes(d) ? days.filter((x) => x !== d) : [...days, d].sort();
+    update({ habitDays: next });
+  };
+
+  return (
+    <div className="space-y-3">
+      <label className="flex items-center gap-2 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          role="switch"
+          aria-checked={!!form.isHabit}
+          checked={!!form.isHabit}
+          onChange={(e) => update({ isHabit: e.target.checked })}
+          className="accent-accent h-4 w-4"
+        />
+        <span className="text-sm text-on-surface font-medium">
+          {isRTL ? 'عادة متكررة' : 'Recurring habit'}
+        </span>
+      </label>
+
+      {form.isHabit && (
+        <div className="rounded-[var(--radius-lg)] border border-accent/20 bg-accent/5 p-3 space-y-3">
+          <div>
+            <label className="text-[11px] text-on-surface-tertiary uppercase tracking-wider mb-1 block">
+              {isRTL ? 'التكرار' : 'Frequency'}
+            </label>
+            <div className="flex gap-1 flex-wrap">
+              {([
+                { id: 'daily' as const, labelAr: 'يومياً', labelEn: 'Daily' },
+                { id: 'skip-weekends' as const, labelAr: 'بدون عطلة', labelEn: 'Skip weekends' },
+                { id: 'weekly' as const, labelAr: 'أسبوعي', labelEn: 'Weekly' },
+                { id: 'custom' as const, labelAr: 'مخصّص', labelEn: 'Custom' },
+              ]).map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => update({ habitFrequency: f.id })}
+                  className={cn(
+                    'px-2.5 py-1 rounded-full text-xs border transition-colors',
+                    freq === f.id
+                      ? 'bg-accent text-on-accent border-accent'
+                      : 'bg-surface border-border text-on-surface-secondary hover:bg-surface-secondary',
+                  )}
+                >
+                  {isRTL ? f.labelAr : f.labelEn}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {(freq === 'weekly' || freq === 'custom') && (
+            <div>
+              <label className="text-[11px] text-on-surface-tertiary uppercase tracking-wider mb-1 block">
+                {isRTL ? 'أيام الأسبوع' : 'Days of week'}
+              </label>
+              <div className="flex gap-1 flex-wrap">
+                {dayNames.map((name, i) => (
+                  <button
+                    key={i}
+                    onClick={() => toggleDay(i)}
+                    className={cn(
+                      'w-9 h-9 rounded-full text-[10px] font-semibold transition-colors border',
+                      days.includes(i)
+                        ? 'bg-accent text-on-accent border-accent'
+                        : 'bg-surface border-border text-on-surface-secondary hover:bg-surface-secondary',
+                    )}
+                    aria-pressed={days.includes(i)}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="text-[11px] text-on-surface-tertiary uppercase tracking-wider mb-1 block">
+              {isRTL ? `المدة المستهدفة: ${form.durationMinutes ?? 0} دقيقة` : `Target duration: ${form.durationMinutes ?? 0} min`}
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={180}
+              step={5}
+              value={form.durationMinutes ?? 0}
+              onChange={(e) => update({ durationMinutes: Number(e.target.value) || undefined })}
+              className="w-full accent-accent"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[11px] text-on-surface-tertiary uppercase tracking-wider mb-1 block">
+                {isRTL ? 'يبدأ' : 'Starts'}
+              </label>
+              <input
+                type="date"
+                value={form.habitStartDate ?? ''}
+                onChange={(e) => update({ habitStartDate: e.target.value || null })}
+                className="w-full h-8 bg-surface border border-border rounded px-2 text-xs"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-on-surface-tertiary uppercase tracking-wider mb-1 block">
+                {isRTL ? 'ينتهي' : 'Ends'}
+              </label>
+              <input
+                type="date"
+                value={form.habitEndDate ?? ''}
+                onChange={(e) => update({ habitEndDate: e.target.value || null })}
+                className="w-full h-8 bg-surface border border-border rounded px-2 text-xs"
+              />
+            </div>
+          </div>
+
+          {form.id && (
+            <div className="pt-2 border-t border-accent/20">
+              <HabitStatsRing habitId={form.id} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Quick flags */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <label className="flex items-center gap-2 cursor-pointer select-none text-sm">
+          <input
+            type="checkbox"
+            role="switch"
+            aria-checked={!!form.isToday}
+            checked={!!form.isToday}
+            onChange={(e) => update({ isToday: e.target.checked })}
+            className="accent-accent h-4 w-4"
+          />
+          <span className="text-on-surface">{isRTL ? 'اليوم' : 'Today'}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer select-none text-sm">
+          <input
+            type="checkbox"
+            role="switch"
+            aria-checked={!!form.crossWorkspace}
+            checked={!!form.crossWorkspace}
+            onChange={(e) => update({ crossWorkspace: e.target.checked })}
+            className="accent-accent h-4 w-4"
+          />
+          <span className="text-on-surface">{isRTL ? 'عابرة للغرف' : 'Cross-workspace'}</span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+// ── R19 — All-day + start/end time window ─────────────────────────
+function AllDayAndWindow({
+  form, update, isRTL,
+}: {
+  form: TaskItem;
+  update: (fields: Partial<TaskItem>) => void;
+  isRTL: boolean;
+}) {
+  return (
+    <div className="col-span-2 w-full space-y-2 mt-1">
+      <label className="flex items-center gap-2 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          role="switch"
+          aria-checked={!!form.allDay}
+          checked={!!form.allDay}
+          onChange={(e) => update({
+            allDay: e.target.checked,
+            startTime: e.target.checked ? null : form.startTime,
+            endTime: e.target.checked ? null : form.endTime,
+            dueTime: e.target.checked ? null : form.dueTime,
+          })}
+          className="accent-accent h-4 w-4"
+        />
+        <span className="text-sm text-on-surface">{isRTL ? 'يوم كامل' : 'All day'}</span>
+      </label>
+      {!form.allDay && (
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <label className="text-xs text-on-surface-secondary mb-1 block">
+              {isRTL ? 'بداية' : 'Start'}
+            </label>
+            <input
+              type="time"
+              value={form.startTime || ''}
+              onChange={(e) => update({
+                startTime: e.target.value || null,
+                dueTime: e.target.value || form.dueTime,
+              })}
+              className="w-full bg-input border border-border rounded-lg px-3 py-1.5 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="text-xs text-on-surface-secondary mb-1 block">
+              {isRTL ? 'نهاية' : 'End'}
+            </label>
+            <input
+              type="time"
+              value={form.endTime || ''}
+              onChange={(e) => update({ endTime: e.target.value || null })}
+              className="w-full bg-input border border-border rounded-lg px-3 py-1.5 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

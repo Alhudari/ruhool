@@ -56,7 +56,7 @@ import { createNotificationService } from './services/notifications.js';
 import { generateSummary, splitIntoSections } from './services/chat/summary.js';
 import { createNotifyActions } from './services/chat/notify-actions.js';
 import {
-  AnthropicProvider, OpenAIProvider, GeminiProvider,
+  AnthropicProvider, OpenAIProvider, GeminiProvider, OllamaProvider,
   pickProviderForModel as _pickProviderForModel, type UnifiedProvider,
 } from './services/llm/index.js';
 import { BUILTIN_SYSTEM_PROMPTS } from './state/builtin-prompts.js';
@@ -73,7 +73,17 @@ import { CAPABILITY_CHECKERS } from './services/capability-checkers.js';
 import { buildSubscriptionSnapshot as buildAnalystSnapshot } from './routes/analyst.js';
 import { makeEnsureSubscriptionDefaults } from './routes/subscriptions.js';
 import { createSubscriptionsEngine } from './services/subscriptions-engine.js';
-import { startSubscriptionChecker, startScheduleChecker as startScheduleCheckerWorker, startWatcher as startWatcherWorker } from './workers/scheduler.js';
+import { startSubscriptionChecker, startScheduleChecker as startScheduleCheckerWorker, startWatcher as startWatcherWorker, startZoteroRefreshChecker as startZoteroRefreshCheckerWorker, startHabitSpawnerChecker as startHabitSpawnerCheckerWorker } from './workers/scheduler.js';
+import { startZoteroVaultSyncScheduler, seedSyncStatus, type SyncStats } from './workers/zotero-vault-sync.js';
+import { startGoogleTasksSyncScheduler } from './workers/google-tasks-sync.js';
+import { registerGoogleTasksTrigger } from './services/google-tasks-trigger.js';
+import { spawnHabitsForToday } from './services/habit-spawner.js';
+import { parseReportActions, executeReportActions, buildReportsContextBlock, shouldInjectReportActions, REPORT_ACTIONS_PROMPT } from './services/chat/report-actions.js';
+import { sendReport as _sendReport } from './services/reports/send.js';
+import { auditLog as auditLogFn } from './services/audit-log.js';
+import type { DispatcherLLM } from './services/dispatch/index.js';
+import { startAgentOrgWatcher, onAgentOrgChanged } from './state/agent-org-watcher.js';
+import { invalidateAgentOrgCache } from './routes/agents.js';
 import { startResearchWorker as startResearchBullMQWorker } from './workers/bullmq.js';
 import { createAudioService, FALLBACK_ELEVENLABS_VOICE } from './services/audio.js';
 import { createChatHelpers } from './services/chat-helpers.js';
@@ -113,10 +123,95 @@ function pickProviderForModel(model: string): UnifiedProvider | null {
   return _pickProviderForModel(model, { store, anthropicCache: _anthropicCache });
 }
 
+// ── Dispatcher LLM adapter ────────────────────────────────────────
+// Wraps the Anthropic provider (currently the only dispatch-capable
+// provider) into the narrow DispatcherLLM interface. The dispatcher is
+// LLM-agnostic; swapping providers later only requires another wrapper.
+function getDispatcherLLM(): DispatcherLLM | null {
+  const provider = registeredProvider;
+  if (!provider) return null;
+  const model = 'claude-sonnet-4-6';
+  return {
+    callSystemMessage: async (system, userMessage, opts) => {
+      let text = '';
+      let tokensIn = 0;
+      let tokensOut = 0;
+      try {
+        for await (const chunk of provider.chat({
+          model,
+          systemPrompt: system,
+          messages: [{ role: 'user', content: userMessage }],
+          maxTokens: opts?.maxTokens ?? 500,
+          temperature: opts?.temperature ?? 0.3,
+        })) {
+          if (chunk.type === 'text') text += chunk.content;
+          else if (chunk.type === 'usage') {
+            tokensIn = chunk.usage.inputTokens;
+            tokensOut = chunk.usage.outputTokens;
+          } else if (chunk.type === 'error') {
+            throw new Error(chunk.error);
+          }
+        }
+      } catch (err) {
+        throw err instanceof Error ? err : new Error(String(err));
+      }
+      const costUsd = provider.estimateCost(tokensIn, tokensOut, model);
+      return { text, tokensIn, tokensOut, costUsd };
+    },
+  };
+}
+
 const savedAnthropic = store.providers.find(p => p.type === 'anthropic' && p.enabled && p.apiKey);
 if (savedAnthropic?.apiKey) {
   registeredProvider = new AnthropicProvider(savedAnthropic.apiKey, savedAnthropic.baseUrl || undefined);
   bootLogger.info('  Restored Anthropic provider from saved data');
+}
+
+// Always ensure the Ollama provider row exists so the Settings toggle can
+// flip routing live without a restart. The provider is registered but may
+// start disabled; the actual ON/OFF for Shwasha's hybrid routing is
+// `store.shwashaSettings.ollamaEnabled`. URL changes still need a restart
+// because the OllamaProvider instance is constructed from the env-time URL.
+try {
+  const settingsEnabled = store.shwashaSettings?.ollamaEnabled ?? false;
+  const envEnabled = process.env.OLLAMA_ENABLED === 'true';
+  const ollamaEnabled = settingsEnabled || envEnabled;
+  const ollamaBaseUrl =
+    store.shwashaSettings?.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+
+  const existing = store.providers.find((p) => p.type === 'ollama');
+  if (!existing) {
+    const now = new Date().toISOString();
+    store.providers.push({
+      id: crypto.randomUUID(),
+      type: 'ollama',
+      displayName: 'Ollama (local)',
+      apiKey: null,
+      baseUrl: ollamaBaseUrl,
+      defaultModel: null,
+      enabled: ollamaEnabled,
+      status: 'unknown',
+      lastTestAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    saveStore();
+  } else if (existing.enabled !== ollamaEnabled || existing.baseUrl !== ollamaBaseUrl) {
+    existing.enabled = ollamaEnabled;
+    existing.baseUrl = ollamaBaseUrl;
+    existing.updatedAt = new Date().toISOString();
+    saveStore();
+  }
+
+  if (ollamaEnabled) {
+    const probe = new OllamaProvider(ollamaBaseUrl);
+    probe.testConnection().then((res) => {
+      if (res.ok) bootLogger.info({ models: res.models?.length ?? 0 }, '  Ollama provider registered (local)');
+      else bootLogger.warn({ err: res.error }, '  Ollama enabled but unreachable — local models will fail until connected');
+    }).catch((err) => bootLogger.warn({ err: err instanceof Error ? err.message : err }, '  Ollama probe failed'));
+  }
+} catch (err) {
+  bootLogger.warn({ err: err instanceof Error ? err.message : err }, '  Ollama registration failed (non-fatal)');
 }
 
 const notificationService = createNotificationService({
@@ -170,6 +265,10 @@ const RESEARCH_DIR = path.join(DATA_DIR, 'research');
 const TRASH_META = path.join(DATA_ROOT, '_trash.json');
 for (const d of [AUDIO_DIR, CAPTIONS_DIR, UPLOADS_DIR, VIDEOS_DIR, IMAGES_DIR]) fs.mkdirSync(d, { recursive: true });
 function ensureStudioAssetsDir() { if (!fs.existsSync(STUDIO_ASSETS_DIR)) fs.mkdirSync(STUDIO_ASSETS_DIR, { recursive: true }); }
+
+// Configure the audit log (writes to data/audit-log.jsonl)
+import { configureAuditLog } from './services/audit-log.js';
+configureAuditLog({ dataDir: DATA_ROOT });
 
 const renderAudioService = createRenderAudioService({
   audioDir: AUDIO_DIR, videosDir: VIDEOS_DIR,
@@ -230,6 +329,156 @@ function startScheduleChecker() {
     sendAutomatedNotifications,
     logger: bootLogger,
   });
+}
+
+function startZoteroRefreshChecker() {
+  startZoteroRefreshCheckerWorker({
+    getStore: () => store as { zoteroLastRefreshAt?: string },
+    createNotification,
+    logger: bootLogger,
+  });
+}
+
+interface PersistedVaultSync {
+  lastRunAt?: string | null;
+  lastRunStats?: SyncStats | null;
+  lastError?: string | null;
+}
+
+// Start the agent-org watcher as soon as the module loads. Any change
+// to data/agent-org.json drops the in-memory cache so the next
+// /api/agent-org GET re-reads fresh.
+onAgentOrgChanged(() => invalidateAgentOrgCache());
+startAgentOrgWatcher({
+  dataRoot: path.resolve(import.meta.dirname || '.', '../../../data'),
+  logger: { info: (m) => bootLogger.info(m), warn: (obj, m) => bootLogger.warn(obj, m) },
+});
+
+function startZoteroVaultSync() {
+  // Seed in-process status from persisted store so the UI shows the
+  // previous run summary on cold boot.
+  const persisted = (store as unknown as { zoteroVaultSync?: PersistedVaultSync }).zoteroVaultSync;
+  if (persisted) {
+    seedSyncStatus({
+      lastRunAt: persisted.lastRunAt ?? null,
+      lastRunStats: persisted.lastRunStats ?? null,
+      lastError: persisted.lastError ?? null,
+    });
+  }
+  startZoteroVaultSyncScheduler({
+    logger: bootLogger,
+    auditLog: (entry) => auditLogFn(entry),
+    deltaEnabled: process.env.ENABLE_ZOTERO_DELTA_SYNC !== 'false',
+    getLastZoteroVersion: () => {
+      const st = store as unknown as { zoteroVaultSync?: { lastZoteroVersion?: number } };
+      return st.zoteroVaultSync?.lastZoteroVersion ?? 0;
+    },
+    setLastZoteroVersion: (v) => {
+      const st = store as unknown as { zoteroVaultSync?: { lastZoteroVersion?: number } };
+      if (!st.zoteroVaultSync) st.zoteroVaultSync = {};
+      st.zoteroVaultSync.lastZoteroVersion = v;
+      saveStore();
+    },
+    onStatusUpdate: (s) => {
+      const st = store as unknown as { zoteroVaultSync?: PersistedVaultSync };
+      if (!st.zoteroVaultSync) st.zoteroVaultSync = {};
+      st.zoteroVaultSync.lastRunAt = s.lastRunAt;
+      st.zoteroVaultSync.lastRunStats = s.lastRunStats;
+      st.zoteroVaultSync.lastError = s.lastError;
+      saveStore();
+    },
+    // Every 60 minutes.
+    intervalMs: 60 * 60 * 1000,
+    // Opt-out via store.zoteroVaultSyncDisabled for users who don't want it.
+    getEnabled: () => !(store as unknown as { zoteroVaultSyncDisabled?: boolean }).zoteroVaultSyncDisabled,
+  });
+}
+
+function startHabitSpawnerChecker() {
+  startHabitSpawnerCheckerWorker({
+    spawn: async () => {
+      const created = spawnHabitsForToday(store);
+      if (created.length > 0) saveStore();
+      return { created: created.length };
+    },
+    logger: bootLogger,
+  });
+}
+
+function startGoogleTasksSync() {
+  const deps = {
+    getStore: () => store,
+    saveStore,
+    logger: bootLogger,
+    auditLog: (entry: { action: string; source: string; meta?: Record<string, unknown> }) => auditLogFn(entry),
+  };
+  // Register the debounced trigger so /api/tasks CRUD routes and the
+  // fast /sync/tick endpoint can fire syncs on demand.
+  registerGoogleTasksTrigger(deps);
+  startGoogleTasksSyncScheduler(deps);
+}
+
+// Reports → LLM bridge. The reports subsystem needs a simple
+// non-streaming callProvider that picks the model for the signing
+// agent and collects the full response. We pick a sensible default
+// model (override via builtinAgentModels[agentId] if set).
+async function reportsCallProvider(input: {
+  agentId: string;
+  system: string;
+  user: string;
+}): Promise<{ text: string; tokensIn?: number; tokensOut?: number; costUsd?: number }> {
+  const modelOverride = (store as unknown as { builtinAgentModels?: Record<string, string> }).builtinAgentModels?.[input.agentId];
+  const model = modelOverride || 'claude-haiku-4-5-20251001';
+  const provider = pickProviderForModel(model);
+  if (!provider) {
+    throw new Error(`No enabled LLM provider for model ${model} — enable a provider in Settings first`);
+  }
+
+  let text = '';
+  let tokensIn = 0;
+  let tokensOut = 0;
+  const iter = provider.chat({
+    model,
+    messages: [{ role: 'user', content: input.user }],
+    systemPrompt: input.system,
+    temperature: 0.7,
+    maxTokens: 2000,
+  });
+  for await (const chunk of iter) {
+    if (chunk.type === 'text') text += chunk.content;
+    else if (chunk.type === 'usage') {
+      tokensIn = chunk.usage.inputTokens;
+      tokensOut = chunk.usage.outputTokens;
+    }
+  }
+  const costUsd = provider.estimateCost(tokensIn, tokensOut, model);
+  return { text, tokensIn, tokensOut, costUsd };
+}
+
+function startReportsWorker() {
+  void import('./workers/reports-scheduler.js').then(({ startReportsScheduler }) => {
+    startReportsScheduler({
+      getStore: () => store,
+      saveStore,
+      callProvider: reportsCallProvider,
+      logger: bootLogger,
+      auditLog: (entry) => auditLogFn(entry),
+      onFailure: ({ reportName, reportId, error, triggeredBy }) => {
+        // User-facing notification so 3am failures aren't silent until
+        // they next open /settings.
+        try {
+          createNotification({
+            agentId: 'system',
+            title: `📨 فشل إرسال "${reportName}"`,
+            message: `التقرير (${triggeredBy}) لم يُرسَل: ${error.slice(0, 200)}`,
+            link: '/settings?tab=reports',
+            priority: 'high',
+            metadata: { reportId, kind: 'report-send-failed' },
+          });
+        } catch { /* never let notifier crash the scheduler */ }
+      },
+    });
+  }).catch((err) => bootLogger.warn({ err }, '[reports-scheduler] failed to start'));
 }
 
 // ─── Phase 2: workflow DAG orchestrator wiring ───
@@ -382,6 +631,7 @@ registerAllRoutes(app, {
   saveNoteFile, deleteNoteFile, logActivity,
   anthropicCache: _anthropicCache, builtinSystemPrompts: BUILTIN_SYSTEM_PROMPTS,
   builtInLibrary: BUILT_IN_PROMPT_LIBRARY,
+  pickProviderForModel,
   papersDir: PAPERS_DIR, ensurePapersDir, splitIntoSections,
   taskStore, runsLogger: { error: (msg: string, err?: unknown) => bootLogger.error({ err }, msg) },
   createTrigger, runAgentLoop, logError: (msg: string, err: unknown) => bootLogger.error({ err }, msg),
@@ -390,6 +640,8 @@ registerAllRoutes(app, {
   legacyRestoreDir: path.resolve(import.meta.dirname || '.', '../../../backups'),
   ensureBackupsDir, agentDisplayNames: AGENT_DISPLAY_NAMES,
   dataDir: DATA_DIR,
+  dataRoot: DATA_ROOT,
+  getDispatcherLLM,
   notifyLogger: { info: (m: string) => bootLogger.info(m) },
   estimateAudioPlanCost, costDemoMapCost: COST_DEMO_MAP_COST,
   capabilityCheckers: CAPABILITY_CHECKERS, getApiKey,
@@ -400,10 +652,49 @@ registerAllRoutes(app, {
   executeApproval,
   chatDeps: {
     getStore: () => store, saveStore, logger: bootLogger, anthropicCache: _anthropicCache,
-    pickProviderForModel, builtinSystemPrompts: BUILTIN_SYSTEM_PROMPTS,
+    pickProviderForModel,
+    // Proxy the prompts record so architect/manager/doctor dynamically
+    // pick up the REPORT actions schema + a live list of existing
+    // reports — but ONLY when reports exist or the user has recently
+    // discussed them. Saves ~800 tokens per turn on unrelated chats.
+    builtinSystemPrompts: new Proxy(BUILTIN_SYSTEM_PROMPTS, {
+      get(target, prop: string) {
+        const base = target[prop];
+        if (typeof base !== 'string') return base;
+        if (prop === 'architect' || prop === 'manager' || prop === 'doctor') {
+          if (shouldInjectReportActions(store)) {
+            return base + REPORT_ACTIONS_PROMPT + buildReportsContextBlock(store);
+          }
+        }
+        return base;
+      },
+    }),
     managerSystemPrompt: MANAGER_SYSTEM_PROMPT, agentHeaders: AGENT_HEADERS,
     agentDisplayNames: AGENT_DISPLAY_NAMES, capabilityCheckers: CAPABILITY_CHECKERS,
     parseArchitectActions, parseTaskActions, executeTaskActions, parseNotifyActions,
+    parseReportActions,
+    executeReportActions: (actions: unknown[]) => executeReportActions(actions as Parameters<typeof executeReportActions>[0], {
+      getStore: () => store,
+      saveStore,
+      sendReport: async (id: string) => { await _sendReport({
+        getStore: () => store, saveStore,
+        callProvider: reportsCallProvider,
+        logger: bootLogger,
+        auditLog: (entry) => auditLogFn(entry),
+        onFailure: ({ reportName, reportId, error, triggeredBy }) => {
+          try {
+            createNotification({
+              agentId: 'system',
+              title: `📨 فشل إرسال "${reportName}"`,
+              message: `التقرير (${triggeredBy}) لم يُرسَل: ${error.slice(0, 200)}`,
+              link: '/settings?tab=reports',
+              priority: 'high',
+              metadata: { reportId, kind: 'report-send-failed' },
+            });
+          } catch { /* noop */ }
+        },
+      }, id, 'chat'); },
+    }),
     autoTitleIfNeeded, autoSummarizeIfNeeded, extractGraphFromMessage,
     buildSubscriptionSnapshot: _chatSubscriptionSnapshot, runResearch,
     getResearchQueue: () => researchQueue as unknown as { add: (name: string, data: unknown, opts: unknown) => unknown } | null,
@@ -422,7 +713,24 @@ registerAllRoutes(app, {
   parseLibraryId, deleteRender,
   workflowOrchestrator,
   workflowGetRunChannel: workflowRunChannels.getRunChannel,
+  reportsCallProvider,
+  auditLog: (entry: { action: string; source: string; meta?: Record<string, unknown> }) => auditLogFn(entry),
+  onReportFailure: ({ reportName, reportId, error, triggeredBy }: { reportName: string; reportId: string; error: string; triggeredBy: string }) => {
+    try {
+      createNotification({
+        agentId: 'system',
+        title: `📨 فشل إرسال "${reportName}"`,
+        message: `التقرير (${triggeredBy}) لم يُرسَل: ${error.slice(0, 200)}`,
+        link: '/settings?tab=reports',
+        priority: 'high',
+        metadata: { reportId, kind: 'report-send-failed' },
+      });
+    } catch { /* noop */ }
+  },
 });
+
+// Start the reports scheduler — cheap at rest (no-ops until reports exist).
+startReportsWorker();
 
 // Initialize BullMQ queue + worker for workflow-step (Phase 2).
 try {
@@ -508,7 +816,8 @@ startServer({
     return researchWorker;
   },
   redisConnection: REDIS_CONNECTION, runResearch,
-  startScheduleChecker, startWatcherWorker,
+  startScheduleChecker, startZoteroRefreshChecker, startZoteroVaultSync,
+  startHabitSpawnerChecker, startGoogleTasksSync, startWatcherWorker,
   watcherScan: () => scanForAlerts(store as unknown as Phase2StoreLike).length,
   onWatcherChange: () => saveStore(),
   storeFile: STORE_FILE, providersCount: () => store.providers.length,

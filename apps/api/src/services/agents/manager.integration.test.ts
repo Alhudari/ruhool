@@ -47,7 +47,7 @@ describe('AGT-05 integration — round-trip delegation', () => {
 
   it('tool_use path wins when present; text markers are ignored', () => {
     const content: FakeBlock[] = [
-      textBlock('تمام. أحلتها لعبدان ✓'), // legacy marker in prose
+      textBlock('تمام. أحلتها لالباحث ✓'), // legacy marker in prose
       toolUseBlock('research', 'ابحث عن الإبل', 'سياق سابق'),
     ];
     const tool = parseToolUseDelegations(content);
@@ -59,7 +59,7 @@ describe('AGT-05 integration — round-trip delegation', () => {
     });
     // The text marker parser still sees the marker — but callers should
     // prefer tool_use results and only fall back when tool is empty.
-    const textOnly = parseTextMarkerDelegations('تمام. أحلتها لعبدان ✓');
+    const textOnly = parseTextMarkerDelegations('تمام. أحلتها لالباحث ✓');
     expect(textOnly).toHaveLength(1);
     expect(textOnly[0].source).toBe('text_marker');
   });

@@ -30,7 +30,6 @@ import type {
   TaskRecord,
   StoreData,
 } from '../store/types.js';
-import type { ProjectRecord } from './projects.js';
 import { buildProjectContext } from './projects.js';
 import type { SubscriptionRecord } from './subscriptions.js';
 import type { UnifiedProvider } from '../services/llm/index.js';
@@ -887,7 +886,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
           try {
             const { buildCompanionMemoryContext } = await import('./companion.js');
             const memCtx = buildCompanionMemoryContext(
-              store.companionMemory ?? []
+              (store as unknown as { companionMemory?: import('../store/types.js').CompanionMemoryEntry[] }).companionMemory ?? []
             );
             if (memCtx) activeSystemPrompt += '\n\n' + memCtx;
             // Live vault context — graceful
@@ -930,13 +929,13 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
               const litSessions = ((store as unknown as { readingSessions?: Array<{ id: string }> }).readingSessions ?? []).length;
               activeSystemPrompt += `**حالة منصة رحول**:\n`;
               activeSystemPrompt += `- الاجتماعات المسجّلة في رحول: ${meetings}\n`;
-              activeSystemPrompt += `- جلسات القراءة عبر المُلخِّص: ${litSessions}\n`;
+              activeSystemPrompt += `- جلسات القراءة عبر شواشة: ${litSessions}\n`;
               activeSystemPrompt += `\n`;
 
               activeSystemPrompt += `\n**روابط منصة رحول للإحالة المستخدم إليها**:\n`;
               activeSystemPrompt += `- لوحة الدكتوراه: \`/phd\`\n`;
               activeSystemPrompt += `- مكتبة Zotero: \`/zotero\`\n`;
-              activeSystemPrompt += `- مساعد القراءة (المُلخِّص): \`/shwasha\`\n`;
+              activeSystemPrompt += `- مساعد القراءة (شواشة): \`/shwasha\`\n`;
               activeSystemPrompt += `- الاجتماعات: \`/meetings\`\n`;
               activeSystemPrompt += `- المهام: \`/tasks\`\n`;
             } catch { /* vault not accessible — skip */ }
@@ -1541,9 +1540,9 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                   const remembered = parseCompanionMemoryActions(fullResponse, convId!);
                   if (remembered.length > 0) {
                     const storeNow = getStore();
-                    if (!storeNow.companionMemory) storeNow.companionMemory = [];
+                    if (!storeNow.companionMemory) (storeNow as unknown as { companionMemory: import('../store/types.js').CompanionMemoryEntry[] }).companionMemory = [];
                     for (const entry of remembered) {
-                      storeNow.companionMemory.push({
+                      (storeNow as unknown as { companionMemory: import('../store/types.js').CompanionMemoryEntry[] }).companionMemory.push({
                         id: crypto.randomUUID(),
                         ...entry,
                       });
@@ -1692,8 +1691,8 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 }
               } catch { /* ignore */ }
 
-              void autoSummarizeIfNeeded(convId!).catch(() => { /* background — ignore */ });
-              void autoTitleIfNeeded(convId!).catch(() => { /* background — ignore */ });
+              void Promise.resolve(autoSummarizeIfNeeded(convId!)).catch(() => { /* background — ignore */ });
+              void Promise.resolve(autoTitleIfNeeded(convId!)).catch(() => { /* background — ignore */ });
               try {
                 const recent = store.messages
                   .filter((m) => m.conversationId === convId)
@@ -1763,8 +1762,8 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 await stream.writeSSE({ event: 'notifications', data: JSON.stringify({ notifications: notifs }) });
               }
             } catch { /* ignore */ }
-            void autoSummarizeIfNeeded(convId!).catch(() => { /* background — ignore */ });
-            void autoTitleIfNeeded(convId!).catch(() => { /* background — ignore */ });
+            void Promise.resolve(autoSummarizeIfNeeded(convId!)).catch(() => { /* background — ignore */ });
+            void Promise.resolve(autoTitleIfNeeded(convId!)).catch(() => { /* background — ignore */ });
             try {
               const recent = store.messages
                 .filter((m) => m.conversationId === convId)

@@ -1,9 +1,12 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Menu, X } from 'lucide-react';
 import { Sidebar } from './sidebar';
+import { TaskSidebar } from './task-sidebar';
 import { MobileTabBar } from './mobile-tab-bar';
+import { TopToolbar } from './top-toolbar';
+import { SplitPaneArea } from './split-pane';
 import { NotificationBell } from '@/components/notifications/notification-bell';
 import { useAppStore } from '@/store/app';
 import { cn } from '@/lib/utils';
@@ -12,6 +15,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { hydrate, hydrated, mobileSidebarOpen, setMobileSidebarOpen, language } = useAppStore();
   const isRTL = language === 'ar';
 
+  // Embed mode: when this AppShell is rendered inside an iframe (split pane or
+  // pop-out window with ?embed=1), skip the chrome (sidebar/toolbar/tasks) and
+  // render only the page content. Avoids duplicate sidebars wasting space.
+  const [embed, setEmbed] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    setEmbed(params.has('embed') || window.self !== window.top);
+  }, []);
+
   useEffect(() => {
     hydrate();
   }, [hydrate]);
@@ -19,6 +32,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Don't render until hydrated to avoid language flash
   if (!hydrated) {
     return <div className="flex h-screen overflow-hidden" />;
+  }
+
+  // Embed mode — bare content, no chrome
+  if (embed) {
+    return (
+      <div className="h-screen overflow-auto bg-surface">
+        {children}
+      </div>
+    );
   }
 
   return (
@@ -46,6 +68,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {/* Close button */}
           <button
             onClick={() => setMobileSidebarOpen(false)}
+            aria-label={isRTL ? 'أغلق القائمة' : 'Close menu'}
             className={cn(
               'absolute top-3 z-20 p-2 rounded-full bg-surface text-on-surface-secondary hover:bg-surface-secondary transition-colors',
               isRTL ? 'left-3' : 'right-3'
@@ -61,6 +84,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="md:hidden flex items-center gap-3 px-4 h-14 border-b border-border bg-sidebar shrink-0">
           <button
             onClick={() => setMobileSidebarOpen(true)}
+            aria-label={isRTL ? 'افتح القائمة' : 'Open menu'}
             className="p-2 -ml-2 rounded-[var(--radius)] text-on-surface-secondary hover:bg-sidebar-hover transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
           >
             <Menu size={20} />
@@ -76,15 +100,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        {/* Desktop top-right bell */}
-        <div className={cn(
-          'hidden md:block fixed top-2 z-40',
-          isRTL ? 'left-3' : 'right-3'
-        )}>
-          <NotificationBell />
+        <div className="flex-1 flex overflow-hidden">
+          <main id="main-content" className="flex-1 flex flex-col min-w-0 pb-20 md:pb-6" tabIndex={-1}>
+            <TopToolbar />
+            <SplitPaneArea>{children}</SplitPaneArea>
+          </main>
+          <TaskSidebar />
         </div>
-
-        <main className="flex-1 overflow-auto pb-20 md:pb-6">{children}</main>
         <MobileTabBar />
       </div>
     </div>

@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Clock, Globe, Check } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Clock, Globe } from 'lucide-react';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
+import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
+import { SaveBar, useSaveBarHeight } from '@/components/settings/save-bar';
 
 const COMMON_ZONES = [
   { tz: 'Asia/Kuwait', labelAr: 'الكويت', labelEn: 'Kuwait', offset: '+03:00' },
@@ -19,18 +20,27 @@ const COMMON_ZONES = [
   { tz: 'Australia/Sydney', labelAr: 'سيدني', labelEn: 'Sydney', offset: '+10:00/+11:00' },
 ];
 
+type TimezoneValues = { primary: string; secondary: string };
+
 export function TimezoneSettings() {
   const { language } = useAppStore();
   const isRTL = language === 'ar';
   const [primary, setPrimary] = useState('Asia/Kuwait');
   const [secondary, setSecondary] = useState<string>('Europe/London');
+  const [original, setOriginal] = useState<TimezoneValues | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [live, setLive] = useState<{ primary: { formatted: string; formattedAr: string }; secondary: { formatted: string; formattedAr: string } | null } | null>(null);
 
   useEffect(() => {
     apiFetch<{ primary: string; secondary?: string }>('/api/settings/timezones')
-      .then((r) => { setPrimary(r.primary); if (r.secondary) setSecondary(r.secondary); })
+      .then((r) => {
+        const loaded: TimezoneValues = { primary: r.primary, secondary: r.secondary ?? '' };
+        setPrimary(loaded.primary);
+        setSecondary(loaded.secondary);
+        setOriginal(loaded);
+      })
       .catch(() => {});
   }, []);
 
@@ -41,13 +51,30 @@ export function TimezoneSettings() {
     return () => clearInterval(iv);
   }, []);
 
+  const dirty = original !== null && (primary !== original.primary || secondary !== original.secondary);
+  useUnsavedChanges(dirty);
+  const saveBarPad = useSaveBarHeight(dirty || !!successMessage);
+
   const save = async () => {
-    setSaving(true); setSaved(false);
+    setSaving(true);
+    setErrorMessage(null);
     try {
       await apiFetch('/api/settings/timezones', { method: 'PUT', body: JSON.stringify({ primary, secondary: secondary || undefined }) });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } finally { setSaving(false); }
+      setOriginal({ primary, secondary });
+      setSuccessMessage(isRTL ? 'حُفظ' : 'Saved');
+      setTimeout(() => setSuccessMessage(null), 2000);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : (isRTL ? 'فشل الحفظ' : 'Save failed'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const discard = () => {
+    if (!original) return;
+    setPrimary(original.primary);
+    setSecondary(original.secondary);
+    setErrorMessage(null);
   };
 
   return (
@@ -118,15 +145,17 @@ export function TimezoneSettings() {
             className="w-full bg-input border border-border rounded-[var(--radius)] px-3 py-2 text-sm font-mono"
           />
         </div>
-
-        <button
-          onClick={save}
-          disabled={saving || !primary}
-          className={cn('px-4 py-2 rounded-[var(--radius)] text-sm font-semibold inline-flex items-center gap-1.5', saved ? 'bg-emerald-500 text-white' : 'bg-accent text-on-accent disabled:opacity-40')}
-        >
-          {saved ? <><Check size={14} /> {isRTL ? 'حُفظ' : 'Saved'}</> : (saving ? '...' : (isRTL ? 'احفظ' : 'Save'))}
-        </button>
       </div>
+
+      <div style={{ height: saveBarPad }} aria-hidden="true" />
+      <SaveBar
+        dirty={dirty}
+        saving={saving}
+        onSave={save}
+        onDiscard={discard}
+        successMessage={successMessage}
+        errorMessage={errorMessage}
+      />
     </div>
   );
 }

@@ -86,7 +86,7 @@ export function ClippyFloating({ pageHelp }: { pageHelp?: HelpStep[] }) {
       {/* Floating button — Clippy stays pinned; the bubble floats above it absolutely
           so it never shifts his position when it appears/disappears. */}
       {!open && (
-        <div className="fixed bottom-6 z-30" style={isRTL ? { left: 20 } : { right: 20 }}>
+        <div className="fixed z-30" style={isRTL ? { left: 20, bottom: 72 } : { right: 20, bottom: 72 }}>
           {/* Quip speech bubble — absolutely positioned so it doesn't push Clippy */}
           {quip && (
             <div
@@ -131,8 +131,8 @@ export function ClippyFloating({ pageHelp }: { pageHelp?: HelpStep[] }) {
       {/* Drawer */}
       {open && (
         <div
-          className={cn('fixed bottom-6 z-50 w-[360px] max-w-[calc(100vw-32px)] h-[520px] bg-surface border border-border rounded-[var(--radius-lg)] shadow-2xl flex flex-col overflow-hidden')}
-          style={isRTL ? { left: 20 } : { right: 20 }}
+          className={cn('fixed z-50 w-[360px] max-w-[calc(100vw-32px)] h-[520px] bg-surface border border-border rounded-[var(--radius-lg)] shadow-2xl flex flex-col overflow-hidden')}
+          style={isRTL ? { left: 20, bottom: 72 } : { right: 20, bottom: 72 }}
           dir={isRTL ? 'rtl' : 'ltr'}
         >
           <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-surface-secondary">

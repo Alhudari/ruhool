@@ -33,7 +33,7 @@ describe('workflow orchestrator — audit fixes', () => {
     const runId = crypto.randomUUID();
     const now = new Date().toISOString();
     const step: WorkflowStepRecord = {
-      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'عبدان',
+      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'الباحث',
       task: 't', status: 'pending', createdAt: now, updatedAt: now,
     };
     store.workflowRuns = [{
@@ -99,7 +99,7 @@ describe('workflow orchestrator — audit fixes', () => {
     const runId = crypto.randomUUID();
     const now = new Date().toISOString();
     const step: WorkflowStepRecord = {
-      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'عبدان',
+      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'الباحث',
       task: 't', status: 'completed',
       output: 'preserved', completedAt: now,
       createdAt: now, updatedAt: now,

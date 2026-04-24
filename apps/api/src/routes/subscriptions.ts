@@ -73,7 +73,7 @@ export interface SubscriptionsRoutesDeps {
   subFilesDir: string;
 }
 
-type StoreSubs = StoreData & {
+type StoreSubs = Omit<StoreData, 'subscriptions'> & {
   subscriptionCategories?: SubCategoryRecord[];
   subscriptions?: SubscriptionRecord[];
   paymentCards?: PaymentCardRecord[];
