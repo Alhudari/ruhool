@@ -9,7 +9,7 @@ import {
   Target, FlaskConical, ArrowRight, ChevronRight, Lightbulb,
   Award, Layers, AlertTriangle, Clock, BookPlus, Crosshair,
   X, MessageCircle, ChevronDown, ChevronUp,
-  CheckCircle2, Circle, ClipboardList, Zap, BarChart3,
+  CheckCircle2, Circle, ClipboardList, Zap, BarChart3, ChevronLeft,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
@@ -280,12 +280,13 @@ function AlKhuwyPopup({ open, onClose, isRTL }: { open: boolean; onClose: () => 
 }
 
 // ── Tab IDs ────────────────────────────────────────────────────────────
-type Tab = 'overview' | 'meetings' | 'grs2' | 'tasks' | 'library-stats' | 'insights';
+type Tab = 'overview' | 'meetings' | 'grs2' | 'tasks' | 'library-stats' | 'insights' | 'calendar';
 const TABS: { id: Tab; icon: React.ElementType; label: { en: string; ar: string } }[] = [
   { id: 'overview',      icon: Layers,       label: { en: 'Overview',      ar: 'نظرة عامة' } },
   { id: 'meetings',      icon: Calendar,     label: { en: 'Meetings',      ar: 'الاجتماعات' } },
   { id: 'grs2',          icon: ClipboardList,label: { en: 'GRS2',          ar: 'GRS2' } },
   { id: 'tasks',         icon: CheckSquare,  label: { en: 'Tasks',         ar: 'المهام' } },
+  { id: 'calendar',      icon: Calendar,     label: { en: 'Calendar',      ar: 'التقويم' } },
   { id: 'library-stats', icon: BookMarked,   label: { en: 'Library',       ar: 'المكتبة' } },
   { id: 'insights',      icon: Lightbulb,    label: { en: 'Insights',      ar: 'رؤى' } },
 ];
@@ -1551,6 +1552,202 @@ export function PhDDashboard() {
         )}
 
         {/* ══════════════════════════════════════════════════════ */}
+        {/* ══════════════════════════════════════════════════════ */}
+        {/* CALENDAR TAB                                         */}
+        {/* ══════════════════════════════════════════════════════ */}
+        {tab === 'calendar' && (() => {
+          // Lightweight calendar — no library, pure CSS grid
+          const today = new Date();
+          const [calYear, setCalYear] = useState(today.getFullYear());
+          const [calMonth, setCalMonth] = useState(today.getMonth()); // 0-indexed
+          const [calView, setCalView] = useState<'month' | 'week'>('month');
+
+          const firstDay = new Date(calYear, calMonth, 1);
+          const lastDay = new Date(calYear, calMonth + 1, 0);
+          const startDow = firstDay.getDay(); // 0=Sun
+          const daysInMonth = lastDay.getDate();
+
+          const monthLabel = firstDay.toLocaleDateString(isRTL ? 'ar-SA' : 'en-GB', { month: 'long', year: 'numeric' });
+          const DAY_NAMES_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+          const DAY_NAMES_AR = ['أحد', 'إثن', 'ثلا', 'أرب', 'خمس', 'جمع', 'سبت'];
+          const dayNames = isRTL ? DAY_NAMES_AR : DAY_NAMES_EN;
+
+          // Build event map: date string → events[]
+          type CalEvent = { label: string; color: string; kind: string };
+          const eventMap: Record<string, CalEvent[]> = {};
+
+          const addEvent = (dateStr: string | null | undefined, label: string, color: string, kind: string) => {
+            if (!dateStr) return;
+            const normalized = dateStr.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1').slice(0, 10);
+            if (!normalized.match(/^\d{4}-\d{2}-\d{2}$/)) return;
+            if (!eventMap[normalized]) eventMap[normalized] = [];
+            eventMap[normalized].push({ label, color, kind });
+          };
+
+          // Meeting dates
+          sortedMeetings.forEach((m, idx) => {
+            addEvent(m.record?.date, `Meeting #${idx + 1}`, 'bg-info/80 text-white', 'meeting');
+          });
+          // Next meeting
+          if (nextMeeting) addEvent(nextMeeting, isRTL ? 'اجتماع قادم' : 'Upcoming meeting', 'bg-blue-600 text-white', 'meeting');
+          // Task due dates
+          platformTasks.filter(t => t.dueDate && !t.completed).forEach(t => {
+            addEvent(t.dueDate, t.title.slice(0, 25), 'bg-warning/80 text-white', 'task');
+          });
+          // GRS2 month-end
+          if (grs2Current && grs2Current.status !== 'university_approved') {
+            const [gy, gm] = grs2Current.month.split('-');
+            const lastDayOfGrs2 = new Date(Number(gy), Number(gm), 0);
+            addEvent(lastDayOfGrs2.toISOString().slice(0, 10), 'GRS2 Deadline', 'bg-accent/80 text-white', 'grs2');
+          }
+
+          // Build cells array (padded with null for empty days)
+          const cells: (number | null)[] = Array(startDow).fill(null);
+          for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+          while (cells.length % 7 !== 0) cells.push(null);
+
+          const todayStr = today.toISOString().slice(0, 10);
+
+          return (
+            <div className="space-y-4">
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <button onClick={() => {
+                    const d = new Date(calYear, calMonth - 1, 1);
+                    setCalYear(d.getFullYear()); setCalMonth(d.getMonth());
+                  }} className="p-1.5 rounded-lg hover:bg-surface-secondary border border-border">
+                    <ChevronLeft className={cn('h-4 w-4', isRTL && 'rotate-180')} />
+                  </button>
+                  <h3 className="text-base font-bold text-on-surface px-2">{monthLabel}</h3>
+                  <button onClick={() => {
+                    const d = new Date(calYear, calMonth + 1, 1);
+                    setCalYear(d.getFullYear()); setCalMonth(d.getMonth());
+                  }} className="p-1.5 rounded-lg hover:bg-surface-secondary border border-border">
+                    <ChevronRight className={cn('h-4 w-4', isRTL && 'rotate-180')} />
+                  </button>
+                  <button onClick={() => { setCalYear(today.getFullYear()); setCalMonth(today.getMonth()); }}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-surface-secondary ms-2">
+                    {isRTL ? 'اليوم' : 'Today'}
+                  </button>
+                </div>
+                <div className="flex gap-1">
+                  {(['month', 'week'] as const).map(v => (
+                    <button key={v} onClick={() => setCalView(v)}
+                      className={cn('px-3 py-1.5 text-xs rounded-lg border transition-colors',
+                        calView === v ? 'bg-accent text-on-accent border-accent' : 'border-border text-on-surface-secondary hover:bg-surface-secondary'
+                      )}>
+                      {v === 'month' ? (isRTL ? 'شهر' : 'Month') : (isRTL ? 'أسبوع' : 'Week')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Legend */}
+              <div className="flex gap-3 flex-wrap text-xs">
+                {[
+                  { color: 'bg-info/80', label: isRTL ? 'اجتماع' : 'Meeting' },
+                  { color: 'bg-warning/80', label: isRTL ? 'مهمة' : 'Task due' },
+                  { color: 'bg-accent/80', label: 'GRS2' },
+                ].map(l => (
+                  <div key={l.label} className="flex items-center gap-1.5">
+                    <div className={cn('h-2.5 w-2.5 rounded-sm', l.color)} />
+                    <span className="text-on-surface-tertiary">{l.label}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Month grid */}
+              {calView === 'month' && (
+                <div className="rounded-xl border border-border bg-surface-secondary overflow-hidden">
+                  {/* Day name header */}
+                  <div className="grid grid-cols-7 border-b border-border">
+                    {dayNames.map(d => (
+                      <div key={d} className="py-2 text-center text-[11px] font-semibold text-on-surface-tertiary uppercase tracking-wider">
+                        {d}
+                      </div>
+                    ))}
+                  </div>
+                  {/* Day cells */}
+                  <div className="grid grid-cols-7">
+                    {cells.map((day, i) => {
+                      if (day === null) return <div key={i} className="min-h-[80px] border-r border-b border-border bg-surface-tertiary/30 last:border-r-0" />;
+                      const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                      const isToday = dateStr === todayStr;
+                      const events = eventMap[dateStr] ?? [];
+                      return (
+                        <div key={i} className={cn(
+                          'min-h-[80px] border-r border-b border-border p-1.5 last:border-r-0 relative',
+                          isToday && 'bg-accent/5'
+                        )}>
+                          <span className={cn(
+                            'inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium',
+                            isToday ? 'bg-accent text-on-accent' : 'text-on-surface-secondary'
+                          )}>
+                            {day}
+                          </span>
+                          <div className="mt-1 space-y-0.5">
+                            {events.slice(0, 3).map((ev, ei) => (
+                              <div key={ei} className={cn('text-[10px] px-1.5 py-0.5 rounded truncate leading-tight', ev.color)}>
+                                {ev.label}
+                              </div>
+                            ))}
+                            {events.length > 3 && (
+                              <p className="text-[9px] text-on-surface-tertiary ps-1">+{events.length - 3}</p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Week view */}
+              {calView === 'week' && (() => {
+                const startOfWeek = new Date(today);
+                startOfWeek.setDate(today.getDate() - today.getDay());
+                const weekDays = Array.from({ length: 7 }, (_, i) => {
+                  const d = new Date(startOfWeek);
+                  d.setDate(startOfWeek.getDate() + i);
+                  return d;
+                });
+                return (
+                  <div className="rounded-xl border border-border bg-surface-secondary overflow-hidden">
+                    <div className="grid grid-cols-7 border-b border-border">
+                      {weekDays.map((d, i) => {
+                        const ds = d.toISOString().slice(0, 10);
+                        const isToday = ds === todayStr;
+                        return (
+                          <div key={i} className={cn('py-3 text-center border-r border-border last:border-r-0', isToday && 'bg-accent/5')}>
+                            <p className="text-[10px] text-on-surface-tertiary uppercase">{dayNames[d.getDay()]}</p>
+                            <p className={cn('text-sm font-bold mt-0.5', isToday ? 'text-accent' : 'text-on-surface')}>{d.getDate()}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="grid grid-cols-7 min-h-[200px]">
+                      {weekDays.map((d, i) => {
+                        const ds = d.toISOString().slice(0, 10);
+                        const events = eventMap[ds] ?? [];
+                        return (
+                          <div key={i} className="border-r border-border last:border-r-0 p-2 space-y-1">
+                            {events.map((ev, ei) => (
+                              <div key={ei} className={cn('text-[10px] px-1.5 py-0.5 rounded truncate', ev.color)}>
+                                {ev.label}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          );
+        })()}
+
         {/* INSIGHTS TAB                                          */}
         {/* ══════════════════════════════════════════════════════ */}
         {tab === 'insights' && (() => {
