@@ -40,6 +40,7 @@ export function registerTasksRoutes(app: Hono, deps: TasksRoutesDeps): void {
     if (tag) tasks = tasks.filter(t => t.tags.includes(tag));
     if (pinned !== undefined) tasks = tasks.filter(t => t.pinned === (pinned === 'true'));
     tasks.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    c.header('Cache-Control', 'private, max-age=30');
     return c.json(tasks);
   });
 
@@ -153,6 +154,7 @@ export function registerTasksRoutes(app: Hono, deps: TasksRoutesDeps): void {
       return c.json(byWs[workspaceId] ?? []);
     }
     if (!store.taskLists) store.taskLists = ['عام'];
+    c.header('Cache-Control', 'private, max-age=300');
     return c.json(store.taskLists);
   });
 
@@ -259,6 +261,7 @@ export function registerTasksRoutes(app: Hono, deps: TasksRoutesDeps): void {
       if (t.dueDate === today) return true;
       return false;
     });
+    c.header('Cache-Control', 'private, max-age=30');
     return c.json(rows);
   });
 
@@ -320,6 +323,7 @@ export function registerTasksRoutes(app: Hono, deps: TasksRoutesDeps): void {
     const completedDays = history.filter((h) => h.expected && h.done).length;
     const completionRate = expectedDays > 0 ? completedDays / expectedDays : 0;
 
+    c.header('Cache-Control', 'private, max-age=300');
     return c.json({
       habitId: id,
       totalInstances: instances.length,

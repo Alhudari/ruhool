@@ -38,7 +38,10 @@ export function registerLibraryEntitiesRoutes(app: Hono, deps: LibraryEntitiesRo
   const { getStore, saveStore } = deps;
 
   // List entity types
-  app.get('/api/library/entity-types', (c) => c.json(ENTITY_TYPES));
+  app.get('/api/library/entity-types', (c) => {
+    c.header('Cache-Control', 'private, max-age=3600');
+    return c.json(ENTITY_TYPES);
+  });
 
   // List entities — supports type, search, tag, limit, offset
   app.get('/api/library/entities', (c) => {
@@ -62,6 +65,7 @@ export function registerLibraryEntitiesRoutes(app: Hono, deps: LibraryEntitiesRo
 
     entities = entities.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     const total = entities.length;
+    c.header('Cache-Control', 'private, max-age=300');
     return c.json({ entities: entities.slice(offset, offset + limit), total, limit, offset });
   });
 
@@ -105,6 +109,7 @@ export function registerLibraryEntitiesRoutes(app: Hono, deps: LibraryEntitiesRo
     const id = c.req.param('id');
     const entity = getEntities(store).find(e => e.id === id);
     if (!entity) return c.json({ error: 'Not found' }, 404);
+    c.header('Cache-Control', 'private, max-age=60');
     return c.json(entity);
   });
 
@@ -195,6 +200,7 @@ export function registerLibraryEntitiesRoutes(app: Hono, deps: LibraryEntitiesRo
     const store = getStore();
     const id = c.req.param('id');
     const all = getEntities(store).filter(e => !e.deletedAt && e.links.some(l => l.targetId === id));
+    c.header('Cache-Control', 'private, max-age=60');
     return c.json(all);
   });
 

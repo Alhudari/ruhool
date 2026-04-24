@@ -20,6 +20,7 @@ export function registerMilestonesRoutes(app: Hono, deps: MilestonesRoutesDeps):
     const records = getMilestones(store)
       .filter(m => !m.deletedAt)
       .sort((a, b) => a.date.localeCompare(b.date));
+    c.header('Cache-Control', 'private, max-age=60');
     return c.json(records);
   });
 

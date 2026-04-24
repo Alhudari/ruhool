@@ -75,6 +75,7 @@ export function registerMeetingsRoutes(app: Hono, deps: MeetingsRoutesDeps): voi
   // ── List sessions ──────────────────────────────────────────────────
   app.get('/api/meetings/sessions', (c) => {
     const sessions = getMeetingSessions(getStore()).map(({ chatHistory: _ch, ...s }) => s);
+    c.header('Cache-Control', 'private, max-age=60');
     return c.json(sessions);
   });
 

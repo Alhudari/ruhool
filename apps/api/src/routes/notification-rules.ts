@@ -127,6 +127,7 @@ export function registerNotificationRulesRoutes(app: Hono, deps: NotificationRul
   app.get('/api/notifications/rules', (c) => {
     const store = getStore();
     const rules = getRules(store).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    c.header('Cache-Control', 'private, max-age=300');
     return c.json(rules);
   });
 

@@ -68,6 +68,7 @@ export function registerGrs2Routes(app: Hono, deps: Grs2RoutesDeps): void {
     const records = [...getRecords(store)].sort((a, b) =>
       b.month.localeCompare(a.month),
     );
+    c.header('Cache-Control', 'private, max-age=60');
     return c.json(records);
   });
 
@@ -86,6 +87,7 @@ export function registerGrs2Routes(app: Hono, deps: Grs2RoutesDeps): void {
       rec.status !== 'student_confirmed' &&
       rec.status !== 'university_approved';
 
+    c.header('Cache-Control', 'private, max-age=120');
     return c.json({
       needsGrs2,
       urgentFollowUp,
@@ -103,6 +105,7 @@ export function registerGrs2Routes(app: Hono, deps: Grs2RoutesDeps): void {
       rec = createRecord(store, month);
       saveStore();
     }
+    c.header('Cache-Control', 'private, max-age=60');
     return c.json(rec);
   });
 
