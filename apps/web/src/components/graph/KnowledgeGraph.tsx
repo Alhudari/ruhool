@@ -395,11 +395,18 @@ export function KnowledgeGraph() {
       {/* ── Toolbar ── */}
       <div className="flex items-center gap-2 flex-wrap px-4 py-3 border-b border-border shrink-0">
         {/* Title */}
-        <div className="flex items-center gap-2 me-2">
-          <Network size={18} className="text-accent" />
-          <span className="text-sm font-semibold text-on-surface">
-            {isRTL ? 'خريطة المعرفة' : 'Knowledge Graph'}
-          </span>
+        <div className="flex items-center gap-2 me-2 shrink-0">
+          <div className="w-8 h-8 rounded-[var(--radius)] bg-accent/10 text-accent flex items-center justify-center shrink-0">
+            <Network size={16} />
+          </div>
+          <div>
+            <span className="text-sm font-semibold text-on-surface leading-none block">
+              {isRTL ? 'خريطة المعرفة' : 'Knowledge Graph'}
+            </span>
+            <span className="text-[10px] text-on-surface-tertiary leading-none">
+              {isRTL ? 'الروابط المعرفية للبحث' : 'PhD knowledge connections'}
+            </span>
+          </div>
         </div>
 
         {/* Search */}
