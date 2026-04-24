@@ -156,7 +156,7 @@ export function createResearchService(deps: ResearchServiceDeps) {
         let analysisResult = '';
         for await (const chunk of provider.chat({
           model: 'claude-sonnet-4-6',
-          systemPrompt: `You are عبدان, a deep research agent. Analyze and synthesize information. When sources are provided, cite them using [S#-#] markers. Extract substantive findings only. Note methodologies, gaps, and conflicting views. ${langInstruction}`,
+          systemPrompt: `You are الباحث (Al-Bahith), a deep research agent. Analyze and synthesize information. When sources are provided, cite them using [S#-#] markers. Extract substantive findings only. Note methodologies, gaps, and conflicting views. ${langInstruction}`,
           messages: [{ role: 'user', content: `Research query: ${queries[i]}\n\nOriginal topic: ${task.query}${sourcesBlock}` }],
           maxTokens: isDeep ? 2000 : 1000,
         })) {
