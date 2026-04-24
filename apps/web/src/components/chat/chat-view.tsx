@@ -24,33 +24,47 @@ interface AgentDisplayInfo {
 }
 
 const BUILTIN_AGENT_DISPLAY: Record<string, AgentDisplayInfo> = {
-  manager: { name: { en: "Al-Ra'i", ar: 'الراعي' }, color: 'bg-amber-500/20 text-amber-600 dark:text-amber-400', bgColor: 'bg-amber-500', initial: 'ع' },
-  research: { name: { en: 'Al-Bahith', ar: 'عبدان' }, color: 'bg-purple-500/20 text-purple-600 dark:text-purple-400', bgColor: 'bg-purple-500', initial: 'ع' },
-  'reading-helper': { name: { en: 'Al-Mulakhkhis', ar: 'شواشة' }, color: 'bg-blue-500/20 text-blue-600 dark:text-blue-400', bgColor: 'bg-blue-500', initial: 'ش' },
-  'writing-critic': { name: { en: 'Al-Naqid', ar: 'الصفرا' }, color: 'bg-green-500/20 text-green-600 dark:text-green-400', bgColor: 'bg-green-500', initial: 'ص' },
-  comparator: { name: { en: 'Al-Muqarin', ar: 'رمّانة' }, color: 'bg-red-500/20 text-red-600 dark:text-red-400', bgColor: 'bg-red-500', initial: 'ر' },
+  manager: { name: { en: "Al-Ra'i", ar: 'الراعي' }, color: 'bg-amber-500/20 text-amber-600 dark:text-amber-400', bgColor: 'bg-amber-500', initial: 'ر' },
+  doctor: { name: { en: 'Al-Duktor', ar: 'الدكتور' }, color: 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400', bgColor: 'bg-indigo-500', initial: 'د' },
+  research: { name: { en: 'Al-Bahith', ar: 'الباحث' }, color: 'bg-purple-500/20 text-purple-600 dark:text-purple-400', bgColor: 'bg-purple-500', initial: 'ب' },
+  'reading-helper': { name: { en: 'Al-Mulakhkhis', ar: 'المُلخِّص' }, color: 'bg-blue-500/20 text-blue-600 dark:text-blue-400', bgColor: 'bg-blue-500', initial: 'خ' },
+  'writing-critic': { name: { en: 'Al-Naqid', ar: 'الناقد' }, color: 'bg-green-500/20 text-green-600 dark:text-green-400', bgColor: 'bg-green-500', initial: 'ن' },
+  comparator: { name: { en: 'Al-Muqarin', ar: 'المُقارِن' }, color: 'bg-red-500/20 text-red-600 dark:text-red-400', bgColor: 'bg-red-500', initial: 'ق' },
   architect: { name: { en: 'Al-Musammim', ar: 'المصمم' }, color: 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400', bgColor: 'bg-yellow-500', initial: 'م' },
-  'content-creator': { name: { en: 'Al-Sarid', ar: 'الدبسا' }, color: 'bg-pink-500/20 text-pink-600 dark:text-pink-400', bgColor: 'bg-pink-500', initial: 'د' },
-  creative: { name: { en: 'The Creative', ar: '\u0627\u0644\u0643\u0631\u064a\u064a\u062a\u0641' }, color: 'bg-rose-500/20 text-rose-600 dark:text-rose-400', bgColor: 'bg-rose-500', initial: '\u0643' },
-  'tasks-agent': { name: { en: 'Maham', ar: '\u0645\u0647\u0627\u0645' }, color: 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400', bgColor: 'bg-emerald-500', initial: '\u0645' },
-  analyst: { name: { en: 'Al-Muhallil', ar: 'المحلل' }, color: 'bg-teal-500/20 text-teal-600 dark:text-teal-400', bgColor: 'bg-teal-500', initial: 'م' },
-  munazzim: { name: { en: 'Al-Munazzim', ar: 'المنظّم' }, color: 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400', bgColor: 'bg-indigo-500', initial: 'م' },
-  mushakhkhis: { name: { en: 'Al-Mushakhkhis', ar: 'المشخّص' }, color: 'bg-red-500/20 text-red-600 dark:text-red-400', bgColor: 'bg-red-500', initial: 'م' },
+  'content-creator': { name: { en: 'Al-Sarid', ar: 'السارد' }, color: 'bg-pink-500/20 text-pink-600 dark:text-pink-400', bgColor: 'bg-pink-500', initial: 'س' },
+  creative: { name: { en: "Al-Mubdi'", ar: 'المبدع' }, color: 'bg-rose-500/20 text-rose-600 dark:text-rose-400', bgColor: 'bg-rose-500', initial: 'ب' },
+  'tasks-agent': { name: { en: 'Maham', ar: 'مهام' }, color: 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400', bgColor: 'bg-emerald-500', initial: 'م' },
+  analyst: { name: { en: 'Al-Muhallil', ar: 'المحلل' }, color: 'bg-teal-500/20 text-teal-600 dark:text-teal-400', bgColor: 'bg-teal-500', initial: 'ح' },
+  munazzim: { name: { en: 'Al-Munazzim', ar: 'المنظّم' }, color: 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400', bgColor: 'bg-indigo-500', initial: 'ن' },
+  mushakhkhis: { name: { en: 'Al-Mushakhkhis', ar: 'المشخّص' }, color: 'bg-red-500/20 text-red-600 dark:text-red-400', bgColor: 'bg-red-500', initial: 'ش' },
+  'research-companion': { name: { en: 'Al-Khuwy', ar: 'الخوي' }, color: 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400', bgColor: 'bg-emerald-500', initial: 'خ' },
+  fatin: { name: { en: 'Al-Fatin', ar: 'الفطين' }, color: 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400', bgColor: 'bg-cyan-500', initial: 'ف' },
+  playmaker: { name: { en: 'Al-Mumarrir', ar: 'المُمرر' }, color: 'bg-violet-500/20 text-violet-600 dark:text-violet-400', bgColor: 'bg-violet-500', initial: 'م' },
+  mudawwin: { name: { en: 'Al-Mudawwin', ar: 'المُدوّن' }, color: 'bg-amber-500/20 text-amber-600 dark:text-amber-400', bgColor: 'bg-amber-500', initial: 'د' },
+  sayyaq: { name: { en: 'Al-Katib', ar: 'الكاتب' }, color: 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400', bgColor: 'bg-cyan-500', initial: 'ك' },
+  clippy: { name: { en: 'Clippy', ar: 'Clippy' }, color: 'bg-sky-500/20 text-sky-600 dark:text-sky-400', bgColor: 'bg-sky-500', initial: 'C' },
 };
 
 const ALL_BUILTIN_AGENTS = [
-  { id: 'manager', name: { en: "Al-Ra'i", ar: 'الراعي' }, desc: { en: 'The guide', ar: 'القائد' } },
-  { id: 'research', name: { en: 'Al-Bahith', ar: 'عبدان' }, desc: { en: 'Deep research', ar: 'بحث عميق' } },
-  { id: 'reading-helper', name: { en: 'Al-Mulakhkhis', ar: 'شواشة' }, desc: { en: 'Reading helper', ar: 'مساعد القراءة' } },
-  { id: 'writing-critic', name: { en: 'Al-Naqid', ar: 'الصفرا' }, desc: { en: 'Writing critic', ar: 'ناقدة الكتابة' } },
-  { id: 'comparator', name: { en: 'Al-Muqarin', ar: 'رمّانة' }, desc: { en: 'Comparator', ar: 'المقارنة' } },
+  { id: 'manager', name: { en: "Al-Ra'i", ar: 'الراعي' }, desc: { en: 'PhD workspace CEO', ar: 'مدير غرفة الدكتوراه' } },
+  { id: 'doctor', name: { en: 'Al-Duktor', ar: 'الدكتور' }, desc: { en: 'Life workspace CEO', ar: 'مدير غرفة الحياة' } },
+  { id: 'research', name: { en: 'Al-Bahith', ar: 'الباحث' }, desc: { en: 'Deep research', ar: 'بحث عميق' } },
+  { id: 'reading-helper', name: { en: 'Al-Mulakhkhis', ar: 'المُلخِّص' }, desc: { en: 'Reading + summarization', ar: 'قراءة وتلخيص' } },
+  { id: 'writing-critic', name: { en: 'Al-Naqid', ar: 'الناقد' }, desc: { en: 'Writing critic', ar: 'ناقد الكتابة' } },
+  { id: 'comparator', name: { en: 'Al-Muqarin', ar: 'المُقارِن' }, desc: { en: 'Compare papers', ar: 'مقارنة الأوراق' } },
   { id: 'architect', name: { en: 'Al-Musammim', ar: 'المصمم' }, desc: { en: 'Agent architect', ar: 'مدير الوكلاء' } },
-  { id: 'content-creator', name: { en: 'Al-Sarid', ar: 'الدبسا' }, desc: { en: 'Content creator', ar: 'صناعة المحتوى' } },
-  { id: 'creative', name: { en: 'The Creative', ar: '\u0627\u0644\u0643\u0631\u064a\u064a\u062a\u0641' }, desc: { en: 'Video creator', ar: '\u0635\u0627\u0646\u0639 \u0627\u0644\u0641\u064a\u062f\u064a\u0648' } },
-  { id: 'tasks-agent', name: { en: 'Maham', ar: '\u0645\u0647\u0627\u0645' }, desc: { en: 'Task manager', ar: '\u0645\u062f\u064a\u0631 \u0627\u0644\u0645\u0647\u0627\u0645' } },
-  { id: 'analyst', name: { en: 'Al-Muhallil', ar: 'المحلل' }, desc: { en: 'Subscription & cost analyst', ar: 'محلل الاشتراكات والتكاليف' } },
-  { id: 'munazzim', name: { en: 'Al-Munazzim', ar: 'المنظّم' }, desc: { en: 'Conversations & projects', ar: 'إدارة المحادثات والمشاريع' } },
-  { id: 'mushakhkhis', name: { en: 'Al-Mushakhkhis', ar: 'المشخّص' }, desc: { en: 'System diagnostics', ar: 'فحص النظام والمفاتيح' } },
+  { id: 'content-creator', name: { en: 'Al-Sarid', ar: 'السارد' }, desc: { en: 'Arabic content', ar: 'المحتوى العربي' } },
+  { id: 'creative', name: { en: "Al-Mubdi'", ar: 'المبدع' }, desc: { en: 'Video creator', ar: 'صانع الفيديو' } },
+  { id: 'tasks-agent', name: { en: 'Maham', ar: 'مهام' }, desc: { en: 'Task manager', ar: 'مدير المهام' } },
+  { id: 'analyst', name: { en: 'Al-Muhallil', ar: 'المحلل' }, desc: { en: 'Cost analyst', ar: 'محلل التكاليف' } },
+  { id: 'munazzim', name: { en: 'Al-Munazzim', ar: 'المنظّم' }, desc: { en: 'Conversations & projects', ar: 'المحادثات والمشاريع' } },
+  { id: 'mushakhkhis', name: { en: 'Al-Mushakhkhis', ar: 'المشخّص' }, desc: { en: 'System diagnostics', ar: 'فحص النظام' } },
+  { id: 'research-companion', name: { en: 'Al-Khuwy', ar: 'الخوي' }, desc: { en: 'PhD companion', ar: 'رفيق الدكتوراه' } },
+  { id: 'fatin', name: { en: 'Al-Fatin', ar: 'الفطين' }, desc: { en: 'Vision agent', ar: 'وكيل الرؤية' } },
+  { id: 'playmaker', name: { en: 'Al-Mumarrir', ar: 'المُمرر' }, desc: { en: 'Routing intelligence', ar: 'الذكاء التوجيهي' } },
+  { id: 'mudawwin', name: { en: 'Al-Mudawwin', ar: 'المُدوّن' }, desc: { en: 'Meeting tracker', ar: 'متابع الاجتماعات' } },
+  { id: 'sayyaq', name: { en: 'Al-Katib', ar: 'الكاتب' }, desc: { en: 'Writing assistant', ar: 'مساعد الكتابة' } },
+  { id: 'clippy', name: { en: 'Clippy', ar: 'Clippy' }, desc: { en: 'Onboarding assistant', ar: 'مساعد الإعداد' } },
 ];
 
 const COLOR_OPTIONS = [
@@ -198,7 +212,7 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
   }, [targetedAgents.size]);
   // Disambiguation popup: shows when user types an agent's name without @
   const [nameSuggestions, setNameSuggestions] = useState<Array<{ name: string; id: string }>>([]);
-  // Topic-based suggestions (when user mentions a TOPIC like "video" → suggest الكرييتف)
+  // Topic-based suggestions (when user mentions a TOPIC like "video" → suggest المبدع)
   const [topicSuggestions, setTopicSuggestions] = useState<Array<{ name: string; id: string; reason: string }>>([]);
   const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<Set<string>>(new Set());
   const nameDetectAbortRef = useRef<AbortController | null>(null);
@@ -1208,7 +1222,7 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-on-surface-tertiary mb-1">
-                  {isRTL ? 'عبدان' : 'Al-Bahith'}
+                  {isRTL ? 'الباحث' : 'Al-Bahith'}
                 </p>
                 <TaskProgressCard
                   taskId={taskId}
