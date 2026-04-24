@@ -477,7 +477,9 @@ function MeetingRecordView({ record: r, isRTL, sessionId }: { record: MeetingRec
 
       <div className="rounded-lg border bg-muted/30 p-4">
         <p className="text-xs font-semibold text-muted-foreground mb-1">{isRTL ? 'الملخص' : 'Summary'}</p>
-        <p className="text-sm">{r.Summary}</p>
+        <div className="prose prose-sm dark:prose-invert max-w-none [&>p]:my-0.5 [&>ul]:ps-4 [&>ul]:list-disc [&_li]:my-0">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.Summary}</ReactMarkdown>
+        </div>
       </div>
 
       {r.discussion && (
@@ -486,6 +488,30 @@ function MeetingRecordView({ record: r, isRTL, sessionId }: { record: MeetingRec
           <div className="prose prose-sm dark:prose-invert max-w-none text-sm [&>ul]:list-disc [&>ul]:ps-4 [&>ol]:list-decimal [&>ol]:ps-4 [&_li]:my-0.5 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:text-sm [&_h3]:font-semibold [&_input[type=checkbox]]:me-1.5">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.discussion}</ReactMarkdown>
           </div>
+        </div>
+      )}
+
+      {/* GRS2 tracking */}
+      {(r.GRS2_Input || r.GRS2_Respond) && (
+        <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-4 space-y-3">
+          <p className="text-xs font-semibold text-blue-600 dark:text-blue-400">GRS2</p>
+          {r.GRS2_Input && (
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">{isRTL ? 'إدخال الطالب' : 'Student Input'}</p>
+              <p className="text-sm">{r.GRS2_Input}</p>
+            </div>
+          )}
+          {r.GRS2_Respond && (
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">{isRTL ? 'رد المشرف' : 'Supervisor Response'}</p>
+              <p className="text-sm">{r.GRS2_Respond}</p>
+            </div>
+          )}
+          {r.GRS2_confirmed && (
+            <span className="text-xs bg-emerald-500/10 text-emerald-600 px-2 py-0.5 rounded-full">
+              {isRTL ? 'مؤكد' : 'Confirmed'}
+            </span>
+          )}
         </div>
       )}
 
