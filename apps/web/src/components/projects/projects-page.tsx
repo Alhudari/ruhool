@@ -378,16 +378,32 @@ export function ProjectsPageView() {
       </div>
 
       {!loading&&filtered.length===0&&(
-        <div className="text-center py-16 space-y-3">
-          <div className="w-16 h-16 rounded-2xl bg-violet-500/10 flex items-center justify-center mx-auto">
-            <FolderKanban size={28} className="text-violet-500"/>
+        <div className="space-y-6">
+          {/* Quick templates */}
+          <div>
+            <p className="text-sm text-on-surface-tertiary mb-3">{isRTL?'ابدأ بقالب جاهز:':'Start with a template:'}</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {[
+                { color:'#8b5cf6', name:{ar:'دكتوراه BIM',en:'BIM PhD'}, desc:{ar:'بحث أكاديمي في تبني BIM بالكويت',en:'BIM adoption research in Kuwait'}, instructions:{ar:`- أنا عبدالله، طالب دكتوراه في BIM بجامعة برمنغهام\n- بحثي: تبني BIM في قطاع البناء الكويتي والخليجي\n- مشرفان: د. ريتشارد (رئيسي) وبروف. إيان (ثانوي)\n- أكتب باللغتين العربية والإنجليزية\n- مرحلة البحث: مراجعة الأدبيات + جمع البيانات`,en:`- Abdullah, PhD student in BIM at University of Birmingham\n- Research: BIM adoption in Kuwait & GCC construction sector\n- Supervisors: Dr. Richard (primary), Prof. Ian (secondary)\n- Write in both Arabic and English\n- Stage: Literature review + data collection`}, agent:'research' },
+                { color:'#3b82f6', name:{ar:'KSE التحول الرقمي',en:'KSE Digital'}, desc:{ar:'تطوير منصات KSE الرقمية',en:'KSE digital platform development'}, instructions:{ar:`- مشروع رقمي لتطوير منصات شركة KSE الكويتية\n- التقنيات: Next.js, Supabase, Vercel\n- المجال: قطاع البناء والهندسة في الكويت\n- الأهداف: منصة عقود، دليل مشاريع، نظام دعوات`,en:`- Digital project for KSE Kuwait company platforms\n- Stack: Next.js, Supabase, Vercel\n- Domain: Construction & engineering in Kuwait\n- Goals: contracts platform, project directory, invitation system`}, agent:'manager' },
+                { color:'#ec4899', name:{ar:'محتوى تعليمي',en:'Educational Content'}, desc:{ar:'كاروسيل وريلز تعليمية عربية',en:'Arabic educational carousels & reels'}, instructions:{ar:`- محتوى تعليمي عربي عن الهندسة والتكنولوجيا\n- الجمهور: مهندسون وطلاب في الخليج\n- الأسلوب: بسيط، مرئي، عملي\n- المنصات: إنستغرام (ريلز + كاروسيل)`,en:`- Arabic educational content about engineering & tech\n- Audience: Engineers and students in the Gulf\n- Style: Simple, visual, practical\n- Platforms: Instagram (reels + carousels)`}, agent:'content-creator' },
+              ].map((t,i)=>(
+                <button key={i}
+                  onClick={()=>create({name:t.name[isRTL?'ar':'en'],description:t.desc[isRTL?'ar':'en'],instructions:t.instructions[isRTL?'ar':'en'],color:t.color,defaultAgentId:t.agent,agentInstructions:{}})}
+                  className="text-start rounded-[var(--radius-lg)] border border-border p-4 hover:border-primary/30 hover:shadow-sm transition-all"
+                  style={{borderInlineStartColor:t.color,borderInlineStartWidth:3}}>
+                  <p className="font-medium text-sm mb-1">{t.name[isRTL?'ar':'en']}</p>
+                  <p className="text-xs text-on-surface-tertiary">{t.desc[isRTL?'ar':'en']}</p>
+                </button>
+              ))}
+            </div>
           </div>
-          <p className="font-medium">{isRTL?'لا توجد مشاريع بعد':'No projects yet'}</p>
-          <p className="text-sm text-on-surface-tertiary">{isRTL?'أنشئ مشروعاً لتجميع محادثاتك وتعليماتك':'Create a project to group your chats and instructions'}</p>
-          <button onClick={()=>{setEditing(null);setShowModal(true);}}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[var(--radius)] bg-primary text-on-primary text-sm">
-            <Plus size={14}/>{isRTL?'إنشاء مشروع':'Create project'}
-          </button>
+          <div className="text-center">
+            <button onClick={()=>{setEditing(null);setShowModal(true);}}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[var(--radius)] border border-border text-sm hover:bg-muted">
+              <Plus size={14}/>{isRTL?'مشروع فارغ':'Empty project'}
+            </button>
+          </div>
         </div>
       )}
 
