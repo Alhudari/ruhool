@@ -18,8 +18,19 @@ import {
   X,
   MessageSquare,
   CheckSquare,
+  GraduationCap,
+  ClipboardList,
+  Eye,
+  Shuffle,
+  PenLine,
+  Video,
+  Briefcase,
+  BarChart3,
+  FolderKanban,
+  Stethoscope,
 } from 'lucide-react';
 import { VoiceMode } from '../chat/voice-mode';
+import { QuickStart } from './quick-start';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
@@ -36,6 +47,16 @@ const ICON_MAP: Record<string, React.ComponentType<any>> = {
   crown: Shield,
   bot: Bot,
   'check-square': CheckSquare,
+  'graduation-cap': GraduationCap,
+  'clipboard-list': ClipboardList,
+  eye: Eye,
+  shuffle: Shuffle,
+  'pen-line': PenLine,
+  video: Video,
+  briefcase: Briefcase,
+  'bar-chart-3': BarChart3,
+  'folder-kanban': FolderKanban,
+  stethoscope: Stethoscope,
 };
 
 const COLOR_MAP: Record<string, string> = {
@@ -57,48 +78,64 @@ const FALLBACK_AGENTS = [
     id: 'manager',
     icon: 'sparkles',
     color: 'amber',
-    name: { en: 'Al-Ra\'i (الراعي)', ar: 'الراعي' },
-    description: { en: 'The guide — leads the herd', ar: 'المرياع — تقود الذود' },
+    name: { en: "Al-Ra'i", ar: 'الراعي' },
+    description: { en: 'PhD workspace CEO — routes to all specialists', ar: 'مدير غرفة الدكتوراه — يوجّه لجميع المتخصصين' },
     builtIn: true,
   },
   {
     id: 'research',
     icon: 'search',
     color: 'purple',
-    name: { en: 'Abdan (عبدان)', ar: 'عبدان' },
-    description: { en: 'The bull — deep research', ar: 'الفحل — بحث عميق' },
+    name: { en: 'Al-Bahith', ar: 'الباحث' },
+    description: { en: 'Deep research in academic papers', ar: 'البحث العميق في الأوراق الأكاديمية' },
     builtIn: true,
   },
   {
     id: 'reading-helper',
     icon: 'book-open',
     color: 'blue',
-    name: { en: 'Shwasha (شواشة)', ar: 'شواشة' },
-    description: { en: 'Guided paper reading', ar: 'قراءة موجهة للأوراق' },
+    name: { en: 'Al-Mulakhkhis', ar: 'المُلخِّص' },
+    description: { en: 'Guided paper reading + summarization', ar: 'قراءة موجهة للأوراق وتلخيصها' },
     builtIn: true,
   },
   {
     id: 'writing-critic',
     icon: 'pen-tool',
     color: 'green',
-    name: { en: 'Al-Safra (الصفرا)', ar: 'الصفرا' },
-    description: { en: 'Critique your drafts', ar: 'تنقد مسوداتك' },
+    name: { en: 'Al-Naqid', ar: 'الناقد' },
+    description: { en: 'Academic writing critic', ar: 'ناقد الكتابة الأكاديمية' },
+    builtIn: true,
+  },
+  {
+    id: 'research-companion',
+    icon: 'book-open',
+    color: 'emerald',
+    name: { en: 'Al-Khuwy', ar: 'الخوي' },
+    description: { en: 'PhD daily companion', ar: 'الخوي — دليلك اليومي وشريك أفكارك' },
+    builtIn: true,
+  },
+  {
+    id: 'mudawwin',
+    icon: 'check-square',
+    color: 'amber',
+    name: { en: 'Al-Mudawwin', ar: 'المُدوّن' },
+    description: { en: 'Meeting + supervision tracker', ar: 'متابع الاجتماعات والإشراف' },
     builtIn: true,
   },
   {
     id: 'content-creator',
     icon: 'palette',
     color: 'pink',
-    name: { en: 'Al-Dabsa (\u0627\u0644\u062f\u0628\u0633\u0627)', ar: '\u0627\u0644\u062f\u0628\u0633\u0627' },
-    description: { en: 'Arabic educational content', ar: '\u0645\u062d\u062a\u0648\u0649 \u062a\u0639\u0644\u064a\u0645\u064a \u0639\u0631\u0628\u064a' },
+    name: { en: 'Al-Sarid', ar: 'السارد' },
+    description: { en: 'Arabic educational content', ar: 'المحتوى التعليمي العربي' },
     builtIn: true,
   },
   {
     id: 'tasks-agent',
     icon: 'check-square',
     color: 'emerald',
-    name: { en: 'Maham (\u0645\u0647\u0627\u0645)', ar: '\u0645\u0647\u0627\u0645' },
-    description: { en: 'Task manager', ar: '\u0645\u062f\u064a\u0631 \u0627\u0644\u0645\u0647\u0627\u0645' },
+    name: { en: 'Maham', ar: 'مهام' },
+    description: { en: 'Task manager', ar: 'مدير المهام' },
     builtIn: true,
   },
 ];
@@ -271,10 +308,21 @@ export function HomePage() {
         </button>
       </div>
 
+      {/* Quick Start Templates */}
+      <div className="w-full max-w-2xl mb-6">
+        <QuickStart
+          language={language as 'ar' | 'en'}
+          onSelect={(msg, _agentId) => {
+            setMessage(msg);
+            setTimeout(() => inputRef.current?.focus(), 50);
+          }}
+        />
+      </div>
+
       {/* Top Agents */}
       <div className="w-full max-w-2xl">
         <p className="text-xs text-on-surface-tertiary uppercase tracking-wider mb-3 px-1">
-          {isRTL ? 'الوكلاء الأكثر استخداماً' : 'Most Used Agents'}
+          {isRTL ? 'الوكلاء' : 'Agents'}
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {agents.slice(0, 4).map((agent) => {

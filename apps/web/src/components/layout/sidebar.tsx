@@ -57,14 +57,24 @@ interface Conversation {
 
 const AGENT_SHORT_NAMES: Record<string, { en: string; ar: string }> = {
   manager: { en: "Al-Ra'i", ar: 'الراعي' },
-  research: { en: 'Abdan', ar: 'عبدان' },
-  'reading-helper': { en: 'Shwasha', ar: 'شواشة' },
-  'writing-critic': { en: 'Al-Safra', ar: 'الصفرا' },
-  comparator: { en: 'Rammana', ar: 'رمّانة' },
+  doctor: { en: 'Al-Duktor', ar: 'الدكتور' },
+  research: { en: 'Al-Bahith', ar: 'الباحث' },
+  'reading-helper': { en: 'Al-Mulakhkhis', ar: 'المُلخِّص' },
+  'writing-critic': { en: 'Al-Naqid', ar: 'الناقد' },
+  comparator: { en: 'Al-Muqarin', ar: 'المُقارِن' },
   architect: { en: 'Al-Musammim', ar: 'المصمم' },
-  'content-creator': { en: 'Al-Dabsa', ar: 'الدبسا' },
-  creative: { en: 'The Creative', ar: 'الكرييتف' },
+  'content-creator': { en: 'Al-Sarid', ar: 'السارد' },
+  creative: { en: "Al-Mubdi'", ar: 'المبدع' },
   'tasks-agent': { en: 'Maham', ar: 'مهام' },
+  analyst: { en: 'Al-Muhallil', ar: 'المحلل' },
+  munazzim: { en: 'Al-Munazzim', ar: 'المنظّم' },
+  mushakhkhis: { en: 'Al-Mushakhkhis', ar: 'المشخّص' },
+  fatin: { en: 'Al-Fatin', ar: 'الفطين' },
+  playmaker: { en: 'Al-Mumarrir', ar: 'المُمرر' },
+  'research-companion': { en: 'Al-Khuwy', ar: 'الخوي' },
+  mudawwin: { en: 'Al-Mudawwin', ar: 'المُدوّن' },
+  sayyaq: { en: 'Al-Katib', ar: 'الكاتب' },
+  clippy: { en: 'Clippy', ar: 'Clippy' },
 };
 
 interface NavItem {
@@ -157,7 +167,7 @@ const SIDEBAR_GROUPS: SidebarGroup[] = [
   {
     id: 'system',
     label: { en: 'System', ar: 'النظام' },
-    items: ['analyst', 'conversations', 'files', 'blackbox', 'settings'],
+    items: ['analyst', 'usage', 'conversations', 'files', 'blackbox', 'settings'],
     defaultOpen: false,
   },
 ];
