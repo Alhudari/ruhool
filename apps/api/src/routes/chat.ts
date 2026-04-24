@@ -423,7 +423,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       if (rq) {
         rq.add('research', { taskId }, { jobId: taskId });
       } else {
-        setTimeout(() => { void runResearch(taskId).catch((err) => { console.error({ err, taskId }, "runResearch failed"); }); }, 0);
+        setTimeout(() => { const p = runResearch(taskId); if (p && typeof p.catch === "function") void p.catch((err: unknown) => { console.error({ err, taskId }, "runResearch failed"); }); }, 0);
       }
 
       const responseText = isArabic
