@@ -149,6 +149,17 @@ export function TasksPage() {
     try { window.localStorage.setItem('ruhool.tasks.workspace-filter', workspaceFilter); } catch { /* noop */ }
   }, [workspaceFilter]);
   const [editingTask, setEditingTask] = useState<TaskItem | null>(null);
+
+  const openNewHabit = () => {
+    const now = new Date().toISOString();
+    setEditingTask({
+      id: '', title: '', notes: '', completed: false,
+      priority: 'none', dueDate: null, dueTime: null,
+      list: 'عام', tags: [], color: 'none', pinned: false,
+      checklist: [], reminder: null, createdAt: now, updatedAt: now,
+      completedAt: null, isHabit: true, habitFrequency: 'daily', habitDays: [],
+    });
+  };
   const [loadError, setLoadError] = useState<string | null>(null);
   const [quickAddText, setQuickAddText] = useState('');
   const [newListName, setNewListName] = useState('');
@@ -305,11 +316,20 @@ export function TasksPage() {
 
   const saveTask = async (task: TaskItem) => {
     try {
-      const updated = await apiFetch<TaskItem>(`/api/tasks/${task.id}`, {
-        method: 'PUT',
-        body: JSON.stringify(task),
-      });
-      setTasks(prev => prev.map(t => t.id === task.id ? updated : t));
+      if (!task.id) {
+        // Create new task
+        const created = await apiFetch<TaskItem>('/api/tasks', {
+          method: 'POST',
+          body: JSON.stringify(task),
+        });
+        setTasks(prev => [created, ...prev]);
+      } else {
+        const updated = await apiFetch<TaskItem>(`/api/tasks/${task.id}`, {
+          method: 'PUT',
+          body: JSON.stringify(task),
+        });
+        setTasks(prev => prev.map(t => t.id === task.id ? updated : t));
+      }
       setEditingTask(null);
     } catch {}
   };
@@ -702,7 +722,7 @@ export function TasksPage() {
       </div>
 
       {/* Today filter — Round 6 */}
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
         <span className="text-[11px] text-on-surface-tertiary shrink-0">
           {isRTL ? 'العرض:' : 'View:'}
         </span>
@@ -724,6 +744,15 @@ export function TasksPage() {
             {isRTL ? v.labelAr : v.labelEn}
           </button>
         ))}
+        {todayView === 'habits' && (
+          <button
+            onClick={openNewHabit}
+            className="ms-auto flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-accent text-on-accent border border-accent hover:opacity-90 transition-opacity"
+          >
+            <Plus size={12} />
+            {isRTL ? 'عادة جديدة' : 'New Habit'}
+          </button>
+        )}
       </div>
 
       {/* Workspace filter — Round 4 */}
@@ -838,8 +867,22 @@ export function TasksPage() {
           {filtered.length === 0 && !tasks.some(t => t.completed) && (
             <div className="text-center py-16 text-on-surface-tertiary">
               <CheckSquare size={40} className="mx-auto mb-3 opacity-30" />
-              <p className="text-sm">{isRTL ? '\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0647\u0627\u0645 \u0628\u0639\u062f' : 'No tasks yet'}</p>
-              <p className="text-xs mt-1">{isRTL ? '\u0623\u0636\u0641 \u0645\u0647\u0645\u0629 \u062c\u062f\u064a\u062f\u0629 \u0645\u0646 \u0627\u0644\u0623\u0633\u0641\u0644' : 'Add a task from below'}</p>
+              <p className="text-sm">
+                {todayView === 'habits'
+                  ? (isRTL ? '\u0644\u0627 \u062a\u0648\u062c\u062f \u0639\u0627\u062f\u0627\u062a \u0628\u0639\u062f' : 'No habits yet')
+                  : (isRTL ? '\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0647\u0627\u0645 \u0628\u0639\u062f' : 'No tasks yet')}
+              </p>
+              {todayView === 'habits' ? (
+                <button
+                  onClick={openNewHabit}
+                  className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent text-on-accent text-sm hover:opacity-90 transition-opacity"
+                >
+                  <Plus size={14} />
+                  {isRTL ? '\u0623\u0636\u0641 \u0639\u0627\u062f\u0629 \u062c\u062f\u064a\u062f\u0629' : 'Add your first habit'}
+                </button>
+              ) : (
+                <p className="text-xs mt-1">{isRTL ? '\u0623\u0636\u0641 \u0645\u0647\u0645\u0629 \u062c\u062f\u064a\u062f\u0629 \u0645\u0646 \u0627\u0644\u0623\u0633\u0641\u0644' : 'Add a task from below'}</p>
+              )}
             </div>
           )}
         </div>
@@ -871,7 +914,18 @@ export function TasksPage() {
           {filtered.length === 0 && (
             <div className="text-center py-16 text-on-surface-tertiary col-span-full">
               <CheckSquare size={40} className="mx-auto mb-3 opacity-30" />
-              <p className="text-sm">{isRTL ? '\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0647\u0627\u0645' : 'No tasks'}</p>
+              <p className="text-sm">
+                {todayView === 'habits' ? (isRTL ? '\u0644\u0627 \u062a\u0648\u062c\u062f \u0639\u0627\u062f\u0627\u062a' : 'No habits') : (isRTL ? '\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0647\u0627\u0645' : 'No tasks')}
+              </p>
+              {todayView === 'habits' && (
+                <button
+                  onClick={openNewHabit}
+                  className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent text-on-accent text-sm hover:opacity-90 transition-opacity"
+                >
+                  <Plus size={14} />
+                  {isRTL ? '\u0623\u0636\u0641 \u0639\u0627\u062f\u0629' : 'Add habit'}
+                </button>
+              )}
             </div>
           )}
           {!showCompleted && tasks.some(t => t.completed) && (
