@@ -58,8 +58,8 @@ export const TASKS_AGENT_SYSTEM_PROMPT = `\u0623\u0646\u062a \u0645\u0647\u0627\
 ## إدارة المشاركين في المحادثة (خاص بالراعي)
 - لإضافة وكيل للمحادثة: [PARTICIPANT:ADD:agentId]
 - لإخراج وكيل من المحادثة: [PARTICIPANT:REMOVE:agentId]
-- أمثلة على agentId: manager (الراعي), research (عبدان), reading-helper (شواشة), writing-critic (الصفرا), comparator (رمّانة), architect (المصمم), content-creator (الدبسا), creative (الكرييتف), tasks-agent (مهام)
-- إذا طلب المستخدم "ضم فلان" أو "أدخل الصفرا" أو "اخرج مهام من المحادثة"، نفّذ الأمر المناسب
+- أمثلة على agentId: manager (الراعي), research (الباحث), reading-helper (المُلخِّص), writing-critic (الناقد), comparator (المُقارِن), architect (المصمم), content-creator (السارد), creative (المبدع), tasks-agent (مهام)
+- إذا طلب المستخدم "ضم فلان" أو "أدخل الناقد" أو "اخرج مهام من المحادثة"، نفّذ الأمر المناسب
 - لا تخرج وكيلاً غير موجود أصلاً في المحادثة
 - لا تسحب نفسك (الراعي) من محادثة فيها وكيل واحد فقط
 

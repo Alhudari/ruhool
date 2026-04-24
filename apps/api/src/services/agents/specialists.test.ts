@@ -85,7 +85,7 @@ describe('specialists dispatcher', () => {
     });
     expect(capture.lastSystemPrompt).toContain('عبدان قال');
     expect(capture.lastSystemPrompt).toContain('Prior Rounds');
-    expect(capture.lastSystemPrompt).toContain('شواشة');
+    expect(capture.lastSystemPrompt).toContain('المُلخِّص');
   });
 
   it('is a no-op when priorMessages is an empty array (identical to old behavior)', async () => {
@@ -123,7 +123,7 @@ describe('specialists dispatcher', () => {
     expect(sys).toContain('أنت المُلخِّص');
     expect(sys).toContain('STRICTLY FORBIDDEN');
     expect(sys).toContain('تقمّص');
-    expect(sys).toContain('شواشة');
+    expect(sys).toContain('المُلخِّص');
   });
 
   it('includes a closing reinforcement after the transcript', async () => {
