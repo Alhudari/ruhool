@@ -174,7 +174,7 @@ export function createResearchService(deps: ResearchServiceDeps) {
       let finalReport = '';
       for await (const chunk of provider.chat({
         model: 'claude-sonnet-4-6',
-        systemPrompt: `You are عبدان, a deep research agent. Compile the research analyses into a unified, well-structured academic report with clear section headings. When you cite findings, map [S#-#] markers to numeric citations [1], [2], etc. matching the References list. The References list is already formatted in APA style and must be appended verbatim at the end under "## References". ${langInstruction}`,
+        systemPrompt: `You are الباحث (Al-Bahith), a deep research agent. Compile the research analyses into a unified, well-structured academic report with clear section headings. When you cite findings, map [S#-#] markers to numeric citations [1], [2], etc. matching the References list. The References list is already formatted in APA style and must be appended verbatim at the end under "## References". ${langInstruction}`,
         messages: [{ role: 'user', content: `Topic: ${task.query}\n\nResearch analyses:\n${compiledAnalyses}\n\nReferences (APA):\n${apaReferences || '(no web sources — no references)'}` }],
         maxTokens: isDeep ? 6000 : 2048,
       })) {
