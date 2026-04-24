@@ -17,6 +17,7 @@ import { parseNaturalTime } from '../services/natural-time.js';
 import { sanitizeUserInput } from '../services/security/sanitize-input.js';
 import { flag } from '../services/flags.js';
 import { shouldInjectReportActions, buildReportsContextBlock, REPORT_ACTIONS_PROMPT } from '../services/chat/report-actions.js';
+import { wrapToolResult } from '../services/security/trust-wrap.js';
 
 import {
   parseAndExecuteActions,
@@ -1019,36 +1020,38 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 .slice(0, 8);
               const topRated = items.filter((i) => i.rating >= 2).slice(0, 5);
 
-              activeSystemPrompt += `\n\n## مكتبة Zotero الفعلية (محقونة من /api/zotero)\n\n`;
-              activeSystemPrompt += `**الإحصائيات**:\n`;
-              activeSystemPrompt += `- إجمالي المصادر: ${total}\n`;
-              activeSystemPrompt += `- المجموعات: ${collections.length}\n`;
-              activeSystemPrompt += `- للقراءة: ${toRead} | يقرأها: ${reading} | مقروءة: ${read}\n`;
-              activeSystemPrompt += `- بدون تصنيف: ${total - toRead - reading - read}\n\n`;
+              // B-2: Zotero data is external — wrap with trust="low"
+              let zoteroBlock = `## مكتبة Zotero الفعلية\n\n`;
+              zoteroBlock += `**الإحصائيات**:\n`;
+              zoteroBlock += `- إجمالي المصادر: ${total}\n`;
+              zoteroBlock += `- المجموعات: ${collections.length}\n`;
+              zoteroBlock += `- للقراءة: ${toRead} | يقرأها: ${reading} | مقروءة: ${read}\n`;
+              zoteroBlock += `- بدون تصنيف: ${total - toRead - reading - read}\n\n`;
 
               if (collections.length > 0) {
-                activeSystemPrompt += `**المجموعات الموجودة** (لا تقترح إنشاء جديدة قبل التحقق):\n`;
-                for (const col of collections.slice(0, 15)) activeSystemPrompt += `- ${col.name}\n`;
-                activeSystemPrompt += `\n`;
+                zoteroBlock += `**المجموعات الموجودة**:\n`;
+                for (const col of collections.slice(0, 15)) zoteroBlock += `- ${col.name}\n`;
+                zoteroBlock += `\n`;
               }
 
               if (recent.length > 0) {
-                activeSystemPrompt += `**أحدث ${recent.length} مصادر مُضافة**:\n`;
+                zoteroBlock += `**أحدث ${recent.length} مصادر مُضافة**:\n`;
                 for (const it of recent) {
-                  activeSystemPrompt += `- "${it.title.slice(0, 100)}" (${it.year ?? 'n.d.'})${it.authors ? ` — ${it.authors.split(',')[0]}` : ''}${it.doi ? ` | DOI: ${it.doi}` : ''}\n`;
+                  zoteroBlock += `- "${it.title.slice(0, 100)}" (${it.year ?? 'n.d.'})${it.authors ? ` — ${it.authors.split(',')[0]}` : ''}${it.doi ? ` | DOI: ${it.doi}` : ''}\n`;
                 }
-                activeSystemPrompt += `\n`;
+                zoteroBlock += `\n`;
               }
 
               if (topRated.length > 0) {
-                activeSystemPrompt += `**أوراق مُقيّمة عالياً (⭐⭐+)**:\n`;
+                zoteroBlock += `**أوراق مُقيّمة عالياً (⭐⭐+)**:\n`;
                 for (const it of topRated) {
-                  activeSystemPrompt += `- ${'⭐'.repeat(it.rating)} "${it.title.slice(0, 80)}" (${it.year ?? 'n.d.'})\n`;
+                  zoteroBlock += `- ${'⭐'.repeat(it.rating)} "${it.title.slice(0, 80)}" (${it.year ?? 'n.d.'})\n`;
                 }
-                activeSystemPrompt += `\n`;
+                zoteroBlock += `\n`;
               }
 
-              activeSystemPrompt += `**ملاحظة**: عند اقتراح ورقة، **ابحث في هذه القائمة أولاً** قبل اقتراح خارجية. لو موجودة، أحل المستخدم لـ \`/zotero\` مع اسم الورقة.\n`;
+              zoteroBlock += `**ملاحظة**: عند اقتراح ورقة، **ابحث في هذه القائمة أولاً** قبل اقتراح خارجية.\n`;
+              activeSystemPrompt += '\n\n' + (flag('TOOL_TRUST_WRAP') ? wrapToolResult('zotero', zoteroBlock) : zoteroBlock);
             } catch (err) {
               activeSystemPrompt += `\n\n_⚠️ تعذّر الوصول إلى Zotero (${err instanceof Error ? err.message.slice(0, 100) : 'unknown'}). إذا سُئلت عن مكتبتي قل: "Zotero غير متاح حالياً، تأكد أن التطبيق مفتوح أو الاتصال بالـ Web API يعمل."_\n`;
             }
@@ -1519,14 +1522,13 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                   await stream.writeSSE({ event: 'approvals', data: JSON.stringify({ approvals: actions }) });
                 }
               }
-              if (detectedAgent === 'manager' && !toolUseDispatched) {
+              // B-8: when TOOL_USE_ONLY_DELEGATION flag is on, skip text marker fallback entirely
+              if (detectedAgent === 'manager' && !toolUseDispatched && !flag('TOOL_USE_ONLY_DELEGATION')) {
                 try {
                   const dels = parseTextMarkerDelegations(fullResponse);
                   if (dels.length > 0) {
                     bootLogger.warn({ fallback: 'text-marker', count: dels.length }, 'AGT-05 fallback triggered');
                     logDelegations(dels, logActivity, { conversationId: convId });
-                    // BUG A FIX: legacy `delegations` event produced a second
-                    // bubble summary alongside v2 per-agent bubbles.
                     if (!CHAT_V2) {
                       await stream.writeSSE({ event: 'delegations', data: JSON.stringify({ delegations: dels }) });
                     }
@@ -1799,7 +1801,8 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 await stream.writeSSE({ event: 'approvals', data: JSON.stringify({ approvals: actions }) });
               }
             }
-            if (detectedAgent === 'manager' && !toolUseDispatched) {
+            // B-8: gate text marker fallback behind flag
+            if (detectedAgent === 'manager' && !toolUseDispatched && !flag('TOOL_USE_ONLY_DELEGATION')) {
               try {
                 const dels = parseTextMarkerDelegations(fullResponse);
                 if (dels.length > 0) {
