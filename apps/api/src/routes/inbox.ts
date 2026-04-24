@@ -10,6 +10,7 @@
  *   POST   /api/inbox/:id/ask-rumman  — ask Rumman where this should go
  */
 import type { Hono } from 'hono';
+import crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { writeNoteRaw, getVaultRoot, writeFrontmatter } from '@ruhool/core';
@@ -20,15 +21,25 @@ export type InboxKind = 'note' | 'image' | 'link' | 'voice-memo';
 export interface InboxItem {
   id: string;
   kind: InboxKind;
+  type: 'note' | 'inbox';
   title?: string;
   content?: string;
-  imagePath?: string;   // vault-relative path of saved image
+  imagePath?: string;
   url?: string;
   tags?: string[];
+  color: string;               // default '#fef08a' yellow for notes
+  category?: 'phd' | 'life' | 'general';
+  linkedTaskId?: string;
+  linkedEntityId?: string;
+  isProcessed: boolean;
+  processingStatus: 'pending' | 'processing' | 'done' | 'error';
+  aiSummary?: string;
   capturedAt: string;
-  capturedFrom?: string; // 'manual' | 'rumman' | 'shwasha' | 'mudawwin'
+  capturedFrom?: string;
   promoted?: boolean;
   promotedTo?: string;
+  archivedAt?: string;
+  deletedAt?: string;
 }
 
 interface Deps {
@@ -42,14 +53,52 @@ function getInboxStore(store: unknown): InboxItem[] {
   return s.inboxItems;
 }
 
+function migrateItem(i: Partial<InboxItem>): InboxItem {
+  return {
+    id: i.id ?? '',
+    kind: i.kind ?? 'note',
+    type: i.type ?? 'inbox',
+    title: i.title,
+    content: i.content,
+    imagePath: i.imagePath,
+    url: i.url,
+    tags: i.tags ?? [],
+    color: i.color ?? '#fef08a',
+    category: i.category,
+    linkedTaskId: i.linkedTaskId,
+    linkedEntityId: i.linkedEntityId,
+    isProcessed: i.isProcessed ?? false,
+    processingStatus: i.processingStatus ?? 'pending',
+    aiSummary: i.aiSummary,
+    capturedAt: i.capturedAt ?? new Date().toISOString(),
+    capturedFrom: i.capturedFrom,
+    promoted: i.promoted,
+    promotedTo: i.promotedTo,
+    archivedAt: i.archivedAt,
+    deletedAt: i.deletedAt,
+  };
+}
+
 export function registerInboxRoutes(app: Hono, { getStore, saveStore }: Deps): void {
 
   // ── List ─────────────────────────────────────────────────────────────
   app.get('/api/inbox', (c) => {
-    const items = getInboxStore(getStore())
-      .filter((i) => !i.promoted)
+    const category = c.req.query('category');
+    const unprocessed = c.req.query('unprocessed') === 'true';
+    let items = getInboxStore(getStore())
+      .filter(i => !i.promoted && !i.deletedAt)
+      .map(migrateItem)
       .sort((a, b) => b.capturedAt.localeCompare(a.capturedAt));
-    return c.json({ items, total: items.length });
+    if (category) items = items.filter(i => i.category === category);
+    if (unprocessed) items = items.filter(i => !i.isProcessed);
+    return c.json({ items, total: items.length, unprocessed: items.filter(i => !i.isProcessed).length });
+  });
+
+  // ── Count unprocessed ─────────────────────────────────────────────────
+  app.get('/api/inbox/count', (c) => {
+    const items = getInboxStore(getStore()).filter(i => !i.promoted && !i.deletedAt);
+    const unprocessed = items.filter(i => !(i as { isProcessed?: boolean }).isProcessed).length;
+    return c.json({ total: items.length, unprocessed });
   });
 
   // ── Capture ──────────────────────────────────────────────────────────
@@ -69,10 +118,15 @@ export function registerInboxRoutes(app: Hono, { getStore, saveStore }: Deps): v
     const item: InboxItem = {
       id,
       kind: body.kind,
+      type: 'inbox',
       title: body.title,
       content: body.content,
       url: body.url,
       tags: body.tags ?? [],
+      color: body.kind === 'note' ? '#fef08a' : '#ffffff',
+      category: (body as { category?: 'phd' | 'life' | 'general' }).category,
+      isProcessed: false,
+      processingStatus: 'pending',
       capturedAt: new Date().toISOString(),
       capturedFrom: body.capturedFrom ?? 'manual',
     };
@@ -102,13 +156,15 @@ export function registerInboxRoutes(app: Hono, { getStore, saveStore }: Deps): v
   // ── Update ───────────────────────────────────────────────────────────
   app.patch('/api/inbox/:id', async (c) => {
     const { id } = c.req.param();
-    const body = await c.req.json<Partial<Pick<InboxItem, 'title' | 'content' | 'tags' | 'url'>>>();
+    const body = await c.req.json<Partial<Pick<InboxItem,
+      'title' | 'content' | 'tags' | 'url' | 'category' | 'color' | 'isProcessed' | 'processingStatus' | 'aiSummary' | 'linkedTaskId' | 'linkedEntityId'
+    >>>();
     const items = getInboxStore(getStore());
     const item = items.find((i) => i.id === id);
     if (!item) return c.json({ error: 'not found' }, 404);
     Object.assign(item, body);
     saveStore();
-    return c.json(item);
+    return c.json(migrateItem(item));
   });
 
   // ── Discard ──────────────────────────────────────────────────────────

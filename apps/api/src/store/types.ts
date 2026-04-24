@@ -778,6 +778,36 @@ export interface Grs2Record {
   reminderSent?: boolean;
 }
 
+// ─── Phase 7 — Inbox QuickItem ───────────────────────────────────────────────
+
+export type InboxCategory = 'phd' | 'life' | 'general';
+export type InboxProcessingStatus = 'pending' | 'processing' | 'done' | 'error';
+
+export interface InboxItemRecord {
+  id: string;
+  kind: 'note' | 'image' | 'link' | 'voice-memo';
+  type: 'note' | 'inbox';
+  title?: string;
+  content?: string;
+  imagePath?: string;
+  url?: string;
+  tags?: string[];
+  color: string;               // default '#fef08a' yellow
+  category?: InboxCategory;
+  linkedTaskId?: string;
+  linkedEntityId?: string;
+  processedByAgent?: string;
+  aiSummary?: string;
+  isProcessed: boolean;
+  processingStatus: InboxProcessingStatus;
+  capturedAt: string;
+  capturedFrom?: string;
+  promoted?: boolean;
+  promotedTo?: string;
+  archivedAt?: string;
+  deletedAt?: string;
+}
+
 // ─── Unified Library (Phase 4) ───────────────────────────────────────────────
 
 export type EntityType =
@@ -1044,6 +1074,7 @@ export interface StoreData {
   grs2Records?: Grs2Record[];
   milestones?: MilestoneRecord[];
   libraryEntities?: LibraryEntity[];
+  inboxItems?: InboxItemRecord[];
   tags?: TagRecord[];
   tagAssignments?: TagAssignment[];
   researchClusters?: ResearchCluster[];
