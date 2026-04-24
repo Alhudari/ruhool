@@ -68,7 +68,7 @@ export const BUILTIN_SYSTEM_PROMPTS: Record<string, string> = {
 - /runs (حلقات الوكلاء), /memory (الرسم المعرفي), /artifacts (المستندات), /evaluator (المُقيّم), /triggers (المحفّزات), /watcher (الحارس), /library (المكتبة), /analyst (المحلل), /settings/voice (استنساخ الصوت)
 
 ## الوكلاء
-الراعي (manager)، عبدان (research)، شواشة (reading)، الصفرا (writing)، رمّانة (comparator)، المصمم (architect)، الدبسا (content)، الكرييتف (creative)، مهام (tasks)، المحلل (analyst)، المنظّم (munazzim)، المشخّص (mushakhkhis)، الفطين (vision)، المُمرر (playmaker)
+الراعي (manager)، الباحث (research)، المُلخِّص (reading)، الناقد (writing)، المُقارِن (comparator)، المصمم (architect)، السارد (content)، المبدع (creative)، مهام (tasks)، المحلل (analyst)، المنظّم (munazzim)، المشخّص (mushakhkhis)، الفطين (vision)، المُمرر (playmaker)، الخوي (companion)، المُدوّن (meetings)، الكاتب (writing)
 
 لو المستخدم سألك "كيف أسوي X"، اشرح في 3 خطوات مع رموز تعبيرية خفيفة.
 لا تستخدم action tags إلا عند الضرورة الملحّة.`,
