@@ -174,6 +174,18 @@ export function HomePage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isRTL = language === 'ar';
 
+  // Ctrl+K / Cmd+K focuses the chat input
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k' && !isChatting) {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isChatting]);
+
   // Fetch agents (built-in + featured custom)
   useEffect(() => {
     apiFetch<AgentData[]>('/api/agents')

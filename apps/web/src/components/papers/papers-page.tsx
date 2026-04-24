@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Upload, FileText, BookOpen, Loader2, ChevronDown, ChevronUp, HelpCircle } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Upload, FileText, BookOpen, Loader2, ChevronDown, ChevronUp, HelpCircle, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch, API_BASE_URL } from '@/lib/api';
@@ -203,6 +204,7 @@ const GUIDED_QUESTIONS = {
 
 function ReadingView({ paper, notes, onBack, language }: { paper: Paper; notes: Note[]; onBack: () => void; language: 'en' | 'ar' }) {
   const isRTL = language === 'ar';
+  const router = useRouter();
   const [expandedIdx, setExpandedIdx] = useState<number | null>(0);
   const [noteContent, setNoteContent] = useState('');
   const [noteType, setNoteType] = useState<string>('claim');
@@ -237,7 +239,35 @@ function ReadingView({ paper, notes, onBack, language }: { paper: Paper; notes: 
         <button onClick={onBack} className="text-sm text-accent hover:underline">
           {isRTL ? '← رجوع' : '← Back'}
         </button>
-        <h2 className="text-sm font-medium text-on-surface truncate">{paper.title || paper.filename}</h2>
+        <h2 className="text-sm font-medium text-on-surface truncate flex-1">{paper.title || paper.filename}</h2>
+        <button
+          onClick={() => {
+            const title = paper.title || paper.filename;
+            const msg = isRTL
+              ? `@الباحث ابحث عن أوراق ذات صلة بـ: "${title}"`
+              : `@research Find papers related to: "${title}"`;
+            router.push(`/?q=${encodeURIComponent(msg)}`);
+          }}
+          className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 transition-colors shrink-0"
+          title={isRTL ? 'ناقش مع الباحث' : 'Chat with Al-Bahith'}
+        >
+          <MessageSquare className="h-3.5 w-3.5" />
+          {isRTL ? 'الباحث' : 'Al-Bahith'}
+        </button>
+        <button
+          onClick={() => {
+            const title = paper.title || paper.filename;
+            const msg = isRTL
+              ? `@المُلخِّص لخّص هذه الورقة وأبرز النقاط الرئيسية: "${title}"`
+              : `@reading-helper Summarize this paper and highlight key points: "${title}"`;
+            router.push(`/?q=${encodeURIComponent(msg)}`);
+          }}
+          className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 transition-colors shrink-0"
+          title={isRTL ? 'لخّص مع المُلخِّص' : 'Summarize with Al-Mulakhkhis'}
+        >
+          <MessageSquare className="h-3.5 w-3.5" />
+          {isRTL ? 'المُلخِّص' : 'Al-Mulakhkhis'}
+        </button>
       </div>
 
       {/* Split-screen layout: sections nav + content on left, notes on right (desktop) */}
