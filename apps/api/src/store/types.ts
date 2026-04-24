@@ -1119,6 +1119,8 @@ export interface StoreData {
   subscriptions?: unknown[];
   // ---- Time + timezone ----
   timezones?: { primary: string; secondary?: string };
+  // ---- A-2: Agent Task Queue ----
+  agentTasks?: AgentTaskRecord[];
 }
 
 export interface ProjectFile {
@@ -1266,4 +1268,28 @@ export interface ReportRunRecord {
   startedAt: string;
   finishedAt?: string | null;
   recipients: string[];
+}
+
+// ─── A-2: Agent Task Queue ────────────────────────────────────────────────────
+
+export type AgentTaskStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+
+export interface AgentTaskRecord {
+  id: string;
+  agentId: string;
+  prompt: string;
+  status: AgentTaskStatus;
+  scheduledFor: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  result: string | null;
+  conversationId: string | null;
+  pipelineId: string | null;
+  pipelineStepIndex: number | null;
+  createdBy: 'user' | 'pipeline' | 'schedule';
+  label: string | null;
+  reportOnComplete: boolean;
+  deletedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
