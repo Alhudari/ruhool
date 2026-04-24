@@ -85,6 +85,7 @@ import type { DispatcherLLM } from './services/dispatch/index.js';
 import { startAgentOrgWatcher, onAgentOrgChanged } from './state/agent-org-watcher.js';
 import { invalidateAgentOrgCache } from './routes/agents.js';
 import { startResearchWorker as startResearchBullMQWorker } from './workers/bullmq.js';
+import { startAgentTaskWorker } from './services/agent-task-worker.js';
 import { createAudioService, FALLBACK_ELEVENLABS_VOICE } from './services/audio.js';
 import { createChatHelpers } from './services/chat-helpers.js';
 import { createResearchService } from './routes/research.js';
@@ -491,6 +492,36 @@ import { broadcastToConversation } from './state/conversation-channels.js';
 import { createImageService } from './services/generation/images.js';
 import { createGenerationAudioService } from './services/generation/audio.js';
 import { createVideoService } from './services/generation/video.js';
+
+// A-3: Agent Task Worker — polls every 30s, runs due tasks directly via specialistsDispatch
+startAgentTaskWorker({
+  getStore: () => store,
+  saveStore,
+  runTask: async (task) => {
+    if (task.prompt.startsWith('reminder:')) {
+      return task.prompt.replace('reminder:', '').trim();
+    }
+    const model = 'claude-sonnet-4-6';
+    const provider = pickProviderForModel(model);
+    if (!provider) throw new Error('no provider for agent task worker');
+    const result = await specialistsDispatchImpl({
+      specialist: task.agentId,
+      task: task.prompt,
+      priorMessages: [],
+      roundNumber: 1,
+      deps: {
+        provider,
+        model,
+        logger: { info: (o, m) => bootLogger.info(o, m) },
+        logActivity: ({ from, to, task: t }) => {
+          logActivity('task', `${from} → ${to}`, t.slice(0, 200), { agentId: to });
+        },
+        from: 'worker',
+      },
+    });
+    return result.output;
+  },
+});
 
 // ─── Phase 5: generation services ───
 const imageService = createImageService({
