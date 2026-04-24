@@ -148,6 +148,38 @@ export function ReadingPage({ sessionId }: ReadingPageProps) {
   const [synthesisOpen, setSynthesisOpen] = useState(false);
   const [approvedPages, setApprovedPages] = useState<Set<number>>(new Set());
 
+  // ─── J-12: Reading status + depth ───
+  type ReadingStatus = 'to-read' | 'skimming' | 'reading' | 'paused' | 'done';
+  type ReadingDepth = 'title-abstract-conclusion' | 'scan-only' | 'selective' | 'full';
+  const [sessionReadingStatus, setSessionReadingStatus] = useState<ReadingStatus>('reading');
+  const [sessionReadingDepth, setSessionReadingDepth] = useState<ReadingDepth | ''>('');
+  const [pauseNote, setPauseNote] = useState('');
+  const [statusBarOpen, setStatusBarOpen] = useState(false);
+
+  const STATUS_LABELS: Record<ReadingStatus, { en: string; ar: string }> = {
+    'to-read':  { en: 'To Read',  ar: 'للقراءة' },
+    'skimming': { en: 'Skimming', ar: 'تصفح' },
+    'reading':  { en: 'Reading',  ar: 'يُقرأ' },
+    'paused':   { en: 'Paused',   ar: 'موقوف' },
+    'done':     { en: 'Done',     ar: 'مكتمل' },
+  };
+  const DEPTH_LABELS: Record<ReadingDepth, { en: string; ar: string }> = {
+    'title-abstract-conclusion': { en: 'Title/Abstract/Conclusion', ar: 'عنوان/ملخص/خاتمة' },
+    'scan-only':  { en: 'Scan only',  ar: 'تصفح فقط' },
+    'selective':  { en: 'Selective',  ar: 'انتقائي' },
+    'full':       { en: 'Full read',  ar: 'قراءة كاملة' },
+  };
+
+  const updateStatus = async (status: ReadingStatus) => {
+    setSessionReadingStatus(status);
+    if (!sessionId) return;
+    await apiFetch(`/api/reading/sessions/${sessionId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ readingStatus: status, pauseNote: status === 'paused' ? pauseNote : undefined }),
+    }).catch(() => {});
+  };
+
   // ─── TAC mode ───
   const [tacSubmitting, setTacSubmitting] = useState(false);
   const [tacCandidates, setTacCandidates] = useState<Array<{ index: number; title: string; snippet: string }> | null>(null);
@@ -707,7 +739,47 @@ export function ReadingPage({ sessionId }: ReadingPageProps) {
           >
             {modeMeta[isRTL ? 'ar' : 'en']}
           </span>
+          {/* J-12: Reading status toggle */}
+          <button onClick={() => setStatusBarOpen(v => !v)}
+            className="text-[11px] px-2 py-0.5 rounded-full border border-border text-on-surface-secondary hover:bg-surface-secondary whitespace-nowrap">
+            {STATUS_LABELS[sessionReadingStatus][isRTL ? 'ar' : 'en']}
+          </button>
         </div>
+        {/* Status panel — shows below header when open */}
+        {statusBarOpen && (
+          <div className="w-full basis-full mt-2 border-t border-border pt-2 space-y-2">
+            {/* Status buttons */}
+            <div className="flex gap-1.5 flex-wrap">
+              {(Object.entries(STATUS_LABELS) as [ReadingStatus, { en: string; ar: string }][]).map(([k, v]) => (
+                <button key={k} onClick={() => updateStatus(k)}
+                  className={cn('text-[11px] px-2.5 py-1 rounded-full border transition-colors',
+                    sessionReadingStatus === k ? 'bg-accent/15 text-accent border-accent/30 font-medium' : 'border-border text-on-surface-tertiary hover:bg-surface-secondary'
+                  )}>
+                  {isRTL ? v.ar : v.en}
+                </button>
+              ))}
+            </div>
+            {/* Depth */}
+            <div className="flex gap-1.5 flex-wrap">
+              {(Object.entries(DEPTH_LABELS) as [ReadingDepth, { en: string; ar: string }][]).map(([k, v]) => (
+                <button key={k} onClick={() => setSessionReadingDepth(k)}
+                  className={cn('text-[10px] px-2 py-0.5 rounded-full border transition-colors',
+                    sessionReadingDepth === k ? 'bg-surface-tertiary text-on-surface border-accent/30' : 'border-border text-on-surface-tertiary hover:bg-surface-secondary'
+                  )}>
+                  {isRTL ? v.ar : v.en}
+                </button>
+              ))}
+            </div>
+            {/* Pause note */}
+            {sessionReadingStatus === 'paused' && (
+              <input value={pauseNote} onChange={e => setPauseNote(e.target.value)}
+                placeholder={isRTL ? 'سبب الإيقاف...' : 'Why paused...'}
+                className="w-full rounded border border-border bg-surface-secondary px-3 py-1.5 text-xs text-on-surface focus:outline-none focus:ring-1 focus:ring-accent"
+                dir="auto"
+              />
+            )}
+          </div>
+        )}
         {isApproved && (
           <span className="text-[11px] px-2 py-0.5 rounded-full bg-success/10 text-success">
             {isRTL ? 'معتمدة' : 'Approved'}
