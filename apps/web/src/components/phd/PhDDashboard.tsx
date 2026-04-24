@@ -7,7 +7,7 @@ import {
   BookOpen, Brain, Calendar, CheckSquare, Loader2,
   GraduationCap, BookMarked, Star, RefreshCw, TrendingUp,
   Target, FlaskConical, ArrowRight, ChevronRight, Lightbulb,
-  Award, Layers, AlertTriangle, Clock, BookPlus, Crosshair,
+  Award, Layers, AlertTriangle, Clock, BookPlus, Crosshair, Plus,
   X, MessageCircle, ChevronDown, ChevronUp,
   CheckCircle2, Circle, ClipboardList, Zap, BarChart3, ChevronLeft,
 } from 'lucide-react';
@@ -280,13 +280,14 @@ function AlKhuwyPopup({ open, onClose, isRTL }: { open: boolean; onClose: () => 
 }
 
 // ── Tab IDs ────────────────────────────────────────────────────────────
-type Tab = 'overview' | 'meetings' | 'grs2' | 'tasks' | 'library-stats' | 'insights' | 'calendar' | 'supervision';
+type Tab = 'overview' | 'meetings' | 'grs2' | 'tasks' | 'library-stats' | 'insights' | 'calendar' | 'supervision' | 'milestones';
 const TABS: { id: Tab; icon: React.ElementType; label: { en: string; ar: string } }[] = [
   { id: 'overview',      icon: Layers,       label: { en: 'Overview',      ar: 'نظرة عامة' } },
   { id: 'meetings',      icon: Calendar,     label: { en: 'Meetings',      ar: 'الاجتماعات' } },
   { id: 'grs2',          icon: ClipboardList,label: { en: 'GRS2',          ar: 'GRS2' } },
   { id: 'tasks',         icon: CheckSquare,  label: { en: 'Tasks',         ar: 'المهام' } },
   { id: 'supervision',   icon: GraduationCap,label: { en: 'Supervision',   ar: 'الإشراف' } },
+  { id: 'milestones',    icon: Target,       label: { en: 'Milestones',    ar: 'المعالم' } },
   { id: 'calendar',      icon: Calendar,     label: { en: 'Calendar',      ar: 'التقويم' } },
   { id: 'library-stats', icon: BookMarked,   label: { en: 'Library',       ar: 'المكتبة' } },
   { id: 'insights',      icon: Lightbulb,    label: { en: 'Insights',      ar: 'رؤى' } },
@@ -309,6 +310,19 @@ export function PhDDashboard() {
   const [grs2Current, setGrs2Current] = useState<Grs2Record | null>(null);
   const [grs2History, setGrs2History] = useState<Grs2Record[]>([]);
   const [usageSummary, setUsageSummary] = useState<UsageSummary | null>(null);
+
+  // Milestone state (J-10)
+  interface Milestone {
+    id: string; title: string; titleAr: string; date: string;
+    status: 'upcoming' | 'in-progress' | 'completed' | 'delayed';
+    description?: string; tags: string[]; links: string[];
+    createdAt: string; updatedAt: string; deletedAt?: string;
+  }
+  const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [showMilestoneModal, setShowMilestoneModal] = useState(false);
+  const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
+  const [milestoneView, setMilestoneView] = useState<'timeline' | 'list'>('timeline');
+  const [milestoneForm, setMilestoneForm] = useState({ title: '', titleAr: '', date: '', status: 'upcoming' as Milestone['status'], description: '' });
 
   // UI state
   const [loading, setLoading] = useState(true);
@@ -341,7 +355,7 @@ export function PhDDashboard() {
     try {
       const [
         litRes, meetRes, memRes, grs2RemRes, scopeRes, zotRes,
-        tasksRes, grs2CurRes, grs2AllRes, usageRes,
+        tasksRes, grs2CurRes, grs2AllRes, usageRes, milestonesRes,
       ] = await Promise.all([
         apiFetch<{ notes: LitNote[]; total: number }>('/api/vault/literature').catch(() => ({ notes: [], total: 0 })),
         apiFetch<MeetingSession[]>('/api/meetings/sessions').catch(() => [] as MeetingSession[]),
@@ -353,6 +367,7 @@ export function PhDDashboard() {
         apiFetch<Grs2Record>('/api/grs2/current').catch(() => null),
         apiFetch<Grs2Record[]>('/api/grs2').catch(() => [] as Grs2Record[]),
         apiFetch<UsageSummary>('/api/usage/summary').catch(() => null),
+        apiFetch<Milestone[]>('/api/milestones').catch(() => [] as Milestone[]),
       ]);
 
       setLitNotes(litRes.notes);
@@ -363,6 +378,7 @@ export function PhDDashboard() {
       setScopePoints(scopeRes.scopePoints);
       setPlatformTasks(Array.isArray(tasksRes) ? tasksRes : []);
       setUsageSummary(usageRes);
+      setMilestones(Array.isArray(milestonesRes) ? milestonesRes : []);
 
       if (grs2CurRes) {
         setGrs2Current(grs2CurRes);
@@ -1624,6 +1640,197 @@ export function PhDDashboard() {
             </div>
           </div>
         )}
+
+        {/* ══════════════════════════════════════════════════════ */}
+        {/* MILESTONES TAB  (J-10)                               */}
+        {/* ══════════════════════════════════════════════════════ */}
+        {tab === 'milestones' && (() => {
+          const STATUS_CONFIG = {
+            upcoming:    { color: 'text-on-surface-tertiary', bg: 'bg-surface-tertiary',   dot: 'bg-on-surface-tertiary', label: { en: 'Upcoming',    ar: 'قادم' } },
+            'in-progress':{ color: 'text-info',              bg: 'bg-info/15',             dot: 'bg-info',               label: { en: 'In Progress', ar: 'جارٍ' } },
+            completed:   { color: 'text-success',            bg: 'bg-success/15',          dot: 'bg-success',            label: { en: 'Completed',   ar: 'مكتمل' } },
+            delayed:     { color: 'text-error',              bg: 'bg-error/15',            dot: 'bg-error',              label: { en: 'Delayed',     ar: 'متأخر' } },
+          } as const;
+
+          const sorted = [...milestones].filter(m => !m.deletedAt).sort((a, b) => a.date.localeCompare(b.date));
+
+          const saveMilestone = async () => {
+            if (!milestoneForm.title.trim()) return;
+            try {
+              if (editingMilestone) {
+                await apiFetch(`/api/milestones/${editingMilestone.id}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(milestoneForm),
+                });
+              } else {
+                await apiFetch('/api/milestones', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ ...milestoneForm, tags: [], links: [] }),
+                });
+              }
+              await load();
+              setShowMilestoneModal(false);
+              setEditingMilestone(null);
+              setMilestoneForm({ title: '', titleAr: '', date: '', status: 'upcoming', description: '' });
+            } catch { /* silent */ }
+          };
+
+          const deleteMilestone = async (id: string) => {
+            try {
+              await apiFetch(`/api/milestones/${id}`, { method: 'DELETE' });
+              setMilestones(prev => prev.filter(m => m.id !== id));
+            } catch { /* silent */ }
+          };
+
+          const openEdit = (m: Milestone) => {
+            setEditingMilestone(m);
+            setMilestoneForm({ title: m.title, titleAr: m.titleAr, date: m.date, status: m.status, description: m.description ?? '' });
+            setShowMilestoneModal(true);
+          };
+
+          return (
+            <div className="space-y-5">
+              {/* Header */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <h2 className="text-base font-bold text-on-surface">{isRTL ? 'المعالم البحثية' : 'Research Milestones'}</h2>
+                  <p className="text-xs text-on-surface-tertiary mt-0.5">{sorted.length} {isRTL ? 'معلم' : 'milestones'}</p>
+                </div>
+                <div className="flex gap-2">
+                  {(['timeline', 'list'] as const).map(v => (
+                    <button key={v} onClick={() => setMilestoneView(v)}
+                      className={cn('px-3 py-1.5 text-xs rounded-lg border transition-colors',
+                        milestoneView === v ? 'bg-accent text-on-accent border-accent' : 'border-border text-on-surface-secondary hover:bg-surface-secondary'
+                      )}>
+                      {v === 'timeline' ? (isRTL ? 'خط زمني' : 'Timeline') : (isRTL ? 'قائمة' : 'List')}
+                    </button>
+                  ))}
+                  <button onClick={() => { setEditingMilestone(null); setMilestoneForm({ title: '', titleAr: '', date: '', status: 'upcoming', description: '' }); setShowMilestoneModal(true); }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-accent text-on-accent hover:opacity-90">
+                    <Plus className="h-3.5 w-3.5" />
+                    {isRTL ? 'معلم جديد' : 'New Milestone'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Timeline view */}
+              {milestoneView === 'timeline' && sorted.length > 0 && (
+                <div className="rounded-xl border border-border bg-surface-secondary p-6">
+                  <div className="relative">
+                    {/* Horizontal line */}
+                    <div className="absolute top-4 left-4 right-4 h-0.5 bg-border" />
+                    <div className="flex justify-between relative overflow-x-auto gap-2">
+                      {sorted.map(m => {
+                        const cfg = STATUS_CONFIG[m.status];
+                        return (
+                          <button key={m.id} onClick={() => openEdit(m)}
+                            className="flex flex-col items-center gap-2 min-w-[80px] group flex-1">
+                            <div className={cn('h-4 w-4 rounded-full border-2 border-surface z-10 group-hover:scale-125 transition-transform', cfg.dot)} />
+                            <p className="text-[11px] text-on-surface-secondary text-center leading-tight max-w-[90px]">
+                              {isRTL && m.titleAr ? m.titleAr : m.title}
+                            </p>
+                            <p className="text-[10px] text-on-surface-tertiary">{m.date.slice(0, 7)}</p>
+                            <span className={cn('text-[9px] px-1.5 py-0.5 rounded-full font-medium', cfg.bg, cfg.color)}>
+                              {cfg.label[isRTL ? 'ar' : 'en']}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* List view */}
+              {(milestoneView === 'list' || sorted.length === 0) && (
+                <div className="rounded-xl border border-border bg-surface-secondary overflow-hidden">
+                  {sorted.length === 0 ? (
+                    <div className="py-12 text-center text-on-surface-tertiary">
+                      <Target className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                      <p className="text-sm">{isRTL ? 'لا معالم بعد' : 'No milestones yet'}</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-border">
+                      {sorted.map(m => {
+                        const cfg = STATUS_CONFIG[m.status];
+                        return (
+                          <div key={m.id} className="flex items-center gap-3 px-5 py-3 hover:bg-surface-tertiary transition-colors">
+                            <div className={cn('h-3 w-3 rounded-full shrink-0', cfg.dot)} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-on-surface">
+                                {isRTL && m.titleAr ? m.titleAr : m.title}
+                              </p>
+                              {m.description && (
+                                <p className="text-xs text-on-surface-tertiary mt-0.5 truncate">{m.description}</p>
+                              )}
+                            </div>
+                            <span className="text-xs text-on-surface-tertiary">{m.date}</span>
+                            <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0', cfg.bg, cfg.color)}>
+                              {cfg.label[isRTL ? 'ar' : 'en']}
+                            </span>
+                            <div className="flex gap-1 shrink-0">
+                              <button onClick={() => openEdit(m)} className="p-1 text-on-surface-tertiary hover:text-accent">
+                                <RefreshCw className="h-3.5 w-3.5" />
+                              </button>
+                              <button onClick={() => deleteMilestone(m.id)} className="p-1 text-on-surface-tertiary hover:text-error">
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Add/Edit modal */}
+              {showMilestoneModal && (
+                <>
+                  <div className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowMilestoneModal(false)} />
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4" dir={isRTL ? 'rtl' : 'ltr'}>
+                    <div className="bg-surface rounded-2xl border border-border shadow-2xl w-full max-w-md p-6 space-y-4">
+                      <h3 className="text-base font-bold text-on-surface">
+                        {editingMilestone ? (isRTL ? 'تعديل معلم' : 'Edit Milestone') : (isRTL ? 'معلم جديد' : 'New Milestone')}
+                      </h3>
+                      <div className="space-y-3">
+                        <input value={milestoneForm.title} onChange={e => setMilestoneForm(f => ({ ...f, title: e.target.value }))}
+                          placeholder={isRTL ? 'العنوان (إنجليزي)' : 'Title (English)'}
+                          className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-accent" />
+                        <input value={milestoneForm.titleAr} onChange={e => setMilestoneForm(f => ({ ...f, titleAr: e.target.value }))}
+                          placeholder="العنوان (عربي)" dir="rtl"
+                          className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-accent" />
+                        <input type="date" value={milestoneForm.date} onChange={e => setMilestoneForm(f => ({ ...f, date: e.target.value }))}
+                          className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-accent" />
+                        <select value={milestoneForm.status} onChange={e => setMilestoneForm(f => ({ ...f, status: e.target.value as Milestone['status'] }))}
+                          className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-accent">
+                          {Object.entries(STATUS_CONFIG).map(([k, v]) => (
+                            <option key={k} value={k}>{isRTL ? v.label.ar : v.label.en}</option>
+                          ))}
+                        </select>
+                        <textarea value={milestoneForm.description} onChange={e => setMilestoneForm(f => ({ ...f, description: e.target.value }))}
+                          rows={2} dir="auto" placeholder={isRTL ? 'وصف اختياري...' : 'Optional description...'}
+                          className="w-full resize-none rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-accent" />
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <button onClick={() => setShowMilestoneModal(false)}
+                          className="px-4 py-2 text-sm rounded-lg border border-border text-on-surface-secondary hover:bg-surface-tertiary">
+                          {isRTL ? 'إلغاء' : 'Cancel'}
+                        </button>
+                        <button onClick={saveMilestone} disabled={!milestoneForm.title.trim()}
+                          className="px-4 py-2 text-sm rounded-lg bg-accent text-on-accent hover:opacity-90 disabled:opacity-50">
+                          {isRTL ? 'حفظ' : 'Save'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
 
         {/* CALENDAR TAB                                         */}
         {/* ══════════════════════════════════════════════════════ */}
