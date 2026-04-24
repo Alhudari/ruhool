@@ -13,6 +13,7 @@ import crypto from 'node:crypto';
 import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { Logger } from 'pino';
+import { parseNaturalTime } from '../services/natural-time.js';
 
 import {
   parseAndExecuteActions,
@@ -276,6 +277,57 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
 
     let convId = body.conversationId;
     bootLogger.info({ msg: 'chat-route-trace', step: 'entry', conversationId: convId || null, bodyAgentId: body.agentId || null, messageText: (body.message || '').slice(0, 80) }, 'chat-route-trace');
+
+    // A-8: Smart Reminders — detect "ذكرني" / "remind me" before routing to agent
+    const reminderRe = /^ذكرني\b|^remind me\b/i;
+    if (reminderRe.test(body.message.trim())) {
+      const msg = body.message.trim();
+      // Extract time: last time token in message
+      const scheduledFor = parseNaturalTime(msg);
+      // Extract the reminder text: strip the time part
+      const reminderText = msg
+        .replace(/ذكرني\s*/i, '')
+        .replace(/remind me\s*(to|that)?\s*/i, '')
+        .replace(/بعد\s+\d+\s+ساعة|بعد\s+ساعتين|بعد\s+نصف\s+ساعة|بعد\s+\d+\s+دقيقة|بعد\s+يوم|غداً|غدا|الصبح|الصباح|الليل|in\s+\d+\s+hours?|in\s+\d+\s+min\w*|tomorrow/gi, '')
+        .trim() || msg;
+
+      const now = new Date().toISOString();
+      const reminderTask = {
+        id: crypto.randomUUID(),
+        agentId: 'system',
+        prompt: `reminder: ${reminderText}`,
+        status: 'queued' as const,
+        scheduledFor: scheduledFor ?? null,
+        startedAt: null,
+        completedAt: null,
+        result: null,
+        conversationId: convId ?? null,
+        pipelineId: null,
+        pipelineStepIndex: null,
+        createdBy: 'user' as const,
+        label: `تذكير: ${reminderText.slice(0, 60)}`,
+        reportOnComplete: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+      if (!store.agentTasks) store.agentTasks = [];
+      store.agentTasks.push(reminderTask);
+      saveStore();
+
+      const isArabicMsg = /[؀-ۿ]/.test(body.message);
+      const whenStr = scheduledFor
+        ? new Date(scheduledFor).toLocaleString(isArabicMsg ? 'ar-SA' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' })
+        : (isArabicMsg ? 'الآن' : 'now');
+      const ackText = isArabicMsg
+        ? `حسناً، سأذكرك بـ"${reminderText.slice(0, 60)}" ${scheduledFor ? `في ${whenStr}` : 'الآن'} 🔔`
+        : `Got it, I'll remind you "${reminderText.slice(0, 60)}" ${scheduledFor ? `at ${whenStr}` : 'now'} 🔔`;
+
+      return streamSSE(c, async (stream) => {
+        await stream.writeSSE({ event: 'conversation', data: JSON.stringify({ conversationId: convId ?? crypto.randomUUID(), agentId: 'system', participants: ['system'] }) });
+        await stream.writeSSE({ event: 'text', data: JSON.stringify({ content: ackText }) });
+        await stream.writeSSE({ event: 'done', data: '{}' });
+      });
+    }
 
     const mention = detectMention(body.message);
     bootLogger.info({ msg: 'chat-route-trace', step: 'after-mention', mentionAgentId: mention.agentId, conversationId: convId || null }, 'chat-route-trace');
