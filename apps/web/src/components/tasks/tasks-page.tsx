@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   CheckSquare, Plus, Search, List, LayoutGrid, Pin, PinOff,
   Trash2, Loader2, Calendar, Clock, Tag, ChevronDown, ChevronRight,
-  X, Check, Circle, Square, Flag, MessageSquare, StickyNote,
+  X, Check, Circle, Square, Flag, MessageSquare, StickyNote, Flame,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
@@ -931,7 +931,29 @@ export function TasksPage() {
       )}
 
       {/* Content */}
-      {todayView !== 'notes' && view === 'list' ? (
+      {/* ── Habits Grid — dedicated view with streak + heatmap ─────── */}
+      {todayView === 'habits' && (
+        <HabitsGrid
+          habits={tasks.filter(t => t.isHabit && !t.deletedAt)}
+          allTasks={tasks}
+          isRTL={isRTL}
+          onEdit={(t) => setEditingTask({ ...t })}
+          onComplete={async (habitId) => {
+            // Spawn today's instance then toggle it
+            await apiFetch('/api/tasks/habits/spawn-due', { method: 'POST' }).catch(() => {});
+            await load();
+            const today = new Date().toISOString().slice(0, 10);
+            const instance = tasks.find(t => t.habitTemplateId === habitId && t.scheduledFor === today);
+            if (instance) {
+              await apiFetch(`/api/tasks/${instance.id}/toggle`, { method: 'PUT' }).catch(() => {});
+              await load();
+            }
+          }}
+          onOpenNew={openNewHabit}
+        />
+      )}
+
+      {todayView !== 'notes' && todayView !== 'habits' && view === 'list' ? (
         <div>
           <TaskGroup label={isRTL ? '\u0645\u062b\u0628\u062a\u0629' : 'Pinned'} items={pinned} />
           <TaskGroup label={isRTL ? '\u0645\u062a\u0623\u062e\u0631\u0629' : 'Overdue'} items={overdue} />
@@ -959,22 +981,8 @@ export function TasksPage() {
           {filtered.length === 0 && !tasks.some(t => t.completed) && (
             <div className="text-center py-16 text-on-surface-tertiary">
               <CheckSquare size={40} className="mx-auto mb-3 opacity-30" />
-              <p className="text-sm">
-                {todayView === 'habits'
-                  ? (isRTL ? '\u0644\u0627 \u062a\u0648\u062c\u062f \u0639\u0627\u062f\u0627\u062a \u0628\u0639\u062f' : 'No habits yet')
-                  : (isRTL ? '\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0647\u0627\u0645 \u0628\u0639\u062f' : 'No tasks yet')}
-              </p>
-              {todayView === 'habits' ? (
-                <button
-                  onClick={openNewHabit}
-                  className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent text-on-accent text-sm hover:opacity-90 transition-opacity"
-                >
-                  <Plus size={14} />
-                  {isRTL ? '\u0623\u0636\u0641 \u0639\u0627\u062f\u0629 \u062c\u062f\u064a\u062f\u0629' : 'Add your first habit'}
-                </button>
-              ) : (
-                <p className="text-xs mt-1">{isRTL ? '\u0623\u0636\u0641 \u0645\u0647\u0645\u0629 \u062c\u062f\u064a\u062f\u0629 \u0645\u0646 \u0627\u0644\u0623\u0633\u0641\u0644' : 'Add a task from below'}</p>
-              )}
+              <p className="text-sm">{isRTL ? '\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0647\u0627\u0645 \u0628\u0639\u062f' : 'No tasks yet'}</p>
+              <p className="text-xs mt-1">{isRTL ? '\u0623\u0636\u0641 \u0645\u0647\u0645\u0629 \u062c\u062f\u064a\u062f\u0629 \u0645\u0646 \u0627\u0644\u0623\u0633\u0641\u0644' : 'Add a task from below'}</p>
             </div>
           )}
         </div>
@@ -1006,18 +1014,7 @@ export function TasksPage() {
           {filtered.length === 0 && (
             <div className="text-center py-16 text-on-surface-tertiary col-span-full">
               <CheckSquare size={40} className="mx-auto mb-3 opacity-30" />
-              <p className="text-sm">
-                {todayView === 'habits' ? (isRTL ? '\u0644\u0627 \u062a\u0648\u062c\u062f \u0639\u0627\u062f\u0627\u062a' : 'No habits') : (isRTL ? '\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0647\u0627\u0645' : 'No tasks')}
-              </p>
-              {todayView === 'habits' && (
-                <button
-                  onClick={openNewHabit}
-                  className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent text-on-accent text-sm hover:opacity-90 transition-opacity"
-                >
-                  <Plus size={14} />
-                  {isRTL ? '\u0623\u0636\u0641 \u0639\u0627\u062f\u0629' : 'Add habit'}
-                </button>
-              )}
+              <p className="text-sm">{isRTL ? '\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0647\u0627\u0645' : 'No tasks'}</p>
             </div>
           )}
           {!showCompleted && tasks.some(t => t.completed) && (
@@ -1665,6 +1662,101 @@ function AllDayAndWindow({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── HabitsGrid — dedicated J-9 habits view ───────────────────────────────
+function HabitsGrid({
+  habits, allTasks, isRTL, onEdit, onComplete, onOpenNew,
+}: {
+  habits: TaskItem[];
+  allTasks: TaskItem[];
+  isRTL: boolean;
+  onEdit: (t: TaskItem) => void;
+  onComplete: (habitId: string) => Promise<void>;
+  onOpenNew: () => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [completing, setCompleting] = useState<string | null>(null);
+
+  const isDoneToday = (habitId: string) => {
+    return allTasks.some(t =>
+      t.habitTemplateId === habitId &&
+      t.scheduledFor === today &&
+      t.completed
+    );
+  };
+
+  if (habits.length === 0) {
+    return (
+      <div className="flex flex-col items-center py-16 text-on-surface-tertiary">
+        <Flame size={40} className="opacity-30 mb-3" />
+        <p className="text-sm">{isRTL ? 'لا عادات بعد' : 'No habits yet'}</p>
+        <button onClick={onOpenNew}
+          className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent text-on-accent text-sm hover:opacity-90">
+          <Plus size={14} /> {isRTL ? 'أضف عادة' : 'Add habit'}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {habits.map(habit => {
+        const done = isDoneToday(habit.id);
+        return (
+          <div key={habit.id}
+            className={cn(
+              'rounded-xl border bg-surface-secondary p-4 space-y-3 transition-all',
+              done ? 'border-success/40' : 'border-border'
+            )}>
+            {/* Header */}
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-on-surface">{habit.title}</p>
+                {habit.habitFrequency && (
+                  <p className="text-[11px] text-on-surface-tertiary mt-0.5 capitalize">
+                    {habit.habitFrequency === 'daily' ? (isRTL ? 'يومياً' : 'Daily') :
+                     habit.habitFrequency === 'skip-weekends' ? (isRTL ? 'بدون عطلة' : 'Skip weekends') :
+                     habit.habitFrequency === 'weekly' ? (isRTL ? 'أسبوعي' : 'Weekly') :
+                     (isRTL ? 'مخصّص' : 'Custom')}
+                  </p>
+                )}
+              </div>
+              <button onClick={() => onEdit(habit)}
+                className="text-[11px] text-on-surface-tertiary hover:text-accent px-2 py-1 rounded border border-border hover:border-accent/30">
+                {isRTL ? 'تعديل' : 'Edit'}
+              </button>
+            </div>
+
+            {/* Stats ring + heatmap from existing HabitStatsRing */}
+            {habit.id && <HabitStatsRing habitId={habit.id} />}
+
+            {/* Complete today */}
+            <button
+              disabled={completing === habit.id}
+              onClick={async () => {
+                setCompleting(habit.id);
+                try { await onComplete(habit.id); } finally { setCompleting(null); }
+              }}
+              className={cn(
+                'w-full py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2',
+                done
+                  ? 'bg-success/15 text-success cursor-default'
+                  : 'bg-surface-tertiary hover:bg-success/10 hover:text-success text-on-surface-secondary'
+              )}
+            >
+              {completing === habit.id
+                ? <Loader2 size={14} className="animate-spin" />
+                : done
+                  ? <><span>✓</span> {isRTL ? 'منجز اليوم' : 'Done today'} 🎉</>
+                  : <>{isRTL ? 'أكمل اليوم' : 'Complete today'} <Flame size={14} /></>
+              }
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }
