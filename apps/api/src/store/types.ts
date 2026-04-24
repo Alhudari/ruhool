@@ -69,6 +69,12 @@ export interface MsgRecord {
   replyToAgentId?: string;
   /** CHAT_V2 P1: attachments produced by this message. */
   artifacts?: MessageArtifact[];
+  /** Hierarchical dispatch — which step produced this message. */
+  dispatchStep?: 'dept-selected' | 'worker' | 'synthesis' | 'final';
+  dispatchId?: string;
+  dispatchChain?: unknown[];
+  workspaceId?: string;
+  agentDisplay?: { ar: string; en: string };
 }
 
 export interface UsageRecord {

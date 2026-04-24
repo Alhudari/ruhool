@@ -99,6 +99,8 @@ interface Message {
   artifacts?: WorkflowArtifact[];
   streaming?: boolean;
   errored?: boolean;
+  dispatchStep?: 'dept-selected' | 'worker' | 'synthesis' | 'final';
+  dispatchId?: string;
 }
 
 /** CHAT_V2 Wave D client-side feature flag. Default ON — Wave B's backend is live,
@@ -1080,6 +1082,19 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
                       <p className="text-[10px] text-on-surface-tertiary" dir={language === 'ar' ? 'ltr' : 'rtl'}>
                         {assistantTranslit}
                       </p>
+                    )}
+                    {msg.dispatchStep && (
+                      <span className={cn(
+                        'text-[9px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wide',
+                        msg.dispatchStep === 'synthesis' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' :
+                        msg.dispatchStep === 'worker' ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400' :
+                        'bg-muted text-muted-foreground'
+                      )}>
+                        {msg.dispatchStep === 'synthesis' ? (isRTL ? 'تجميع' : 'synthesis') :
+                         msg.dispatchStep === 'worker' ? (isRTL ? 'عامل' : 'worker') :
+                         msg.dispatchStep === 'dept-selected' ? (isRTL ? 'توجيه' : 'routing') :
+                         msg.dispatchStep}
+                      </span>
                     )}
                     {timestamp && (
                       <p className="text-[10px] text-on-surface-tertiary ml-auto shrink-0">
