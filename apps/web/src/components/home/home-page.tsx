@@ -168,6 +168,8 @@ export function HomePage() {
     }
   }, [activeConversationId]);
   const [selectedAgentId, _setSelectedAgentId] = useState<string | undefined>(undefined);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [activeProjectName, setActiveProjectName] = useState<string | null>(null);
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
   const [agents, setAgents] = useState<AgentData[]>(FALLBACK_AGENTS);
   const [showAllAgents, setShowAllAgents] = useState(false);
@@ -175,12 +177,19 @@ export function HomePage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isRTL = language === 'ar';
 
-  // Pre-fill from ?q= URL param (e.g. from papers page "chat with agent" button)
+  // Read URL params: ?q= pre-fills chat, ?projectId= sets active project, ?agentId= sets agent
   useEffect(() => {
     const q = searchParams?.get('q');
-    if (q && !isChatting) {
-      setMessage(q);
-      setTimeout(() => inputRef.current?.focus(), 100);
+    const projectId = searchParams?.get('projectId');
+    const agentId = searchParams?.get('agentId');
+    if (q && !isChatting) { setMessage(q); setTimeout(() => inputRef.current?.focus(), 100); }
+    if (projectId) {
+      setActiveProjectId(projectId);
+      // Fetch project name for display
+      fetch(`/api/projects/${projectId}`).then(r => r.json()).then(p => { if (p.name) setActiveProjectName(p.name); }).catch(() => {});
+    }
+    if (agentId && !q) {
+      // Pre-select agent — handled via message prefix
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -235,6 +244,7 @@ export function HomePage() {
         initialMessage={message}
         conversationId={conversationId}
         agentId={selectedAgentId}
+        projectId={activeProjectId || undefined}
         onConversationCreated={(id) => {
           setConversationId(id);
           setActiveConversation(id);
@@ -269,6 +279,22 @@ export function HomePage() {
             : 'How can I help you today?'}
         </p>
       </div>
+
+      {/* Active project badge */}
+      {activeProjectName && (
+        <div className="w-full max-w-2xl mb-2 flex items-center gap-2">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 text-xs font-medium">
+            <FolderKanban size={12} />
+            {activeProjectName}
+          </div>
+          <button
+            onClick={() => { setActiveProjectId(null); setActiveProjectName(null); window.history.replaceState(null, '', '/'); }}
+            className="text-xs text-on-surface-tertiary hover:text-on-surface transition-colors"
+          >
+            {isRTL ? '× إلغاء المشروع' : '× Clear project'}
+          </button>
+        </div>
+      )}
 
       {/* Chat Input */}
       <div className="w-full max-w-2xl mb-8">

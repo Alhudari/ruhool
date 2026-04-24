@@ -111,7 +111,7 @@ export function registerAllRoutes(app: Hono, deps: Record<string, unknown>): voi
   registerStudioRoutes(app, { dataDir: d.dataDir });
   registerPermissionsRoutes(app, { getStore: d.getStore, saveStore: d.saveStore, logActivity: d.logActivity, builtinAgentPermissions: d.builtinAgentPermissions });
   registerStudioDemosRoutes(app, { demosDir: d.demosDir, videosDir: d.videosDirDemo, studioDemos: d.studioDemos, demoRequirements: d.demoRequirements, demoMapCost: d.demoMapCost, getApiKey: d.getApiKey, capabilityCheckers: d.capabilityCheckers, renderVideo: d.renderVideo, listRenders: d.listRenders, muxAudioOntoVideo: d.muxAudioOntoVideo, attachCostToRender: d.attachCostToRender, renderQueueState: d.renderQueueState, logActivity: d.logActivity });
-  registerProjectsRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
+  registerProjectsRoutes(app, { getStore: d.getStore, saveStore: d.saveStore, dataDir: d.dataDir });
   registerConversationsExtendedRoutes(app, { getStore: d.getStore, saveStore: d.saveStore, logActivity: d.logActivity, ensureProjectsArray: d.ensureProjectsArray, generateSummary: d.generateSummary });
   registerExportRoutes(app, { getStore: d.getStore, saveStore: d.saveStore, dataDir: d.dataDir });
   registerRenderRoutes(app, { renderQueueState: d.renderQueueState, muxAudioOntoVideo: d.muxAudioOntoVideo, logActivity: d.logActivity, logger: d.logger });

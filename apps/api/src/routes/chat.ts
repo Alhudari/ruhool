@@ -31,6 +31,7 @@ import type {
   StoreData,
 } from '../store/types.js';
 import type { ProjectRecord } from './projects.js';
+import { buildProjectContext } from './projects.js';
 import type { SubscriptionRecord } from './subscriptions.js';
 import type { UnifiedProvider } from '../services/llm/index.js';
 import { AnthropicProvider } from '../services/llm/index.js';
@@ -82,6 +83,9 @@ export type ChatRoutesDeps = {
   autoSummarizeIfNeeded: (convId: string) => Promise<void> | void;
   extractGraphFromMessage: (convId: string, userMsgId: string, assistantMsgId: string) => Promise<void> | void;
   buildSubscriptionSnapshot: () => Promise<string>;
+
+  // projects data dir (for file context injection)
+  dataDir?: string;
 
   // runtime services
   runResearch: (taskId: string) => Promise<void> | void;
@@ -813,8 +817,8 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
 
           const projectId = (conv as { projectId?: string } | undefined)?.projectId;
           if (projectId) {
-            const proj = (((store as unknown as { projects?: ProjectRecord[] }).projects || []) as ProjectRecord[]).find((p) => p.id === projectId);
-            if (proj?.instructions) ctx += `\n\n## \u062A\u0639\u0644\u064A\u0645\u0627\u062A \u0627\u0644\u0645\u0634\u0631\u0648\u0639: ${proj.name}\n${proj.instructions}`;
+            const proj = (store.projects || []).find(p => p.id === projectId);
+            if (proj) ctx += buildProjectContext(proj, deps.dataDir || '', detectedAgent);
           }
 
           activeSystemPrompt += ctx;

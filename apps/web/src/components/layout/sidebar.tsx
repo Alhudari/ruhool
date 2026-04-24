@@ -39,6 +39,7 @@ import {
   Zap,
   Network as NetworkIcon,
   Activity,
+  FolderKanban,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
@@ -89,6 +90,7 @@ const NAV_ITEMS_MAP: Record<string, NavItem> = {
   home: { id: 'home', icon: Home, label: { en: 'Home', ar: 'الرئيسية' }, href: '/' },
   dashboard: { id: 'dashboard', icon: LayoutDashboard, label: { en: 'Dashboard', ar: 'لوحة التحكم' }, href: '/dashboard' },
   agents: { id: 'agents', icon: Bot, label: { en: 'Agents', ar: 'الوكلاء' }, href: '/agents' },
+  projects: { id: 'projects', icon: FolderKanban, label: { en: 'Projects', ar: 'المشاريع' }, href: '/projects' },
   approvals: { id: 'approvals', icon: Bell, label: { en: 'Approvals', ar: 'الموافقات' }, href: '/approvals' },
   workflows: { id: 'workflows', icon: Workflow, label: { en: 'Workflows', ar: 'سير العمل' }, href: '/workflows' },
   'workflow-runs': { id: 'workflow-runs', icon: Workflow, label: { en: 'Workflow Runs', ar: 'مسارات العمل' }, href: '/workflow-runs' },
@@ -131,7 +133,7 @@ const SIDEBAR_GROUPS: SidebarGroup[] = [
   {
     id: 'herd',
     label: { en: 'Herd', ar: 'الذود' },
-    items: ['agents', 'approvals', 'notifications'],
+    items: ['agents', 'projects', 'approvals', 'notifications'],
     defaultOpen: true,
   },
   {

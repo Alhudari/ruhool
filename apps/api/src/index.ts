@@ -409,6 +409,7 @@ registerAllRoutes(app, {
     getResearchQueue: () => researchQueue as unknown as { add: (name: string, data: unknown, opts: unknown) => unknown } | null,
     taskStore, logActivity,
     workflowOrchestrator,
+    dataDir: DATA_ROOT,
   },
   runSchedule,
   builtinAgentPermissions: BUILTIN_AGENT_PERMISSIONS,

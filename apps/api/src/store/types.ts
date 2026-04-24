@@ -447,7 +447,7 @@ export interface StoreData {
   hierarchy?: HierarchyNode[];
   watcherAlerts?: WatcherAlert[];
   // ---- Additional optional fields used by routes/services (progressively typed) ----
-  projects?: Array<{ id: string; name: string; description?: string; instructions?: string; color?: string; pinned?: boolean; archived?: boolean; createdAt: string; updatedAt: string }>;
+  projects?: ProjectRecord[];
   pinnedConversations?: string[];
   promptOverrides?: Record<string, string>;
   permissionOverrides?: Record<string, AgentPermissions>;
@@ -467,6 +467,30 @@ export interface StoreData {
   timezones?: { primary: string; secondary?: string };
   phdSchedule?: { semester?: string; supervisorMeetings?: Array<{ date: string; notes?: string }>; deadlines?: Array<{ date: string; label: string }> };
   companionMemory?: CompanionMemoryEntry[];
+}
+
+export interface ProjectFile {
+  id: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  createdAt: string;
+}
+
+export interface ProjectRecord {
+  id: string;
+  name: string;
+  description?: string;
+  instructions?: string;
+  color?: string;
+  icon?: string;
+  pinned?: boolean;
+  archived?: boolean;
+  defaultAgentId?: string;
+  files?: ProjectFile[];
+  agentInstructions?: Record<string, string>;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CompanionMemoryEntry {

@@ -149,10 +149,11 @@ interface ChatViewProps {
   initialMessage?: string;
   conversationId?: string | null;
   agentId?: string;
+  projectId?: string;
   onConversationCreated?: (id: string) => void;
 }
 
-export function ChatView({ initialMessage, conversationId: propConvId, agentId, onConversationCreated }: ChatViewProps) {
+export function ChatView({ initialMessage, conversationId: propConvId, agentId, projectId, onConversationCreated }: ChatViewProps) {
   const { language, isStreaming, setIsStreaming } = useAppStore();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -528,6 +529,7 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
           conversationId: convId,
           message: finalText,
           ...(effectiveAgentId ? { agentId: effectiveAgentId } : {}),
+          ...(projectId ? { projectId } : {}),
           ...(chainDepth ? { chainDepth } : {}),
           ...(activeReply?.id ? { replyToMessageId: activeReply.id } : {}),
           ...(pendingImages.length > 0 ? { images: pendingImages.map((img) => ({ base64: img.base64, mimeType: img.mimeType })) } : {}),
