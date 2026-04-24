@@ -84,7 +84,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <NotificationBell />
         </div>
 
-        <main className="flex-1 overflow-auto pb-14 md:pb-0">{children}</main>
+        <main className="flex-1 overflow-auto pb-20 md:pb-6">{children}</main>
         <MobileTabBar />
       </div>
     </div>

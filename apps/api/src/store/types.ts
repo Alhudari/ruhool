@@ -139,6 +139,47 @@ export interface NoteRecord {
   themes: string[];
   archived?: boolean;
   createdAt: string;
+  // ── Reading session safety fields ──────────────────────────────────
+  /** 'manual' = user typed it, never auto-overwrite.
+   *  'ai-draft' = AI generated, can be re-generated if user asks.
+   *  'ai-adopted' = user approved, protected from auto-overwrite. */
+  source?: 'manual' | 'ai-draft' | 'ai-adopted';
+  /** e.g. "45-52" — which pages this note covers */
+  pageRange?: string;
+  /** link back to the ReadingSession that produced this note */
+  sessionId?: string;
+  /** free-text book/source title when not linked to a /papers record */
+  bookTitle?: string;
+  /** Zotero item key if imported from Zotero */
+  zoteroKey?: string;
+  updatedAt?: string;
+}
+
+export interface ReadingSessionPage {
+  /** e.g. "1-5", "10", "45-52" */
+  pageRange: string;
+  /** how the content was captured */
+  inputMethod: 'copy-paste' | 'image' | 'manual';
+  /** ids of NoteRecord produced for these pages */
+  noteIds: string[];
+  processedAt: string;
+}
+
+export interface ReadingSession {
+  id: string;
+  title: string;
+  /** link to /papers record — optional */
+  paperId?: string;
+  /** Zotero item key — optional */
+  zoteroKey?: string;
+  /** link to project — optional */
+  projectId?: string;
+  pages: ReadingSessionPage[];
+  /** total pages in source — used to show progress */
+  totalPages?: number;
+  createdAt: string;
+  updatedAt: string;
+  archived?: boolean;
 }
 
 export interface WorkflowRecord {
@@ -448,6 +489,7 @@ export interface StoreData {
   watcherAlerts?: WatcherAlert[];
   // ---- Additional optional fields used by routes/services (progressively typed) ----
   projects?: ProjectRecord[];
+  readingSessions?: ReadingSession[];
   pinnedConversations?: string[];
   promptOverrides?: Record<string, string>;
   permissionOverrides?: Record<string, AgentPermissions>;

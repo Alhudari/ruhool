@@ -97,6 +97,7 @@ const NAV_ITEMS_MAP: Record<string, NavItem> = {
   schedules: { id: 'schedules', icon: Clock, label: { en: 'Schedules', ar: 'الجدولة' }, href: '/schedules' },
   tools: { id: 'tools', icon: Wrench, label: { en: 'Tools', ar: 'الأدوات' }, href: '/tools' },
   papers: { id: 'papers', icon: BookOpen, label: { en: 'Papers', ar: 'الأوراق' }, href: '/papers' },
+  zotero: { id: 'zotero', icon: BookOpen, label: { en: 'Zotero', ar: 'Zotero' }, href: '/zotero' },
   notes: { id: 'notes', icon: NotebookPen, label: { en: 'Atomic Notes', ar: 'الملاحظات الذرية' }, href: '/notes' },
   'notes-keep': { id: 'notes-keep', icon: StickyNote, label: { en: 'Quick Notes', ar: 'ملاحظات سريعة' }, href: '/notes-keep' },
   knowledge: { id: 'knowledge', icon: Network, label: { en: 'Knowledge', ar: 'المعرفة' }, href: '/graph' },
@@ -151,7 +152,7 @@ const SIDEBAR_GROUPS: SidebarGroup[] = [
   {
     id: 'research',
     label: { en: 'Research & Knowledge', ar: 'البحث والمعرفة' },
-    items: ['papers', 'notes', 'knowledge'],
+    items: ['papers', 'zotero', 'notes', 'knowledge'],
     defaultOpen: false,
   },
   {
