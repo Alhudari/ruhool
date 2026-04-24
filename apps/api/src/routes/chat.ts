@@ -544,7 +544,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
     const CHAT_V2 = CHAT_V2_GLOBAL;
 
     // CHAT_V2 P1 — multi-mention fast-path.
-    // If the user @-mentioned multiple specialists (e.g. "@عبدان @شواشة ما رأيكما"),
+    // If the user @-mentioned multiple specialists (e.g. "@الباحث @المُلخِّص ما رأيكما"),
     // fan out a sequential dispatch to each specialist directly, each producing its
     // own message row + SSE `message.start`/`message.delta`/`message.done` triple and
     // a `participants.update`. This bypasses the manager LLM for deterministic group
@@ -924,13 +924,13 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
               const litSessions = ((store as unknown as { readingSessions?: Array<{ id: string }> }).readingSessions ?? []).length;
               activeSystemPrompt += `**حالة منصة رحول**:\n`;
               activeSystemPrompt += `- الاجتماعات المسجّلة في رحول: ${meetings}\n`;
-              activeSystemPrompt += `- جلسات القراءة عبر شواشة: ${litSessions}\n`;
+              activeSystemPrompt += `- جلسات القراءة عبر المُلخِّص: ${litSessions}\n`;
               activeSystemPrompt += `\n`;
 
               activeSystemPrompt += `\n**روابط منصة رحول للإحالة المستخدم إليها**:\n`;
               activeSystemPrompt += `- لوحة الدكتوراه: \`/phd\`\n`;
               activeSystemPrompt += `- مكتبة Zotero: \`/zotero\`\n`;
-              activeSystemPrompt += `- مساعد القراءة (شواشة): \`/shwasha\`\n`;
+              activeSystemPrompt += `- مساعد القراءة (المُلخِّص): \`/shwasha\`\n`;
               activeSystemPrompt += `- الاجتماعات: \`/meetings\`\n`;
               activeSystemPrompt += `- المهام: \`/tasks\`\n`;
             } catch { /* vault not accessible — skip */ }
@@ -1389,7 +1389,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 .replace(/\{[^{}]*?"(?:title|agent|priority|description)"\s*:[^{}]*?\}/g, '')
                 .trim() || '\u2713';
               // CHAT_V2 P1: when the manager delegated via tool_use, his closing text
-              // is a short acknowledgement ("أحلتها لعبدان") — render it as a subtler
+              // is a short acknowledgement ("أحلتها للباحث") — render it as a subtler
               // `handoff` bubble instead of a normal assistant bubble.
               const managerKind: 'handoff' | 'text' =
                 CHAT_V2 && detectedAgent === 'manager' && toolUseDispatched ? 'handoff' : 'text';
@@ -1401,7 +1401,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 kind: managerKind,
               });
               // CHAT_V2 P1: emit the manager's own bubble as start/delta/done so the UI
-              // can render the short handoff line ("أحلتها لعبدان") as its own message.
+              // can render the short handoff line ("أحلتها للباحث") as its own message.
               if (CHAT_V2 && cleanedForSave && cleanedForSave !== '\u2713') {
                 await stream.writeSSE({
                   event: 'message.start',
