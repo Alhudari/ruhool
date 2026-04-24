@@ -12,8 +12,11 @@ export function registerHealthRoutes(app: Hono, deps: HealthDeps): void {
     c.json({
       status: 'ok',
       name: 'Ruhool',
-      version: '0.2.0',
+      version: '0.3.0',
+      buildRound: 'R9-R18',
+      agents: 19,
       services: deps.serviceHealth,
+      timestamp: new Date().toISOString(),
     })
   );
 }
