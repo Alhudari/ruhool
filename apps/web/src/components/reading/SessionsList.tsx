@@ -14,6 +14,7 @@ import {
   Loader2,
   Monitor,
   Quote,
+  BookOpen,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -146,13 +147,28 @@ export function SessionsList() {
 
   return (
     <div className="max-w-4xl mx-auto px-6 pt-6">
+      {/* Page header — spec pattern */}
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-11 h-11 rounded-[var(--radius-lg)] bg-accent/10 text-accent flex items-center justify-center shrink-0">
+          <BookOpen size={22} />
+        </div>
+        <div>
+          <h1 className="text-xl font-bold text-on-surface">
+            {isRTL ? 'جلسات القراءة — صخِّ' : 'Reading Sessions — Shwasha'}
+          </h1>
+          <p className="text-xs text-on-surface-tertiary">
+            {isRTL ? 'تحليل عميق للمصادر صفحةً صفحة' : 'Deep source analysis page by page'}
+          </p>
+        </div>
+        <div className="ms-auto text-[11px] text-on-surface-tertiary">
+          {isRTL ? `${sessions.length} جلسة` : `${sessions.length} sessions`}
+        </div>
+      </div>
+
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-xs font-medium uppercase tracking-wider text-on-surface-tertiary">
           {isRTL ? 'جلسات سابقة' : 'Recent sessions'}
         </h2>
-        <span className="text-[11px] text-on-surface-tertiary">
-          {isRTL ? `${sessions.length} جلسة` : `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'}`}
-        </span>
       </div>
 
       <ul className="space-y-1.5">
