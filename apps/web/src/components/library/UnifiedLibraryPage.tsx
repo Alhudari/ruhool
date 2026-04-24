@@ -386,6 +386,34 @@ function EntityDetailPanel({ entity, onBack, onUpdate, isRTL, allEntities }: {
             )}
           </div>
         </div>
+        {/* Export buttons */}
+        <div className="flex gap-1 shrink-0">
+          <button
+            title="Export CSV"
+            onClick={() => {
+              const headers = ['title','type','authors','year','doi','readingStatus','tags'];
+              const row = [entity.title, entity.type, entity.authors??'', entity.year??'', entity.doi??'', entity.readingStatus??'', entity.tags.join(';')];
+              const csv = [headers.join(','), row.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')].join('\n');
+              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+              const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+              a.download = `${entity.title.replace(/[^\w]/g,'-').slice(0,40)}.csv`; a.click();
+            }}
+            className="p-1.5 text-[10px] rounded border border-border text-on-surface-tertiary hover:bg-surface-tertiary"
+          >CSV</button>
+          {(entity.zoteroKey || entity.doi) && (
+            <button
+              title="Export BibTeX"
+              onClick={() => {
+                const key = entity.zoteroKey ?? entity.doi?.replace(/[^a-zA-Z0-9]/g,'') ?? entity.id.slice(0,8);
+                const bib = `@article{${key},\n  title = {${entity.title}},\n  author = {${entity.authors??''}},\n  year = {${entity.year??''}},\n  doi = {${entity.doi??''}},\n  journal = {${entity.journal??''}},\n}`;
+                const blob = new Blob([bib], { type: 'text/plain' });
+                const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+                a.download = `${key}.bib`; a.click();
+              }}
+              className="p-1.5 text-[10px] rounded border border-border text-on-surface-tertiary hover:bg-surface-tertiary"
+            >.bib</button>
+          )}
+        </div>
       </div>
 
       {/* Abstract if present */}
@@ -614,6 +642,14 @@ export function UnifiedLibraryPage() {
   const [selected, setSelected] = useState<LibraryEntity | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [offset, setOffset] = useState(0);
+  // J-11: multi-select
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const toggleCheck = (id: string) => setCheckedIds(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  const clearChecked = () => setCheckedIds(new Set());
   const LIMIT = 50;
 
   const load = useCallback(async () => {
@@ -801,6 +837,11 @@ export function UnifiedLibraryPage() {
                       isActive && 'bg-accent/10 border-s-2 border-accent'
                     )}
                   >
+                    {/* Checkbox for multi-select */}
+                    <input type="checkbox" checked={checkedIds.has(e.id)}
+                      onClick={ev => { ev.stopPropagation(); toggleCheck(e.id); }}
+                      onChange={() => {}}
+                      className="shrink-0 h-4 w-4 rounded accent-accent mt-2" />
                     <div className={cn('h-8 w-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5', c.bg)}>
                       <I className={cn('h-4 w-4', c.color)} />
                     </div>
@@ -873,6 +914,38 @@ export function UnifiedLibraryPage() {
           </div>
         )}
       </div>
+
+      {/* Multi-select action bar */}
+      {checkedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-30 bg-surface border border-border rounded-xl shadow-2xl px-5 py-3 flex items-center gap-4"
+          dir={isRTL ? 'rtl' : 'ltr'}>
+          <span className="text-sm font-medium text-on-surface">
+            {checkedIds.size} {isRTL ? 'محدد' : 'selected'}
+          </span>
+          <button
+            onClick={async () => {
+              const targetId = window.prompt(isRTL ? 'أدخل ID الكيان للربط:' : 'Enter entity ID to link to:');
+              if (!targetId) return;
+              for (const id of checkedIds) {
+                await apiFetch(`/api/library/entities/${id}/link`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ targetId }),
+                }).catch(() => {});
+              }
+              clearChecked();
+              await load();
+            }}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-accent text-on-accent hover:opacity-90">
+            <Link2 className="h-3.5 w-3.5" />
+            {isRTL ? 'ربط المحددة' : 'Link selected'}
+          </button>
+          <button onClick={clearChecked}
+            className="text-xs px-3 py-1.5 rounded-lg border border-border text-on-surface-secondary hover:bg-surface-secondary">
+            {isRTL ? 'إلغاء' : 'Cancel'}
+          </button>
+        </div>
+      )}
 
       {/* Add modal */}
       {showAdd && (
