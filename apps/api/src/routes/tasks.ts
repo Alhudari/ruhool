@@ -29,16 +29,21 @@ export function registerTasksRoutes(app: Hono, deps: TasksRoutesDeps): void {
     const store = getStore();
     if (!store.tasks) store.tasks = [];
     let tasks = [...store.tasks];
+    // Exclude soft-deleted by default
+    const showTrash = c.req.query('trash') === 'true';
+    if (!showTrash) tasks = tasks.filter(t => !(t as { deletedAt?: string }).deletedAt);
     const list = c.req.query('list');
     const completed = c.req.query('completed');
     const priority = c.req.query('priority');
     const tag = c.req.query('tag');
     const pinned = c.req.query('pinned');
+    const quickNotes = c.req.query('quickNotes');
     if (list) tasks = tasks.filter(t => t.list === list);
     if (completed !== undefined) tasks = tasks.filter(t => t.completed === (completed === 'true'));
     if (priority) tasks = tasks.filter(t => t.priority === priority);
     if (tag) tasks = tasks.filter(t => t.tags.includes(tag));
     if (pinned !== undefined) tasks = tasks.filter(t => t.pinned === (pinned === 'true'));
+    if (quickNotes === 'true') tasks = tasks.filter(t => (t as { isQuickNote?: boolean }).isQuickNote);
     tasks.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
     c.header('Cache-Control', 'private, max-age=30');
     return c.json(tasks);
@@ -80,6 +85,12 @@ export function registerTasksRoutes(app: Hono, deps: TasksRoutesDeps): void {
       durationMinutes: body.durationMinutes,
       habitStartDate: body.habitStartDate ?? null,
       habitEndDate: body.habitEndDate ?? null,
+      isQuickNote: body.isQuickNote ?? false,
+      noteColor: body.noteColor ?? (body.isQuickNote ? '#fef08a' : undefined),
+      categoryEn: body.categoryEn,
+      categoryAr: body.categoryAr,
+      meetingSourceId: body.meetingSourceId,
+      meetingSourceNo: body.meetingSourceNo,
     };
     store.tasks.push(task);
     logActivity('task', `Task created: ${task.title}`, task.notes || '', { agentId: 'tasks-agent', metadata: { taskId: task.id } });

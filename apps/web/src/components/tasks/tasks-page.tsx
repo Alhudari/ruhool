@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   CheckSquare, Plus, Search, List, LayoutGrid, Pin, PinOff,
   Trash2, Loader2, Calendar, Clock, Tag, ChevronDown, ChevronRight,
-  X, Check, Circle, Square, Flag, MessageSquare,
+  X, Check, Circle, Square, Flag, MessageSquare, StickyNote,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
@@ -54,6 +54,15 @@ interface TaskItem {
   scheduledFor?: string | null;
   isToday?: boolean;
   crossWorkspace?: boolean;
+  /** J-6: Quick Note */
+  isQuickNote?: boolean;
+  noteColor?: string;
+  categoryEn?: string;
+  categoryAr?: string;
+  meetingSourceId?: string;
+  meetingSourceNo?: number;
+  /** J-7: soft delete */
+  deletedAt?: string;
 }
 
 const PRIORITY_CONFIG: Record<string, { label: { en: string; ar: string }; color: string; dot: string }> = {
@@ -138,7 +147,8 @@ export function TasksPage() {
   const [workspaceFilter, setWorkspaceFilter] = useState<'all' | 'phd' | 'life'>('all');
   // Round 6: top-level view filter — 'all' is flat task list, 'today'
   // is today's focus, 'habits' is habit templates only.
-  const [todayView, setTodayView] = useState<'all' | 'today' | 'habits'>('all');
+  const [todayView, setTodayView] = useState<'all' | 'today' | 'habits' | 'notes'>('all');
+  const [quickNotes, setQuickNotes] = useState<TaskItem[]>([]);
   useEffect(() => {
     try {
       const v = window.localStorage.getItem('ruhool.tasks.workspace-filter');
@@ -160,6 +170,17 @@ export function TasksPage() {
       completedAt: null, isHabit: true, habitFrequency: 'daily', habitDays: [],
     });
   };
+  const openNewNote = () => {
+    const now = new Date().toISOString();
+    setEditingTask({
+      id: '', title: '', notes: '', completed: false,
+      priority: 'none', dueDate: null, dueTime: null,
+      list: 'عام', tags: [], color: 'yellow', pinned: false,
+      checklist: [], reminder: null, createdAt: now, updatedAt: now,
+      completedAt: null, isQuickNote: true, noteColor: '#fef08a',
+    });
+  };
+
   const [loadError, setLoadError] = useState<string | null>(null);
   const [quickAddText, setQuickAddText] = useState('');
   const [newListName, setNewListName] = useState('');
@@ -729,6 +750,7 @@ export function TasksPage() {
         {([
           { id: 'all' as const, labelAr: 'الكل', labelEn: 'All' },
           { id: 'today' as const, labelAr: 'اليوم', labelEn: 'Today' },
+          { id: 'notes' as const, labelAr: 'ملاحظات', labelEn: 'Notes' },
           { id: 'habits' as const, labelAr: 'العادات', labelEn: 'Habits' },
         ]).map((v) => (
           <button
@@ -745,12 +767,15 @@ export function TasksPage() {
           </button>
         ))}
         {todayView === 'habits' && (
-          <button
-            onClick={openNewHabit}
-            className="ms-auto flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-accent text-on-accent border border-accent hover:opacity-90 transition-opacity"
-          >
-            <Plus size={12} />
-            {isRTL ? 'عادة جديدة' : 'New Habit'}
+          <button onClick={openNewHabit}
+            className="ms-auto flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-accent text-on-accent border border-accent hover:opacity-90 transition-opacity">
+            <Plus size={12} /> {isRTL ? 'عادة جديدة' : 'New Habit'}
+          </button>
+        )}
+        {todayView === 'notes' && (
+          <button onClick={openNewNote}
+            className="ms-auto flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-500 text-white border border-amber-500 hover:opacity-90 transition-opacity">
+            <Plus size={12} /> {isRTL ? 'ملاحظة جديدة' : 'New Note'}
           </button>
         )}
       </div>
@@ -838,8 +863,52 @@ export function TasksPage() {
         )}
       </div>
 
+      {/* ── Quick Notes Grid — Notes view ───────────────────────────── */}
+      {todayView === 'notes' && (
+        <div>
+          {tasks.filter(t => t.isQuickNote && !t.deletedAt).length === 0 ? (
+            <div className="flex flex-col items-center py-16 text-on-surface-tertiary">
+              <StickyNote size={40} className="opacity-30 mb-3" />
+              <p className="text-sm">{isRTL ? 'لا ملاحظات بعد' : 'No notes yet'}</p>
+              <button onClick={openNewNote}
+                className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-amber-500 text-white text-sm hover:opacity-90">
+                <Plus size={14} /> {isRTL ? 'أضف ملاحظة' : 'Add note'}
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {tasks.filter(t => t.isQuickNote && !t.deletedAt).map(note => (
+                <button
+                  key={note.id}
+                  onClick={() => setEditingTask({ ...note })}
+                  style={{ backgroundColor: note.noteColor ?? '#fef08a' }}
+                  className="rounded-xl p-4 min-h-[110px] text-start shadow-sm hover:shadow-md transition-shadow group relative"
+                >
+                  {note.title && (
+                    <p className="text-sm font-semibold text-gray-800 mb-1 leading-snug">{note.title}</p>
+                  )}
+                  {note.notes && (
+                    <p className="text-xs text-gray-600 leading-relaxed line-clamp-4">{note.notes}</p>
+                  )}
+                  {note.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {note.tags.slice(0, 2).map(t => (
+                        <span key={t} className="text-[10px] px-1.5 py-0 rounded-full bg-black/10 text-gray-700">#{t}</span>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-gray-500 mt-2 absolute bottom-2 end-3">
+                    {new Date(note.updatedAt).toLocaleDateString()}
+                  </p>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Content */}
-      {view === 'list' ? (
+      {todayView !== 'notes' && view === 'list' ? (
         <div>
           <TaskGroup label={isRTL ? '\u0645\u062b\u0628\u062a\u0629' : 'Pinned'} items={pinned} />
           <TaskGroup label={isRTL ? '\u0645\u062a\u0623\u062e\u0631\u0629' : 'Overdue'} items={overdue} />

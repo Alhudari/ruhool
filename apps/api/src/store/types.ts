@@ -472,6 +472,17 @@ export interface TaskItem {
   externalId?: string;
   externalProvider?: 'google-tasks' | 'outlook' | 'todoist';
   externalUpdatedAt?: string;
+  /** Phase J-6: Quick Note — displayed as yellow sticky card in /tasks Notes view */
+  isQuickNote?: boolean;
+  noteColor?: string;         // default '#fef08a'
+  /** Phase J-6: bilingual category names */
+  categoryEn?: string;
+  categoryAr?: string;
+  /** Phase J-6: link back to a meeting (sourceRef) */
+  meetingSourceId?: string;
+  meetingSourceNo?: number;
+  /** Phase J-7: soft delete */
+  deletedAt?: string;
 }
 
 export interface ConversationMemoryEntry {
