@@ -538,6 +538,46 @@ export function PhDDashboard() {
               </div>
             )}
 
+            {/* Thesis phase status — scope points grouped by phase */}
+            {scopePoints.length > 0 && (() => {
+              const phaseMap: Record<string, { active: number; done: number }> = {};
+              for (const sp of scopePoints) {
+                const ph = sp.phase ?? 'general';
+                if (!phaseMap[ph]) phaseMap[ph] = { active: 0, done: 0 };
+                if (sp.status === 'completed') phaseMap[ph].done++;
+                else if (sp.status !== 'dropped') phaseMap[ph].active++;
+              }
+              const phases = Object.entries(phaseMap);
+              if (phases.length === 0) return null;
+              return (
+                <div className="lg:col-span-3 rounded-xl border border-border bg-surface-secondary p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <GraduationCap className="h-4 w-4 text-accent" />
+                    <h3 className="text-sm font-semibold text-on-surface">
+                      {isRTL ? 'مراحل الأطروحة' : 'Thesis Phases'}
+                    </h3>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {phases.map(([ph, counts]) => (
+                      <div key={ph} className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2">
+                        <span className="text-xs font-medium text-on-surface capitalize">{ph}</span>
+                        {counts.done > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 font-medium">
+                            {counts.done} {isRTL ? 'مكتمل' : 'done'}
+                          </span>
+                        )}
+                        {counts.active > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-500 font-medium">
+                            {counts.active} {isRTL ? 'نشط' : 'active'}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Scope points progress */}
             {scopePoints.length > 0 && (
               <div className="lg:col-span-3 rounded-xl border border-border bg-surface-secondary p-5">
