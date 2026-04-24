@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Bot, Compass, Search, BookOpen, PenTool, Sparkles, Loader2, Shield } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
@@ -43,9 +43,11 @@ const COLOR_MAP: Record<string, string> = {
 export default function AgentChatPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const agentId = params.id as string;
   const { language, setActiveConversation } = useAppStore();
   const isRTL = language === 'ar';
+  const projectId = searchParams?.get('projectId') || undefined;
 
   const [agent, setAgent] = useState<Agent | null>(null);
   const [loading, setLoading] = useState(true);
@@ -127,6 +129,7 @@ export default function AgentChatPage() {
           <ChatView
             agentId={agentId}
             conversationId={conversationId}
+            projectId={projectId}
             onConversationCreated={(id) => {
               setConversationId(id);
               setActiveConversation(id);
