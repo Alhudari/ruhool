@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { headers } from 'next/headers';
 import '../styles/globals.css';
 import { ClippyGate } from '@/components/help/clippy-gate';
-import { GuardedNavProvider } from '@/lib/navigation/GuardedNavProvider';
+import { ClientRoot } from '@/components/shared/ClientRoot';
 
 export const metadata: Metadata = {
   title: 'Ruhool (رحول) — Multi-Agent Platform',
@@ -83,10 +83,10 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-screen">
-        <GuardedNavProvider>
+        <ClientRoot>
           {children}
           <ClippyGate />
-        </GuardedNavProvider>
+        </ClientRoot>
       </body>
     </html>
   );
