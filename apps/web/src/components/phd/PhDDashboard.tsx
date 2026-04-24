@@ -1,11 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
-  BookOpen, FileText, Brain, Calendar, CheckSquare, Loader2,
+  BookOpen, Brain, Calendar, CheckSquare, Loader2,
   GraduationCap, BookMarked, Star, RefreshCw, TrendingUp,
   Target, FlaskConical, ArrowRight, ChevronRight, Lightbulb,
-  Award, Layers,
+  Award, Layers, AlertTriangle, Clock, BookPlus, Crosshair,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
@@ -52,6 +54,26 @@ interface MemoryEntry {
   content: string;
   date: string;
   tags?: string[];
+}
+interface Grs2Reminder {
+  needsGrs2: boolean;
+  urgentFollowUp: boolean;
+  currentMonth: string;
+  daysUntilMonthEnd: number;
+}
+interface ScopePoint {
+  id: string;
+  number: number;
+  title: string;
+  status?: 'active' | 'completed' | 'paused' | 'dropped';
+  phase?: string;
+}
+interface ZoteroItem {
+  key: string;
+  title?: string;
+  itemType?: string;
+  dateAdded?: string;
+  creators?: Array<{ lastName?: string; firstName?: string }>;
 }
 
 // ── Sub-components ────────────────────────────────────────────────────
@@ -149,18 +171,34 @@ export function PhDDashboard() {
   const [taskFilter, setTaskFilter] = useState<'pending' | 'done' | 'all'>('pending');
 
   const [insights, setInsights] = useState<MemoryEntry[]>([]);
+  const [grs2Reminder, setGrs2Reminder] = useState<Grs2Reminder | null>(null);
+  const [scopePoints, setScopePoints] = useState<ScopePoint[]>([]);
+  const [recentZotero, setRecentZotero] = useState<ZoteroItem[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const [litRes, taskRes, meetRes, memRes] = await Promise.all([
+      const [litRes, taskRes, meetRes, memRes, grs2Res, scopeRes, zotRes] = await Promise.all([
         apiFetch<{ notes: LitNote[]; total: number }>('/api/vault/literature'),
         apiFetch<{ tasks: VaultTask[]; total: number }>('/api/vault/tasks?subPath=01%20PhD'),
         apiFetch<MeetingSession[]>('/api/meetings/sessions'),
         apiFetch<MemoryEntry[]>('/api/companion/memory').catch(() => [] as MemoryEntry[]),
+        apiFetch<Grs2Reminder>('/api/grs2/reminders').catch(() => null),
+        apiFetch<{ scopePoints: ScopePoint[] }>('/api/scope-points').catch(() => ({ scopePoints: [] })),
+        apiFetch<{ items: ZoteroItem[] }>('/api/zotero/items?limit=200').catch(() => ({ items: [] })),
       ]);
       setData({ litNotes: litRes.notes, litTotal: litRes.total, tasks: taskRes.tasks, meetings: meetRes });
       setInsights(memRes);
+      setGrs2Reminder(grs2Res);
+      setScopePoints(scopeRes.scopePoints);
+
+      // Filter Zotero items added in last 7 days
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const recent = zotRes.items.filter((item) => {
+        if (!item.dateAdded) return false;
+        return new Date(item.dateAdded).getTime() >= cutoff;
+      });
+      setRecentZotero(recent);
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed to load'); }
     finally { setLoading(false); }
   }, []);
@@ -188,6 +226,18 @@ export function PhDDashboard() {
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const lastActions = recentMeetings.find((m) => m.record?.action_plan_next?.length)?.record?.action_plan_next ?? [];
   const nextMeeting = recentMeetings.find((m) => m.record?.Next_Meeting)?.record?.Next_Meeting;
+
+  // Next meeting countdown
+  const nextMeetingDays = useMemo(() => {
+    if (!nextMeeting) return null;
+    // Try parsing common date formats (DD/MM/YYYY, YYYY-MM-DD, etc.)
+    const parsed = new Date(nextMeeting.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1'));
+    if (!Number.isNaN(parsed.getTime())) {
+      const diff = Math.ceil((parsed.getTime() - Date.now()) / 86400000);
+      return diff;
+    }
+    return null;
+  }, [nextMeeting]);
 
   // Year breakdown of papers
   const yearCounts = useMemo(() => {
@@ -399,6 +449,139 @@ export function PhDDashboard() {
         {/* ── OVERVIEW ─────────────────────────────────────────── */}
         {tab === 'overview' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+            {/* GRS2 reminder widget — urgent banner */}
+            {grs2Reminder && (grs2Reminder.needsGrs2 || grs2Reminder.urgentFollowUp) && (
+              <div className={cn(
+                'lg:col-span-3 rounded-xl border p-4 flex items-start gap-3',
+                grs2Reminder.urgentFollowUp
+                  ? 'bg-red-500/10 border-red-500/20'
+                  : 'bg-amber-500/10 border-amber-500/20'
+              )}>
+                <AlertTriangle className={cn('h-5 w-5 shrink-0 mt-0.5', grs2Reminder.urgentFollowUp ? 'text-red-500' : 'text-amber-500')} />
+                <div className="flex-1 min-w-0">
+                  <p className={cn('text-sm font-semibold', grs2Reminder.urgentFollowUp ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400')}>
+                    {isRTL
+                      ? (grs2Reminder.urgentFollowUp ? `تقرير GRS2 — ${grs2Reminder.daysUntilMonthEnd} أيام متبقية` : `تقرير GRS2 لشهر ${grs2Reminder.currentMonth} لم يُبدأ بعد`)
+                      : (grs2Reminder.urgentFollowUp ? `GRS2 Follow-up — ${grs2Reminder.daysUntilMonthEnd} days left this month` : `GRS2 report for ${grs2Reminder.currentMonth} not started`)}
+                  </p>
+                  <p className="text-xs text-on-surface-secondary mt-0.5">
+                    {isRTL ? 'يُوصى بإتمامه قبل نهاية الشهر' : 'Recommended to complete before month end'}
+                  </p>
+                </div>
+                <a href="/grs2" className={cn(
+                  'text-xs px-3 py-1.5 rounded-lg shrink-0 font-medium',
+                  grs2Reminder.urgentFollowUp
+                    ? 'bg-red-500/20 text-red-600 hover:bg-red-500/30 dark:text-red-400'
+                    : 'bg-amber-500/20 text-amber-600 hover:bg-amber-500/30 dark:text-amber-400'
+                )}>
+                  {isRTL ? 'فتح GRS2' : 'Open GRS2'}
+                </a>
+              </div>
+            )}
+
+            {/* Next meeting countdown */}
+            {nextMeetingDays !== null && (
+              <div className={cn(
+                'rounded-xl border p-4 flex items-center gap-3',
+                nextMeetingDays <= 3
+                  ? 'bg-blue-500/10 border-blue-500/20'
+                  : 'bg-surface-secondary border-border'
+              )}>
+                <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center shrink-0', nextMeetingDays <= 3 ? 'bg-blue-500/20 text-blue-500' : 'bg-accent/10 text-accent')}>
+                  <Clock className="h-5 w-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-on-surface-tertiary uppercase tracking-wider">
+                    {isRTL ? 'الاجتماع القادم' : 'Next meeting'}
+                  </p>
+                  <p className="text-sm font-bold text-on-surface">
+                    {nextMeetingDays <= 0
+                      ? (isRTL ? 'اليوم!' : 'Today!')
+                      : nextMeetingDays === 1
+                        ? (isRTL ? 'غداً' : 'Tomorrow')
+                        : `${nextMeetingDays} ${isRTL ? 'أيام' : 'days'}`}
+                  </p>
+                  <p className="text-[11px] text-on-surface-tertiary">{nextMeeting}</p>
+                </div>
+                <a href="/meetings" className="text-xs text-accent hover:underline shrink-0">
+                  {isRTL ? 'الاجتماعات' : 'Meetings'}
+                </a>
+              </div>
+            )}
+
+            {/* Recent Zotero additions */}
+            {recentZotero.length > 0 && (
+              <div className={cn('rounded-xl border border-border bg-surface-secondary p-4', nextMeetingDays !== null ? 'lg:col-span-2' : 'lg:col-span-3')}>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <BookPlus className="h-4 w-4 text-accent" />
+                    <h3 className="text-sm font-semibold text-on-surface">
+                      {isRTL ? `أُضيف حديثاً للمكتبة (${recentZotero.length})` : `Recently Added to Library (${recentZotero.length})`}
+                    </h3>
+                  </div>
+                  <a href="/zotero" className="text-[11px] text-accent hover:underline">{isRTL ? 'عرض الكل' : 'View all'}</a>
+                </div>
+                <div className="space-y-1.5">
+                  {recentZotero.slice(0, 5).map((item) => (
+                    <div key={item.key} className="flex items-center gap-2 text-xs py-1">
+                      <BookOpen className="h-3.5 w-3.5 text-on-surface-tertiary shrink-0" />
+                      <span className="flex-1 truncate text-on-surface-secondary">{item.title ?? item.key}</span>
+                      {item.dateAdded && (
+                        <span className="text-[10px] text-on-surface-tertiary shrink-0 font-mono">
+                          {new Date(item.dateAdded).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Scope points progress */}
+            {scopePoints.length > 0 && (
+              <div className="lg:col-span-3 rounded-xl border border-border bg-surface-secondary p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Crosshair className="h-4 w-4 text-accent" />
+                    <h3 className="text-sm font-semibold text-on-surface">
+                      {isRTL ? 'نقاط النطاق البحثي' : 'Research Scope Points'}
+                    </h3>
+                  </div>
+                  <a href="/supervision" className="text-[11px] text-accent hover:underline">{isRTL ? 'إدارة' : 'Manage'}</a>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {scopePoints.sort((a, b) => a.number - b.number).map((sp) => {
+                    const statusColor = sp.status === 'completed'
+                      ? 'text-emerald-500 bg-emerald-500/10'
+                      : sp.status === 'paused'
+                        ? 'text-amber-500 bg-amber-500/10'
+                        : 'text-blue-500 bg-blue-500/10';
+                    const statusLabel = sp.status === 'completed'
+                      ? (isRTL ? 'مكتمل' : 'Done')
+                      : sp.status === 'paused'
+                        ? (isRTL ? 'موقوف' : 'Paused')
+                        : (isRTL ? 'نشط' : 'Active');
+                    return (
+                      <div key={sp.id} className="rounded-lg border border-border bg-surface p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2 flex-1 min-w-0">
+                            <span className="text-[11px] font-mono text-on-surface-tertiary shrink-0 mt-0.5">S{sp.number}</span>
+                            <p className="text-xs text-on-surface-secondary leading-snug truncate">{sp.title}</p>
+                          </div>
+                          <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0', statusColor)}>
+                            {statusLabel}
+                          </span>
+                        </div>
+                        {sp.phase && (
+                          <p className="text-[10px] text-on-surface-tertiary mt-1.5 ps-5">{sp.phase}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Lit progress ring + breakdown */}
             <div className="lg:col-span-2 rounded-xl border border-border bg-surface-secondary p-6">
@@ -755,9 +938,9 @@ export function PhDDashboard() {
                             {m.record?.date ?? m.title}
                           </p>
                           {m.record?.Summary && (
-                            <p className="text-xs text-on-surface-secondary leading-relaxed mt-1">
-                              {m.record.Summary}
-                            </p>
+                            <div className="text-xs text-on-surface-secondary leading-relaxed mt-1 prose prose-xs dark:prose-invert max-w-none [&>p]:my-0.5 [&>ul]:ps-4 [&>ul]:list-disc [&_li]:my-0">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.record.Summary}</ReactMarkdown>
+                            </div>
                           )}
                         </div>
                         {m.record?.Next_Meeting && (
