@@ -451,4 +451,23 @@ export interface StoreData {
   costTier?: 'zero-cost' | 'saving' | 'medium' | 'max' | string;
   voicePreferences?: { elevenlabsVoiceId?: string; [k: string]: unknown };
   __apiPort?: number;
+  // ---- Dispatch + workspace ----
+  limits?: { hierarchicalDispatchUsd?: number; dispatchMaxFanout?: number };
+  activeWorkspaceId?: string;
+  // ---- Subscriptions + overrides ----
+  subscriptions?: Array<{ id: string; name: string; linkedApiField?: string; cost?: number; [k: string]: unknown }>;
+  agentNameOverrides?: Record<string, { en: string; ar: string } | string>;
+  // ---- Time + timezone ----
+  timezones?: { primary: string; secondary?: string };
+  phdSchedule?: { semester?: string; supervisorMeetings?: Array<{ date: string; notes?: string }>; deadlines?: Array<{ date: string; label: string }> };
+  companionMemory?: CompanionMemoryEntry[];
+}
+
+export interface CompanionMemoryEntry {
+  id: string;
+  content: string;
+  tags?: string[];
+  createdAt: string;
+  agentId?: string;
+  importance?: number;
 }
