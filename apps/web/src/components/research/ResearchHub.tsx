@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Plus, Loader2, ChevronRight, File, Folder,
   FlaskConical, X, Save, Edit2, ArrowLeft,
@@ -853,13 +855,11 @@ function ReportTab({ cluster, language, onUpdate }: ReportTabProps) {
           </button>
         </div>
       ) : (
-        <div className="prose prose-sm max-w-none bg-surface-secondary rounded-[var(--radius-lg)] p-4 min-h-[200px]">
+        <div className="prose prose-sm dark:prose-invert max-w-none bg-surface-secondary rounded-[var(--radius-lg)] p-4 min-h-[200px] [&>h2]:text-base [&>h2]:font-semibold [&>h3]:text-sm [&>h3]:font-medium [&>ul]:list-disc [&>ul]:ps-4 [&>ol]:list-decimal [&>ol]:ps-4 [&_li]:my-0.5 [&_input[type=checkbox]]:me-1.5">
           {draft ? (
-            <pre className="whitespace-pre-wrap text-sm text-on-surface font-sans leading-relaxed">
-              <WikilinkRenderer text={draft} />
-            </pre>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{draft}</ReactMarkdown>
           ) : (
-            <p className="text-on-surface-tertiary text-sm">
+            <p className="text-on-surface-tertiary text-sm not-prose">
               {isRTL ? 'لا يوجد تقرير بعد. اضغط تعديل للبدء.' : 'No report yet. Click Edit to start.'}
             </p>
           )}

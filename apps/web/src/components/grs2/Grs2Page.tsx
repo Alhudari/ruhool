@@ -104,7 +104,11 @@ export function Grs2Page() {
       setCurrent(cur);
       setContentDraft(cur.content ?? '');
       setSupervisorDraft(cur.supervisorResponse ?? '');
-      setHistory(all.filter(r => r.month !== cur.month));
+      setHistory(
+        all
+          .filter(r => r.month !== cur.month)
+          .sort((a, b) => b.month.localeCompare(a.month))
+      );
       setReminder(rem);
     } catch { /* ignore */ }
     finally { setLoading(false); }
