@@ -561,6 +561,30 @@ export interface NotificationRecord {
   metadata?: Record<string, unknown>;
 }
 
+export interface NotificationRule {
+  id: string;
+  titleEn: string;
+  titleAr: string;
+  trigger: {
+    type: 'time-before' | 'daily-morning' | 'daily-evening' | 'cron' | 'task-overdue';
+    offsetHours?: number;
+    cronExpression?: string;
+    timeOfDay?: string;
+  };
+  condition?: {
+    type: 'grs2-not-submitted' | 'task-overdue' | 'meeting-upcoming' | 'custom';
+    customCheck?: string;
+  };
+  messageTemplate: { en: string; ar: string };
+  linkTo?: string;
+  agentId?: string;
+  enabled: boolean;
+  isBuiltIn: boolean;
+  snoozedUntil?: string;
+  lastFiredAt?: string;
+  createdAt: string;
+}
+
 export interface AgentNotificationSettings {
   agentId: string;
   enabled: boolean;
@@ -919,6 +943,7 @@ export interface StoreData {
   budget?: { monthlyBudget: number; budgetAlertPercent: number };
   notifications?: { smtpHost?: string; smtpPort?: number; smtpUser?: string; smtpPass?: string; smtpFrom?: string; slackWebhookUrl?: string; desktopEnabled?: string };
   notificationRecords?: NotificationRecord[];
+  notificationRules?: NotificationRule[];
   agentNotificationSettings?: AgentNotificationSettings[];
   libraryCategories?: LibraryCategory[];
   libraryTags?: LibraryTag[];
