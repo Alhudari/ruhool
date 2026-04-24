@@ -214,13 +214,13 @@ export function ZoteroBrowser() {
     setLoadingItems(true);
     try {
       const url = collection ? `/api/zotero/items-rich?collection=${collection.key}` : '/api/zotero/items-rich';
-      const r = await apiFetch<{ items: ZoteroItemRich[]; invalidCollection?: boolean }>(url);
-      setItems(r.items);
+      const r = await apiFetch<{ items?: ZoteroItemRich[]; invalidCollection?: boolean }>(url);
+      setItems(Array.isArray(r?.items) ? r.items : []);
       // If backend reports the collection key is stale, auto-reset to "All items"
       if (r.invalidCollection && collection) {
         setActiveCollection(null);
-        const all = await apiFetch<{ items: ZoteroItemRich[] }>('/api/zotero/items-rich');
-        setItems(all.items);
+        const all = await apiFetch<{ items?: ZoteroItemRich[] }>('/api/zotero/items-rich');
+        setItems(Array.isArray(all?.items) ? all.items : []);
       }
     } catch { setItems([]); }
     setLoadingItems(false);
@@ -285,7 +285,10 @@ export function ZoteroBrowser() {
     });
   };
 
-  const itemTypes = useMemo(() => [...new Set(items.map((i) => i.itemType).filter(Boolean))], [items]);
+  const itemTypes = useMemo(() => {
+    const safe = Array.isArray(items) ? items : [];
+    return [...new Set(safe.map((i) => i.itemType).filter(Boolean))];
+  }, [items]);
 
   const renderCollection = (col: ZoteroCollection, depth: number): React.ReactNode => {
     const hasChildren = (col.children?.length ?? 0) > 0;
@@ -317,7 +320,7 @@ export function ZoteroBrowser() {
   };
 
   const filtered = useMemo(() => {
-    let r = items;
+    let r = Array.isArray(items) ? items : [];
     if (search.trim()) {
       const q = search.toLowerCase();
       r = r.filter((i) =>
@@ -352,8 +355,9 @@ export function ZoteroBrowser() {
   }, [items, search, typeFilter, newOnly, sortBy, sortDir]);
 
   const newCount = useMemo(() => {
+    const safe = Array.isArray(items) ? items : [];
     const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    return items.filter((i) => {
+    return safe.filter((i) => {
       const userTags = i.tags.filter((t) => !/^⭐+$/.test(t));
       const recentlyAdded = i.dateAdded ? new Date(i.dateAdded).getTime() > cutoff : false;
       return userTags.length === 0 || recentlyAdded;
@@ -823,7 +827,7 @@ export function ZoteroBrowser() {
       {showBulk && (
         <BulkTagModal
           itemKeys={[...selected]}
-          itemTitles={items.filter((i) => selected.has(i.itemKey)).map((i) => i.title)}
+          itemTitles={(Array.isArray(items) ? items : []).filter((i) => selected.has(i.itemKey)).map((i) => i.title)}
           isRTL={isRTL}
           onClose={() => setShowBulk(false)}
           onDone={() => { setShowBulk(false); setSelected(new Set()); loadItems(activeCollection); }}
