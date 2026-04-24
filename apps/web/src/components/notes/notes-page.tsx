@@ -533,16 +533,7 @@ function ReadModal({
             <h2 className="text-base font-semibold text-on-surface truncate">{data?.name ?? noteName}</h2>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {data && (
-              <button
-                onClick={() => onOpenInObsidian(data.path)}
-                title={isRTL ? 'فتح في Obsidian للتعديل' : 'Edit in Obsidian'}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-accent/15 text-accent hover:bg-accent/25 transition-colors"
-              >
-                <Pencil className="h-3 w-3" />
-                {isRTL ? 'تعديل في Obsidian' : 'Edit'}
-              </button>
-            )}
+            {/* Edit in platform — Obsidian edit button removed (Law 1) */}
             <button
               onClick={onClose}
               className="p-1.5 rounded hover:bg-surface-secondary text-on-surface-tertiary"

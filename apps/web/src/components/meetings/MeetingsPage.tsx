@@ -284,8 +284,7 @@ export function MeetingsPage() {
               <div className="truncate">{s.title}</div>
               <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2">
                 <span>{new Date(s.record?.date || s.createdAt).toLocaleDateString(isRTL ? 'ar' : 'en-GB')}</span>
-                {s.obsidianPath && <span className="text-emerald-500">✓ Obsidian</span>}
-                {s.record && !s.obsidianPath && <span className="text-amber-500">● pending</span>}
+                {s.record && <span className="text-emerald-500">✓ {isRTL ? 'سُجِّل' : 'recorded'}</span>}
               </div>
             </button>
           ))}
@@ -314,20 +313,13 @@ export function MeetingsPage() {
                 <ChevronLeft className={cn('h-4 w-4', isRTL && 'rotate-180')} />
               </button>
               <h3 className="font-semibold">{active.title}</h3>
-              {active.obsidianPath && (
+              {active.record && (
                 <span className="text-xs bg-emerald-500/10 text-emerald-600 px-2 py-0.5 rounded-full">
-                  {isRTL ? 'محفوظ في Obsidian' : 'Saved to Obsidian'}
+                  {isRTL ? 'مسجَّل ✓' : 'Recorded ✓'}
                 </span>
               )}
             </div>
             <div className="flex items-center gap-2">
-              {active.record && !active.obsidianPath && (
-                <button onClick={saveToObsidian} disabled={isSaving}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-700 disabled:opacity-50">
-                  {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                  {isRTL ? 'حفظ في Obsidian' : 'Save to Obsidian'}
-                </button>
-              )}
               <button onClick={() => deleteSession(active.id)}
                 className="rounded p-1.5 hover:bg-destructive/10 text-destructive">
                 <Trash2 className="h-4 w-4" />

@@ -302,14 +302,7 @@ export function StandaloneNotesPage({ initialSessionId }: { initialSessionId: st
             </p>
           </div>
         </div>
-        <button
-          onClick={saveToObsidian}
-          disabled={saving}
-          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-accent text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-50"
-        >
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-          {isRTL ? 'احفظ في Obsidian' : 'Save to Obsidian'}
-        </button>
+        {/* Save to Obsidian removed — Law 1: platform is source of truth */}
       </div>
 
       {error && (
@@ -487,8 +480,8 @@ export function StandaloneNotesPage({ initialSessionId }: { initialSessionId: st
 
           <p className="text-[11px] text-on-surface-tertiary text-center">
             {isRTL
-              ? 'الجلسة محفوظة في رحول. اضغط "احفظ في Obsidian" لإنشاء ملف ‎.md نهائي.'
-              : 'Session is saved in Ruhool. Press "Save to Obsidian" to create the final .md file.'}
+              ? 'الجلسة محفوظة في رحول تلقائياً.'
+              : 'Session is saved automatically in Ruhool.'}
           </p>
         </div>
       </div>

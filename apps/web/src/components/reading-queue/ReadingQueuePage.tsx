@@ -440,14 +440,7 @@ function PaperRow({
               <Pencil className="h-3.5 w-3.5" />
             </button>
           )}
-          <a
-            href={`obsidian://open?vault=PhD&file=${paper.path.split('/').map(encodeURIComponent).join('/').replace(/\.md$/, '')}`}
-            target="_self"
-            title={isRTL ? 'افتح في Obsidian' : 'Open in Obsidian'}
-            className="h-8 w-8 rounded-lg flex items-center justify-center bg-surface text-on-surface-tertiary hover:bg-surface-tertiary border border-border transition-colors"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
+          {/* Obsidian link removed — Law 1 */}
         </div>
       </div>
     </div>

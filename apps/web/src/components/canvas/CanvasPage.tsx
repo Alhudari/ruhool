@@ -1668,15 +1668,7 @@ function DocPreviewModal({ path, isRTL, onClose }: { path: string; isRTL: boolea
             <h2 className="text-base font-semibold text-on-surface truncate">{note?.name ?? path.split('/').pop()}</h2>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <a
-              href={`obsidian://open?vault=PhD&file=${encodeURIComponent(path.replace(/\.md$/, ''))}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-accent/15 text-accent hover:bg-accent/25"
-            >
-              <ExternalLink className="h-3 w-3" />
-              {isRTL ? 'فتح في Obsidian' : 'Open in Obsidian'}
-            </a>
+            {/* Obsidian link removed — Law 1 */}
             <button onClick={onClose} className="p-1.5 rounded hover:bg-surface-secondary text-on-surface-tertiary">
               <X className="h-4 w-4" />
             </button>

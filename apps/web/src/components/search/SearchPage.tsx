@@ -242,11 +242,7 @@ export function SearchPage() {
                         <p className="text-[10px] text-on-surface-tertiary mt-1 font-mono break-all">{h.path}</p>
                       )}
                     </div>
-                    {obsidianUrl && (
-                      <a href={obsidianUrl} target="_self" className="text-on-surface-tertiary hover:text-accent shrink-0">
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
-                    )}
+                    {/* Obsidian link removed — Law 1 */}
                   </div>
                 </div>
               );

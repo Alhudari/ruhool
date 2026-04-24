@@ -62,10 +62,9 @@ export function GlobalSearch() {
     else if (h.kind === 'inbox') router.push('/inbox');
     else if (h.kind === 'meeting') router.push('/supervision');
     else if (h.kind === 'atomic') router.push('/notes');
-    else if (h.path) {
-      const url = `obsidian://open?vault=${VAULT_NAME}&file=${h.path.split('/').map(encodeURIComponent).join('/').replace(/\.md$/, '')}`;
-      window.open(url, '_self');
-    }
+    else if (h.kind === 'paper') router.push('/library?type=paper');
+    else if (h.kind === 'book') router.push('/library?type=book');
+    else router.push('/library');
     setOpen(false);
   };
 

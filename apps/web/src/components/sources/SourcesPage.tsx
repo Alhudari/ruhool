@@ -267,14 +267,7 @@ export function SourcesPage() {
                     {s.status && (
                       <span className="text-[10px] text-on-surface-tertiary">{s.status}</span>
                     )}
-                    <a
-                      href={obsidianUrl}
-                      target="_self"
-                      title={isRTL ? 'فتح في Obsidian' : 'Open in Obsidian'}
-                      className="ms-auto text-on-surface-tertiary hover:text-accent"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                    </a>
+                    {/* Obsidian link removed — Law 1 */}
                   </div>
                 </div>
               );
