@@ -770,6 +770,56 @@ export interface Grs2Record {
   reminderSent?: boolean;
 }
 
+// ─── Unified Library (Phase 4) ───────────────────────────────────────────────
+
+export type EntityType =
+  | 'paper' | 'book' | 'report' | 'standard' | 'my-writing' | 'thesis-chapter'
+  | 'person' | 'organization' | 'conference' | 'project'
+  | 'atomic-note' | 'reading-session' | 'research-cluster'
+  | 'file' | 'webpage' | 'video' | 'code-repo';
+
+export type ReadingStatus = 'to-read' | 'skimming' | 'reading' | 'paused' | 'done';
+export type ReadingDepth = 'title-abstract-conclusion' | 'scan-only' | 'selective' | 'full';
+
+export interface SubNote {
+  id: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EntityLink {
+  targetId: string;
+  relation?: string;
+  createdAt: string;
+}
+
+export interface LibraryEntity {
+  id: string;
+  type: EntityType;
+  title: string;
+  coverImage?: string;
+  notes: string;
+  subNotes: SubNote[];
+  links: EntityLink[];
+  tags: string[];
+  zoteroKey?: string;
+  readingStatus?: ReadingStatus;
+  readingDepth?: ReadingDepth;
+  authors?: string;
+  year?: number;
+  url?: string;
+  doi?: string;
+  isbn?: string;
+  publisher?: string;
+  journal?: string;
+  abstract?: string;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
+  deletedAt?: string;
+}
+
 export interface MilestoneRecord {
   id: string;
   title: string;
@@ -985,6 +1035,7 @@ export interface StoreData {
   meetingSessions?: MeetingSessionRecord[];
   grs2Records?: Grs2Record[];
   milestones?: MilestoneRecord[];
+  libraryEntities?: LibraryEntity[];
   tags?: TagRecord[];
   tagAssignments?: TagAssignment[];
   researchClusters?: ResearchCluster[];

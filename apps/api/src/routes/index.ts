@@ -93,6 +93,7 @@ import { registerGraphRoutes } from './graph.js';
 import { registerScopePointsRoutes } from './scope-points.js';
 import { registerMilestonesRoutes } from './milestones.js';
 import { registerNotificationRulesRoutes, seedBuiltInRules } from './notification-rules.js';
+import { registerLibraryEntitiesRoutes } from './library-entities.js';
 
 // Accept a wide superset deps bag; each registrar picks what it needs.
 // Using `unknown` + cast inside to avoid re-declaring every registrar's typed Deps here.
@@ -198,6 +199,7 @@ export function registerAllRoutes(app: Hono, deps: Record<string, unknown>): voi
   registerResearchClustersRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
   registerScopePointsRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
   registerMilestonesRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
+  registerLibraryEntitiesRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
   registerNotificationRulesRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
 
   // Seed built-in notification rules on first run (idempotent)
