@@ -9,27 +9,37 @@
  *     for the manager so old mentions keep routing correctly.
  */
 export const MENTION_MAP: Record<string, string> = {
-  // Manager — الراعي
+  // ── Canonical R12 Arabic names (primary aliases) ──────────────────
   'الراعي': 'manager', "al-ra'i": 'manager', 'alrai': 'manager', 'al-rai': 'manager',
-
-  // Architect — المصمم
+  'الدكتور': 'doctor', 'al-duktor': 'doctor', 'doctor': 'doctor',
+  'الباحث': 'research', 'al-bahith': 'research',
+  'المُلخِّص': 'reading-helper', 'الملخص': 'reading-helper', 'al-mulakhkhis': 'reading-helper',
+  'الناقد': 'writing-critic', 'al-naqid': 'writing-critic',
+  'المُقارِن': 'comparator', 'المقارن': 'comparator', 'al-muqarin': 'comparator',
   'المصمم': 'architect', 'al-musammim': 'architect', 'almusammim': 'architect',
+  'السارد': 'content-creator', 'al-sarid': 'content-creator',
+  'المبدع': 'creative', "al-mubdi'": 'creative', 'al-mubdi': 'creative',
+  'مهام': 'tasks-agent', 'maham': 'tasks-agent', 'tasks': 'tasks-agent',
+  'المحلل': 'analyst', 'al-muhallil': 'analyst',
+  'المنظّم': 'munazzim', 'المنظم': 'munazzim', 'al-munazzim': 'munazzim',
+  'المشخّص': 'mushakhkhis', 'المشخص': 'mushakhkhis', 'al-mushakhkhis': 'mushakhkhis',
+  'الخوي': 'research-companion', 'al-khuwy': 'research-companion', 'khuwy': 'research-companion',
+  'الفطين': 'fatin', 'fatin': 'fatin', 'al-fatin': 'fatin',
+  'المُمرر': 'playmaker', 'الممرر': 'playmaker', 'playmaker': 'playmaker', 'al-mumarrir': 'playmaker',
+  'المُدوّن': 'mudawwin', 'المدون': 'mudawwin', 'mudawwin': 'mudawwin', 'al-mudawwin': 'mudawwin',
+  'الكاتب': 'sayyaq', 'sayyaq': 'sayyaq', 'al-katib': 'sayyaq',
+  'clippy': 'clippy',
 
-  // Specialists (unchanged)
+  // ── Legacy camel-herd names — kept for backward compat ────────────
   'عبدان': 'research', 'abdan': 'research',
   'شواشة': 'reading-helper', 'shwasha': 'reading-helper',
   'الصفرا': 'writing-critic', 'al-safra': 'writing-critic', 'alsafra': 'writing-critic',
   'رمّانة': 'comparator', 'رمانة': 'comparator', 'rammana': 'comparator',
   'الدبسا': 'content-creator', 'al-dabsa': 'content-creator', 'aldabsa': 'content-creator',
-  'الكرييتف': 'creative', 'creative': 'creative', 'alkreetif': 'creative',
-  'مهام': 'tasks-agent', 'maham': 'tasks-agent', 'tasks': 'tasks-agent',
-  'الفطين': 'fatin', 'fatin': 'fatin', 'alfatin': 'fatin', 'fateen': 'fatin',
-  'المُمرر': 'playmaker', 'الممرر': 'playmaker', 'playmaker': 'playmaker',
-  'clippy': 'clippy',
+  'الكرييتف': 'creative', 'alkreetif': 'creative',
+  'رمّان': 'research-companion', 'ramman': 'research-companion',
 
-  // Legacy aliases for backward compatibility — الرحول used to be the
-  // manager's label before the Week-1 rename. Keep routing to `manager`
-  // for a transition period.
+  // ── Platform name alias ────────────────────────────────────────────
   'الرحول': 'manager',
   'ruhool': 'manager',
 };
