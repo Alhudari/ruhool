@@ -57,6 +57,7 @@ import { registerRenderRoutes } from './render.js';
 import { registerTrashRoutes } from './trash.js';
 import { registerWorkflowRunsRoutes, type WorkflowRunsRoutesDeps } from './workflow-runs.js';
 import { registerGeneratedFilesRoutes } from './generated-files.js';
+import { registerDispatchRoutes } from './dispatch.js';
 
 // Accept a wide superset deps bag; each registrar picks what it needs.
 // Using `unknown` + cast inside to avoid re-declaring every registrar's typed Deps here.
@@ -117,6 +118,7 @@ export function registerAllRoutes(app: Hono, deps: Record<string, unknown>): voi
   registerLibraryListRoutes(app, { getStore: d.getStore, saveStore: d.saveStore, studioAssetsDir: d.studioAssetsDir, ensureStudioAssetsDir: d.ensureStudioAssetsDir, experimentsCategoryId: d.experimentsCategoryId, listRenders: d.listRenders, archiveRender: d.archiveRender, trashMetaPath: d.trashMetaPath });
   registerTrashRoutes(app, { trashMetaPath: d.trashMetaPath, studioAssetsDir: d.studioAssetsDir, parseLibraryId: d.parseLibraryId, archiveRender: d.archiveRender, deleteRender: d.deleteRender });
   if (d.dataDir) registerGeneratedFilesRoutes(app, { dataDir: d.dataDir });
+  if (d.getLLM && d.dataDir) registerDispatchRoutes(app, { getStore: d.getStore, saveStore: d.saveStore, dataRoot: d.dataDir, getLLM: d.getLLM, logger: d.logger });
   if (d.workflowOrchestrator && d.workflowGetRunChannel) {
     registerWorkflowRunsRoutes(app, {
       getStore: d.getStore,
