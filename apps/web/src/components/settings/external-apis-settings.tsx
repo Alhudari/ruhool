@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ExternalLink, Save, Trash2, CheckCircle2, Circle, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react';
+import { ExternalLink, Trash2, CheckCircle2, Circle, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
+import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
+import { SaveBar, useSaveBarHeight } from '@/components/settings/save-bar';
 
 type KeyField =
   | 'mapboxToken' | 'maptilerKey' | 'geoapifyKey' | 'thunderforestKey' | 'lumaApiKey'
@@ -139,18 +141,22 @@ type KeyState = Record<string, string> & {
   hasThunderforest?: boolean; hasLuma?: boolean;
 };
 
+const emptyDrafts = (): Record<KeyField, string> => ({
+  mapboxToken: '', maptilerKey: '', geoapifyKey: '', thunderforestKey: '', lumaApiKey: '',
+  elevenlabsApiKey: '', stableAudioKey: '', audiocraftLocalUrl: '', groqApiKey: '',
+});
+
 export function ExternalApisSettings() {
   const { language } = useAppStore();
   const isRTL = language === 'ar';
 
   const [keys, setKeys] = useState<KeyState>({});
-  const [drafts, setDrafts] = useState<Record<KeyField, string>>({
-    mapboxToken: '', maptilerKey: '', geoapifyKey: '', thunderforestKey: '', lumaApiKey: '',
-    elevenlabsApiKey: '', stableAudioKey: '', audiocraftLocalUrl: '', groqApiKey: '',
-  });
+  const [drafts, setDrafts] = useState<Record<KeyField, string>>(emptyDrafts());
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState<KeyField | null>(null);
-  const [savedMsg, setSavedMsg] = useState<KeyField | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [clearingField, setClearingField] = useState<KeyField | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [checking, setChecking] = useState<KeyField | null>(null);
   const [capabilities, setCapabilities] = useState<Record<string, { ok: boolean; capabilities: Record<string, { ok: boolean; message: string }> }>>({});
   const [costTier, setCostTierState] = useState<'zero-cost' | 'saving' | 'medium' | 'max'>('saving');
@@ -188,30 +194,47 @@ export function ExternalApisSettings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const save = async (field: KeyField) => {
-    const value = drafts[field].trim();
-    if (!value) return;
-    setSaving(field);
+  const pendingFields = (Object.keys(drafts) as KeyField[]).filter((f) => drafts[f].trim().length > 0);
+  const dirty = pendingFields.length > 0;
+  useUnsavedChanges(dirty);
+  const saveBarPad = useSaveBarHeight(dirty || !!successMessage);
+
+  const save = async () => {
+    if (!dirty) return;
+    setSaving(true);
+    setErrorMessage(null);
     try {
+      const payload: Partial<Record<KeyField, string>> = {};
+      for (const f of pendingFields) payload[f] = drafts[f].trim();
       await apiFetch('/api/settings/api-keys', {
         method: 'PUT',
-        body: JSON.stringify({ [field]: value }),
+        body: JSON.stringify(payload),
       });
       const fresh = await apiFetch<KeyState>('/api/settings/api-keys');
       setKeys(fresh);
-      setDrafts((d) => ({ ...d, [field]: '' }));
-      setSavedMsg(field);
-      setTimeout(() => setSavedMsg(null), 2000);
-    } catch {
-      /* ignore */
+      setDrafts(emptyDrafts());
+      checkAll();
+      setSuccessMessage(
+        isRTL
+          ? `حُفظ ${pendingFields.length} ${pendingFields.length === 1 ? 'مفتاح' : 'مفاتيح'}`
+          : `Saved ${pendingFields.length} ${pendingFields.length === 1 ? 'key' : 'keys'}`
+      );
+      setTimeout(() => setSuccessMessage(null), 2000);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : (isRTL ? 'فشل الحفظ' : 'Save failed'));
     } finally {
-      setSaving(null);
+      setSaving(false);
     }
+  };
+
+  const discard = () => {
+    setDrafts(emptyDrafts());
+    setErrorMessage(null);
   };
 
   const clear = async (field: KeyField) => {
     if (!window.confirm(isRTL ? 'حذف هذا المفتاح؟' : 'Remove this key?')) return;
-    setSaving(field);
+    setClearingField(field);
     try {
       await apiFetch(`/api/settings/api-keys/${field}`, { method: 'DELETE' });
       const fresh = await apiFetch<KeyState>('/api/settings/api-keys');
@@ -219,7 +242,7 @@ export function ExternalApisSettings() {
     } catch {
       /* ignore */
     } finally {
-      setSaving(null);
+      setClearingField(null);
     }
   };
 
@@ -231,11 +254,11 @@ export function ExternalApisSettings() {
     );
   }
 
-  const TIERS: { id: typeof costTier; label: { ar: string; en: string }; desc: { ar: string; en: string }; color: string }[] = [
-    { id: 'zero-cost', label: { ar: 'صفر تكلفة', en: 'Zero cost' },    desc: { ar: 'مجاني فقط، لا خدمات مدفوعة', en: 'Free only, no paid services' },     color: 'emerald' },
-    { id: 'saving',    label: { ar: 'توفير',    en: 'Saving' },       desc: { ar: 'الباقات المجانية + موديلات سريعة رخيصة', en: 'Free tiers + cheap fast models' }, color: 'sky' },
-    { id: 'medium',    label: { ar: 'متوسط',    en: 'Medium' },       desc: { ar: 'جودة جيدة مع كل الخدمات', en: 'Good quality with all services' },      color: 'amber' },
-    { id: 'max',       label: { ar: 'أعلى',     en: 'Max quality' },  desc: { ar: 'أفضل جودة بغض النظر عن التكلفة', en: 'Best quality regardless of cost' }, color: 'rose' },
+  const TIERS: { id: typeof costTier; label: { ar: string; en: string }; desc: { ar: string; en: string } }[] = [
+    { id: 'zero-cost', label: { ar: 'صفر تكلفة', en: 'Zero cost' },    desc: { ar: 'مجاني فقط، لا خدمات مدفوعة', en: 'Free only, no paid services' } },
+    { id: 'saving',    label: { ar: 'توفير',    en: 'Saving' },       desc: { ar: 'الباقات المجانية + موديلات سريعة رخيصة', en: 'Free tiers + cheap fast models' } },
+    { id: 'medium',    label: { ar: 'متوسط',    en: 'Medium' },       desc: { ar: 'جودة جيدة مع كل الخدمات', en: 'Good quality with all services' } },
+    { id: 'max',       label: { ar: 'أعلى',     en: 'Max quality' },  desc: { ar: 'أفضل جودة بغض النظر عن التكلفة', en: 'Best quality regardless of cost' } },
   ];
 
   return (
@@ -290,6 +313,7 @@ export function ExternalApisSettings() {
         {KEYS.map((k) => {
           const connected = !!keys[k.hasFlag];
           const masked = keys[k.field] as string | undefined;
+          const rowPending = drafts[k.field].trim().length > 0;
           return (
             <div
               key={k.field}
@@ -299,9 +323,9 @@ export function ExternalApisSettings() {
                 <div className={cn(
                   'mt-0.5 shrink-0',
                   !connected ? 'text-on-surface-tertiary'
-                    : capabilities[k.field]?.ok ? 'text-green-500'
-                    : capabilities[k.field] && !capabilities[k.field].ok ? 'text-amber-500'
-                    : 'text-green-500'
+                    : capabilities[k.field]?.ok ? 'text-success'
+                    : capabilities[k.field] && !capabilities[k.field].ok ? 'text-warning'
+                    : 'text-success'
                 )}>
                   {!connected ? <Circle size={18} />
                     : capabilities[k.field] && !capabilities[k.field].ok ? <AlertTriangle size={18} />
@@ -310,12 +334,17 @@ export function ExternalApisSettings() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-sm font-semibold text-on-surface">{k.name[language]}</h3>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 font-medium">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/10 text-success font-medium">
                       {k.free[language]}
                     </span>
                     {connected && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent font-medium">
                         {isRTL ? 'متصل' : 'Connected'}
+                      </span>
+                    )}
+                    {rowPending && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-warning/15 text-warning font-medium">
+                        {isRTL ? 'غير محفوظ' : 'Unsaved'}
                       </span>
                     )}
                   </div>
@@ -344,35 +373,17 @@ export function ExternalApisSettings() {
                   }
                   className="flex-1 h-9 px-3 rounded-[var(--radius)] bg-surface-secondary border border-border text-sm text-on-surface font-mono"
                 />
-                <button
-                  onClick={() => save(k.field)}
-                  disabled={!drafts[k.field].trim() || saving === k.field}
-                  className={cn(
-                    'h-9 px-3 rounded-[var(--radius)] text-sm font-medium flex items-center gap-1.5 transition-colors',
-                    drafts[k.field].trim()
-                      ? 'bg-accent text-on-accent hover:opacity-90'
-                      : 'bg-surface-secondary text-on-surface-tertiary cursor-not-allowed'
-                  )}
-                >
-                  <Save size={14} />
-                  {saving === k.field ? (isRTL ? 'حفظ…' : 'Saving…') : (isRTL ? 'حفظ' : 'Save')}
-                </button>
                 {connected && (
                   <button
                     onClick={() => clear(k.field)}
-                    disabled={saving === k.field}
-                    className="h-9 px-3 rounded-[var(--radius)] border border-border text-on-surface-tertiary hover:bg-red-500/10 hover:text-red-500 hover:border-red-500/40 transition-colors"
+                    disabled={clearingField === k.field}
+                    className="h-9 px-3 rounded-[var(--radius)] border border-border text-on-surface-tertiary hover:bg-error/10 hover:text-error hover:border-error/40 transition-colors disabled:opacity-50"
                     title={isRTL ? 'حذف المفتاح' : 'Remove key'}
                   >
-                    <Trash2 size={14} />
+                    {clearingField === k.field ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                   </button>
                 )}
               </div>
-              {savedMsg === k.field && (
-                <p className="text-xs text-green-600">
-                  {isRTL ? '✓ تم الحفظ' : '✓ Saved'}
-                </p>
-              )}
 
               {connected && (
                 <div className="pt-2 border-t border-border">
@@ -394,7 +405,7 @@ export function ExternalApisSettings() {
                       {Object.entries(capabilities[k.field].capabilities).map(([capKey, cap]) => (
                         <div key={capKey} className={cn(
                           'text-[11px] flex items-start gap-1.5 p-1.5 rounded',
-                          cap.ok ? 'bg-green-500/10 text-green-700 dark:text-green-400' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                          cap.ok ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
                         )}>
                           {cap.ok ? <CheckCircle2 size={10} className="mt-0.5 shrink-0" /> : <AlertTriangle size={10} className="mt-0.5 shrink-0" />}
                           <div className="flex-1 min-w-0">
@@ -403,7 +414,7 @@ export function ExternalApisSettings() {
                         </div>
                       ))}
                       {Object.values(capabilities[k.field].capabilities).every((c) => !c.ok) && (
-                        <a href={k.signupUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] text-amber-600 hover:underline">
+                        <a href={k.signupUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] text-warning hover:underline">
                           {isRTL ? '← افتح لوحة التحكم لتفعيل الخدمات' : '← Open dashboard to enable services'}
                         </a>
                       )}
@@ -425,6 +436,17 @@ export function ExternalApisSettings() {
           ? 'ملاحظة: المفاتيح تُحفظ محلياً على جهازك فقط. لا تُرسل لأي خدمة خارج الخدمة المقصودة.'
           : 'Note: keys are stored locally on your machine only. They are never sent anywhere except the intended service.'}
       </div>
+
+      <div style={{ height: saveBarPad }} aria-hidden="true" />
+
+      <SaveBar
+        dirty={dirty}
+        saving={saving}
+        onSave={save}
+        onDiscard={discard}
+        successMessage={successMessage}
+        errorMessage={errorMessage}
+      />
     </div>
   );
 }

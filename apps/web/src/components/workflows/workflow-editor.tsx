@@ -38,9 +38,9 @@ interface WorkflowData {
 
 const AGENTS = [
   { id: 'manager', label: 'Al-Ra\'i (Manager)', labelAr: 'الراعي (القائد)' },
-  { id: 'research', label: 'Abdan (Research)', labelAr: 'عبدان (البحث)' },
-  { id: 'reading-helper', label: 'Shwasha (Reading)', labelAr: 'شواشة (القراءة)' },
-  { id: 'writing-critic', label: 'Al-Safra (Writing)', labelAr: 'الصفرا (النقد)' },
+  { id: 'research', label: 'Al-Bahith (Research)', labelAr: 'الباحث (البحث)' },
+  { id: 'reading-helper', label: 'Al-Mulakhkhis (Reading)', labelAr: 'المُلخِّص (القراءة)' },
+  { id: 'writing-critic', label: 'Al-Naqid (Writing)', labelAr: 'الناقد (النقد)' },
 ];
 
 const NODE_WIDTH = 240;

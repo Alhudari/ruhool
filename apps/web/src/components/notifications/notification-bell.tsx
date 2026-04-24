@@ -23,13 +23,13 @@ export interface NotificationRecord {
 
 const AGENT_NAMES: Record<string, { en: string; ar: string }> = {
   manager: { en: "Al-Ra'i", ar: 'الراعي' },
-  research: { en: 'Abdan', ar: 'عبدان' },
-  'reading-helper': { en: 'Shwasha', ar: 'شواشة' },
-  'writing-critic': { en: 'Al-Safra', ar: 'الصفرا' },
-  comparator: { en: 'Rammana', ar: 'رمّانة' },
+  research: { en: 'Al-Bahith', ar: 'الباحث' },
+  'reading-helper': { en: 'Al-Mulakhkhis', ar: 'المُلخِّص' },
+  'writing-critic': { en: 'Al-Naqid', ar: 'الناقد' },
+  comparator: { en: 'Al-Muqarin', ar: 'المُقارِن' },
   architect: { en: "Al-Musammim", ar: "المصمم" },
-  'content-creator': { en: 'Al-Dabsa', ar: 'الدبسا' },
-  creative: { en: 'Creative', ar: 'الكرييتف' },
+  'content-creator': { en: 'Al-Sarid', ar: 'السارد' },
+  creative: { en: 'Creative', ar: 'المبدع' },
   'tasks-agent': { en: 'Maham', ar: 'مهام' },
 };
 

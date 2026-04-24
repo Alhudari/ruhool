@@ -167,7 +167,7 @@ function buildPrompt(opts: {
 
 // ─── Component ───
 
-export function CreativeIntakeForm({ isRTL, defaultDuration = 30, onSubmit, onSkip, asAgentMessage = false, agentName = 'الكرييتف' }: Props) {
+export function CreativeIntakeForm({ isRTL, defaultDuration = 30, onSubmit, onSkip, asAgentMessage = false, agentName = 'المبدع' }: Props) {
   // Extensible option lists
   const [videoTypes, setVideoTypes] = useState(VIDEO_TYPES_BASE);
   const [durations, setDurations] = useState<number[]>(DURATIONS_BASE);

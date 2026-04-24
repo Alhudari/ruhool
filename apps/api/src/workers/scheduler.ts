@@ -53,3 +53,66 @@ export function startWatcher(deps: WatcherDeps): NodeJS.Timeout {
     } catch (err) { deps.logger.warn({ err }, '[watcher] scan error'); }
   }, 10 * 60 * 1000);
 }
+
+// ── Zotero refresh-overdue checker ─────────────────────────────────
+// Once a day, checks if it's been > 14 days since last Zotero refresh,
+// and creates a notification if overdue (no auto-refresh — user-triggered only).
+export interface ZoteroRefreshCheckerDeps {
+  getStore: () => { zoteroLastRefreshAt?: string };
+  createNotification: (input: { agentId: string; title: string; message: string; link?: string; priority?: 'low' | 'normal' | 'high'; bypassSettings?: boolean }) => unknown;
+  logger: { info: (m: string) => void; warn: (obj: { err: unknown }, m: string) => void };
+}
+
+export function startZoteroRefreshChecker(deps: ZoteroRefreshCheckerDeps): NodeJS.Timeout {
+  let lastNotifiedDay: string | null = null;
+  const check = () => {
+    try {
+      const store = deps.getStore();
+      const last = store.zoteroLastRefreshAt;
+      const today = new Date().toISOString().slice(0, 10);
+      // Avoid spamming — only one notification per day
+      if (lastNotifiedDay === today) return;
+      const days = last
+        ? Math.floor((Date.now() - new Date(last).getTime()) / (24 * 60 * 60 * 1000))
+        : 999;
+      if (days >= 14) {
+        deps.createNotification({
+          agentId: 'system',
+          title: '⏰ Zotero يحتاج تحديثاً',
+          message: last
+            ? `مرّ ${days} يوماً منذ آخر تحديث للأرقام من OpenAlex. الاستشهادات قد تكون قديمة.`
+            : `لم تقم بتحديث أرقام Zotero بعد. اضغط "حدّث الآن" في /zotero.`,
+          link: '/zotero',
+          priority: 'normal',
+        });
+        lastNotifiedDay = today;
+        deps.logger.info(`[zotero-refresh] notified user (${days} days since last refresh)`);
+      }
+    } catch (err) { deps.logger.warn({ err }, '[zotero-refresh] check error'); }
+  };
+  // Run once on boot, then every 6 hours
+  setTimeout(check, 30_000);
+  return setInterval(check, 6 * 60 * 60 * 1000);
+}
+
+// ── Round 6 — Habit spawner ───────────────────────────────────────
+// Calls the habit-spawn logic shortly after boot and then once per hour.
+// Hourly gives us margin on midnight roll-overs + timezone edge cases
+// without burning cycles — the endpoint is idempotent.
+export interface HabitSpawnerDeps {
+  spawn: () => Promise<{ created: number }>;
+  logger: { info: (m: string) => void; warn: (obj: { err: unknown }, m: string) => void };
+}
+
+export function startHabitSpawnerChecker(deps: HabitSpawnerDeps): NodeJS.Timeout {
+  const tick = async () => {
+    try {
+      const r = await deps.spawn();
+      if (r.created > 0) deps.logger.info(`[habit-spawner] created ${r.created} instance(s)`);
+    } catch (err) {
+      deps.logger.warn({ err }, '[habit-spawner] tick failed');
+    }
+  };
+  setTimeout(tick, 45_000);
+  return setInterval(tick, 60 * 60 * 1000);
+}

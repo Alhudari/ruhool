@@ -23,7 +23,7 @@ const MODES: {
       en: 'Local models only (Ollama). No data leaves your machine. Cloud API calls are blocked.',
       ar: 'نماذج محلية فقط (Ollama). لا تخرج بياناتك من جهازك. يتم حظر استدعاءات API السحابية.',
     },
-    color: 'text-red-500',
+    color: 'text-error',
   },
   {
     id: 'balanced',
@@ -33,7 +33,7 @@ const MODES: {
       en: 'Cloud allowed for non-private content. Default mode for general use.',
       ar: 'السحابة مسموحة للمحتوى غير الخاص. الوضع الافتراضي للاستخدام العام.',
     },
-    color: 'text-amber-500',
+    color: 'text-warning',
   },
   {
     id: 'open',
@@ -43,7 +43,7 @@ const MODES: {
       en: 'Cloud for everything. Maximum capability, all providers available.',
       ar: 'السحابة لكل شيء. أقصى قدرة، جميع المزودين متاحون.',
     },
-    color: 'text-green-500',
+    color: 'text-success',
   },
 ];
 

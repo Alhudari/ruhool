@@ -50,7 +50,7 @@ import {
   planAndRunWorkflowTool,
 } from '../services/agents/manager.js';
 import type { WorkflowOrchestrator } from '../services/workflow/orchestrator.js';
-import { dispatch as specialistsDispatch } from '../services/agents/specialists.js';
+import { dispatch as specialistsDispatch, buildIdentityDirective } from '../services/agents/specialists.js';
 
 type AnthropicCache = {
   current: AnthropicProvider | null;
@@ -75,6 +75,8 @@ export type ChatRoutesDeps = {
   parseTaskActions: (response: string) => unknown[];
   executeTaskActions: (actions: unknown[]) => TaskItem[];
   parseNotifyActions: (response: string, agentId: string) => NotificationRecord[];
+  parseReportActions?: (response: string) => unknown[];
+  executeReportActions?: (actions: unknown[]) => Array<{ action: string; id?: string; name?: string; error?: string }>;
   autoTitleIfNeeded: (convId: string) => Promise<void> | void;
   autoSummarizeIfNeeded: (convId: string) => Promise<void> | void;
   extractGraphFromMessage: (convId: string, userMsgId: string, assistantMsgId: string) => Promise<void> | void;
@@ -159,6 +161,8 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
     parseTaskActions,
     executeTaskActions,
     parseNotifyActions,
+    parseReportActions,
+    executeReportActions,
     autoTitleIfNeeded,
     autoSummarizeIfNeeded,
     extractGraphFromMessage,
@@ -235,7 +239,21 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
 
   app.post('/api/chat', async (c) => {
     const store = getStore();
-    const body = await c.req.json<{ conversationId?: string; message: string; model?: string; agentId?: string; context?: string; replyToMessageId?: string; chainDepth?: number; images?: Array<{ base64: string; mimeType: string }>; skipPlayMaker?: boolean }>();
+    const body = await c.req.json<{
+      conversationId?: string;
+      message: string;
+      model?: string;
+      agentId?: string;
+      context?: string;
+      replyToMessageId?: string;
+      chainDepth?: number;
+      /** R12 — original @mention sequence replayed on follow-up turns
+       *  so multi-agent chains longer than 2 hops keep the full list
+       *  of targets across every server turn. */
+      chainMentions?: string[];
+      images?: Array<{ base64: string; mimeType: string }>;
+      skipPlayMaker?: boolean;
+    }>();
 
     // BUG A/C FIX: derive CHAT_V2 ONCE at handler entry so every branch (cache,
     // multi-mention, main loop, fallbacks) uses the same gate. When v2 is on,
@@ -254,7 +272,14 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
 
     const mention = detectMention(body.message);
     bootLogger.info({ msg: 'chat-route-trace', step: 'after-mention', mentionAgentId: mention.agentId, conversationId: convId || null }, 'chat-route-trace');
-    const allMentioned = detectAllMentions(body.message);
+    // If the client is replaying a chained turn, it passes the
+    // original @mention list through `chainMentions` — otherwise
+    // `detectAllMentions` re-parses the current message. This makes
+    // chains longer than 2 hops possible: the server sees the full
+    // original sequence on every turn, not just the new follow-up.
+    const allMentioned = body.chainMentions && body.chainMentions.length > 0
+      ? body.chainMentions
+      : detectAllMentions(body.message);
     let messageForLLM = body.message;
     let detectedAgent: string;
     // isQuestionAboutOther was used by the former keyword-reroute guard — no longer needed.
@@ -663,7 +688,13 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       try {
         await stream.writeSSE({ event: 'conversation', data: JSON.stringify({ conversationId: convId, agentId: detectedAgent, participants }) });
 
-        let activeSystemPrompt = BUILTIN_SYSTEM_PROMPTS[detectedAgent] || MANAGER_SYSTEM_PROMPT;
+        // R17 — prepend the same identity directive the dispatch path
+        // uses so direct-chat (@specialist on the main /api/chat) gets
+        // the same persona-bleed protection as manager-delegated calls.
+        // Was: provider.chat was called with BUILTIN_SYSTEM_PROMPTS[id]
+        // alone, so prior speakers' voices leaked into the reply.
+        const identityDirective = buildIdentityDirective(detectedAgent);
+        let activeSystemPrompt = identityDirective + '\n\n' + (BUILTIN_SYSTEM_PROMPTS[detectedAgent] || MANAGER_SYSTEM_PROMPT);
 
         if (detectedAgent === 'mushakhkhis') {
           try {
@@ -781,6 +812,174 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
           activeSystemPrompt += ctx;
         } catch { /* ignore */ }
 
+        // Inject PhD working schedule into research-related agents
+        if (['research-companion', 'manager', 'research', 'reading-helper', 'writing-critic', 'comparator', 'mudawwin'].includes(detectedAgent)) {
+          try {
+            const { getOrCreateSchedule, buildScheduleContext } = await import('./phd-schedule.js');
+            const sched = getOrCreateSchedule(store as unknown as import('../store/types.js').StoreData);
+            activeSystemPrompt += buildScheduleContext(sched);
+          } catch { /* ignore */ }
+        }
+
+        if (detectedAgent === 'mudawwin') {
+          try {
+            const { listNotes, readNote, listAllTasks } = await import('@ruhool/core');
+            const { readAuditLog } = await import('../services/audit-log.js');
+            const meetingPaths = await listNotes({ subPath: '01 PhD/01 Supervision/Supervision Interaction Points', recursive: false }).catch(() => [] as string[]);
+            const meetings = await Promise.all(
+              meetingPaths.map(async (p) => {
+                try {
+                  const n = await readNote(p);
+                  return { name: n.name, date: n.frontmatter.date as string | undefined, summary: n.frontmatter.Summary as string | undefined, next: n.frontmatter.Next_Meeting as string | undefined };
+                } catch { return null; }
+              })
+            );
+            const valid = meetings.filter(Boolean) as Array<{ name: string; date?: string; summary?: string; next?: string }>;
+            const sorted = valid.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+            const last = sorted[0];
+
+            activeSystemPrompt += `\n\n## سياق الإشراف الحالي\n\n`;
+            activeSystemPrompt += `**عدد الاجتماعات المسجلة**: ${valid.length}\n`;
+            if (last) {
+              activeSystemPrompt += `**آخر اجتماع**: #${last.name} في ${(last.date ?? '').slice(0, 10)}\n`;
+              if (last.summary) activeSystemPrompt += `**ملخص آخر اجتماع**: ${String(last.summary).slice(0, 300)}\n`;
+              if (last.next) activeSystemPrompt += `**الاجتماع القادم المخطط**: ${last.next}\n`;
+            }
+            activeSystemPrompt += `\n**رقم الاجتماع التالي المقترح**: ${valid.length + 1}\n`;
+
+            // Recent activity since last meeting (papers added, tasks done)
+            const phdTasks = await listAllTasks({ subPath: '01 PhD' }).catch(() => []);
+            const done = phdTasks.filter((t: { done: boolean }) => t.done);
+            activeSystemPrompt += `\n**النشاط منذ بدء البحث**:\n`;
+            activeSystemPrompt += `- مهام مكتملة: ${done.length}\n`;
+            activeSystemPrompt += `- مهام معلّقة: ${phdTasks.length - done.length}\n`;
+
+            // Audit feed since last meeting — gives Mudawwin a precise log
+            // of what happened with timestamps (papers synced, atomic notes
+            // created/edited, sources added, etc.)
+            const sinceIso = (last?.date && String(last.date)) || undefined;
+            const audit = await readAuditLog({ limit: 100, sinceIso }).catch(() => []);
+            if (audit.length > 0) {
+              activeSystemPrompt += `\n**سجل النشاط على Obsidian منذ آخر اجتماع** (${audit.length} عملية):\n`;
+              for (const e of audit.slice(0, 30)) {
+                const t = e.ts.slice(0, 16).replace('T', ' ');
+                activeSystemPrompt += `- [${t}] ${e.action}${e.path ? ` → ${e.path}` : ''}\n`;
+              }
+            }
+          } catch { /* ignore */ }
+        }
+
+        if (detectedAgent === 'research-companion') {
+          try {
+            const { buildCompanionMemoryContext } = await import('./companion.js');
+            const memCtx = buildCompanionMemoryContext(
+              (store as unknown as { companionMemory?: import('../store/types.js').CompanionMemoryEntry[] }).companionMemory ?? []
+            );
+            if (memCtx) activeSystemPrompt += '\n\n' + memCtx;
+            // Live vault context — graceful
+            try {
+              const { getVaultName, listTopLevelFolders, listAllTasks, listNotes } = await import('@ruhool/core');
+              const vaultName = getVaultName();
+              const topFolders = await listTopLevelFolders();
+              const litNotes = await listNotes({ subPath: '01 PhD/02 Literature Review/Academic Literature', recursive: false }).catch(() => [] as string[]);
+              const phdTasks = await listAllTasks({ subPath: '01 PhD' }).catch(() => []);
+              const pending = phdTasks.filter((t: { done: boolean }) => !t.done);
+
+              activeSystemPrompt += `\n\n## سياق Obsidian Vault الحقيقي (محدّث ${new Date().toISOString().slice(0, 10)})\n\n`;
+              activeSystemPrompt += `**اسم Vault**: \`${vaultName}\`\n`;
+              activeSystemPrompt += `**رابط فتح ملف**: \`obsidian://open?vault=${vaultName}&file=PATH\` — **يجب** ترميز المسافات بـ \`%20\` (مثال: \`01%20PhD/02%20Literature%20Review\`)\n\n`;
+
+              if (topFolders.length > 0) {
+                activeSystemPrompt += `**المجلدات الرئيسية في Vault** (المستخدم لديه هذه البنية فعلاً — لا تقترح إنشاء vault جديد):\n`;
+                for (const f of topFolders) activeSystemPrompt += `- \`${f}\`\n`;
+                activeSystemPrompt += `\n`;
+              }
+
+              if (litNotes.length > 0) {
+                activeSystemPrompt += `**أحدث 10 مصادر أكاديمية** في \`01 PhD/02 Literature Review/Academic Literature\` (إجمالي: ${litNotes.length}):\n`;
+                for (const n of litNotes.slice(-10).reverse()) {
+                  const fileName = n.split('/').pop()?.replace(/\.md$/, '') ?? n;
+                  activeSystemPrompt += `- ${fileName}\n`;
+                }
+                activeSystemPrompt += `\n`;
+              }
+
+              if (pending.length > 0) {
+                activeSystemPrompt += `**${pending.length} مهام معلّقة في 01 PhD** (عيّنة):\n`;
+                for (const t of pending.slice(0, 8)) {
+                  activeSystemPrompt += `- [ ] ${t.text}${t.section ? ` _(in ${t.section})_` : ''} — في \`${t.notePath}\`\n`;
+                }
+                activeSystemPrompt += `\n`;
+              }
+
+              const meetings = ((store as unknown as { meetingSessions?: Array<{ id: string }> }).meetingSessions ?? []).length;
+              const litSessions = ((store as unknown as { readingSessions?: Array<{ id: string }> }).readingSessions ?? []).length;
+              activeSystemPrompt += `**حالة منصة رحول**:\n`;
+              activeSystemPrompt += `- الاجتماعات المسجّلة في رحول: ${meetings}\n`;
+              activeSystemPrompt += `- جلسات القراءة عبر شواشة: ${litSessions}\n`;
+              activeSystemPrompt += `\n`;
+
+              activeSystemPrompt += `\n**روابط منصة رحول للإحالة المستخدم إليها**:\n`;
+              activeSystemPrompt += `- لوحة الدكتوراه: \`/phd\`\n`;
+              activeSystemPrompt += `- مكتبة Zotero: \`/zotero\`\n`;
+              activeSystemPrompt += `- مساعد القراءة (شواشة): \`/shwasha\`\n`;
+              activeSystemPrompt += `- الاجتماعات: \`/meetings\`\n`;
+              activeSystemPrompt += `- المهام: \`/tasks\`\n`;
+            } catch { /* vault not accessible — skip */ }
+
+            // ── Zotero context for Rumman — gives him real library awareness
+            // so he can suggest from existing items + know reading status. Cheap:
+            // 1 Zotero call per Rumman turn, cached server-side via response-cache.
+            try {
+              const { zoteroListItemsRich, zoteroListCollections } = await import('@ruhool/core');
+              const items = await zoteroListItemsRich(undefined, 200);
+              const collections = await zoteroListCollections().catch(() => []);
+              const total = items.length;
+              const toRead = items.filter((i) => i.tags.some((t) => /^to.?read$/i.test(t))).length;
+              const reading = items.filter((i) => i.tags.some((t) => /^reading$/i.test(t))).length;
+              const read = items.filter((i) => i.tags.some((t) => /^read$/i.test(t))).length;
+              const recent = [...items]
+                .filter((i) => i.dateAdded)
+                .sort((a, b) => (b.dateAdded ?? '').localeCompare(a.dateAdded ?? ''))
+                .slice(0, 8);
+              const topRated = items.filter((i) => i.rating >= 2).slice(0, 5);
+
+              activeSystemPrompt += `\n\n## مكتبة Zotero الفعلية (محقونة من /api/zotero)\n\n`;
+              activeSystemPrompt += `**الإحصائيات**:\n`;
+              activeSystemPrompt += `- إجمالي المصادر: ${total}\n`;
+              activeSystemPrompt += `- المجموعات: ${collections.length}\n`;
+              activeSystemPrompt += `- للقراءة: ${toRead} | يقرأها: ${reading} | مقروءة: ${read}\n`;
+              activeSystemPrompt += `- بدون تصنيف: ${total - toRead - reading - read}\n\n`;
+
+              if (collections.length > 0) {
+                activeSystemPrompt += `**المجموعات الموجودة** (لا تقترح إنشاء جديدة قبل التحقق):\n`;
+                for (const col of collections.slice(0, 15)) activeSystemPrompt += `- ${col.name}\n`;
+                activeSystemPrompt += `\n`;
+              }
+
+              if (recent.length > 0) {
+                activeSystemPrompt += `**أحدث ${recent.length} مصادر مُضافة**:\n`;
+                for (const it of recent) {
+                  activeSystemPrompt += `- "${it.title.slice(0, 100)}" (${it.year ?? 'n.d.'})${it.authors ? ` — ${it.authors.split(',')[0]}` : ''}${it.doi ? ` | DOI: ${it.doi}` : ''}\n`;
+                }
+                activeSystemPrompt += `\n`;
+              }
+
+              if (topRated.length > 0) {
+                activeSystemPrompt += `**أوراق مُقيّمة عالياً (⭐⭐+)**:\n`;
+                for (const it of topRated) {
+                  activeSystemPrompt += `- ${'⭐'.repeat(it.rating)} "${it.title.slice(0, 80)}" (${it.year ?? 'n.d.'})\n`;
+                }
+                activeSystemPrompt += `\n`;
+              }
+
+              activeSystemPrompt += `**ملاحظة**: عند اقتراح ورقة، **ابحث في هذه القائمة أولاً** قبل اقتراح خارجية. لو موجودة، أحل المستخدم لـ \`/zotero\` مع اسم الورقة.\n`;
+            } catch (err) {
+              activeSystemPrompt += `\n\n_⚠️ تعذّر الوصول إلى Zotero (${err instanceof Error ? err.message.slice(0, 100) : 'unknown'}). إذا سُئلت عن مكتبتي قل: "Zotero غير متاح حالياً، تأكد أن التطبيق مفتوح أو الاتصال بالـ Web API يعمل."_\n`;
+            }
+          } catch { /* ignore */ }
+        }
+
         if (detectedAgent === 'tasks-agent') {
           try {
             const allLists = new Set<string>();
@@ -808,6 +1007,17 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
           if (customAgent) activeSystemPrompt = customAgent.systemPrompt;
         }
 
+        // Response length directive — injected for all agents except clippy/playmaker
+        if (detectedAgent !== 'clippy' && detectedAgent !== 'playmaker') {
+          const rl = (store as unknown as { responseLength?: string }).responseLength ?? 'medium';
+          if (rl === 'short') {
+            activeSystemPrompt += '\n\n## تعليمات المستخدم: طول الرد\nأجب باختصار شديد — الحد الأقصى 3-4 جمل أو 5 نقاط. لا شرح مطوّل. الجوهر فقط.';
+          } else if (rl === 'long') {
+            activeSystemPrompt += '\n\n## تعليمات المستخدم: طول الرد\nأجب بتفصيل كامل — شرح شامل مع أمثلة وسياق وكل ما يلزم. لا تختصر.';
+          }
+          // 'medium' = default behaviour, no directive needed
+        }
+
         if (body.context) {
           activeSystemPrompt += '\n\n[\u0633\u064A\u0627\u0642 \u0625\u0636\u0627\u0641\u064A \u0645\u0646 \u0627\u0644\u0648\u0627\u062C\u0647\u0629]\n' + body.context + '\n';
         }
@@ -823,7 +1033,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
 
         try {
           const tzConfig = (store as unknown as { timezones?: { primary: string; secondary?: string } }).timezones
-            || { primary: 'Asia/Kuwait', secondary: 'Europe/London' };
+            || { primary: 'Europe/London', secondary: 'Asia/Kuwait' };
           const now = new Date();
           const fmt = (tz: string, locale: string, long = false) => new Intl.DateTimeFormat(locale, {
             timeZone: tz, hour12: false,
@@ -1246,12 +1456,88 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                   }
                 }
               }
+              if (parseReportActions && executeReportActions) {
+                try {
+                  const reportActions = parseReportActions(fullResponse);
+                  if (reportActions.length > 0) {
+                    const results = executeReportActions(reportActions);
+                    await stream.writeSSE({ event: 'reports', data: JSON.stringify({ results }) });
+                  }
+                } catch { /* ignore */ }
+              }
               try {
                 const notifs = parseNotifyActions(fullResponse, detectedAgent || 'manager');
                 if (notifs.length > 0) {
                   await stream.writeSSE({ event: 'notifications', data: JSON.stringify({ notifications: notifs }) });
                 }
               } catch { /* ignore */ }
+
+              // PhD schedule update: parse [PHD_SCHEDULE] tags from manager
+              if (detectedAgent === 'manager') {
+                try {
+                  const { parsePhdScheduleActions, applyScheduleUpdate } = await import('./phd-schedule.js');
+                  const updates = parsePhdScheduleActions(fullResponse);
+                  if (updates.length > 0) {
+                    const storeNow = getStore();
+                    for (const up of updates) {
+                      applyScheduleUpdate(storeNow as unknown as import('../store/types.js').StoreData, up);
+                    }
+                    saveStore();
+                  }
+                } catch { /* ignore */ }
+              }
+
+              // Mudawwin meeting create: parse [MEETING:CREATE] tags
+              if (detectedAgent === 'mudawwin') {
+                try {
+                  const { parseMeetingCreateActions, applyMeetingCreate } = await import('./meeting-actions.js');
+                  const meetings = parseMeetingCreateActions(fullResponse);
+                  for (const m of meetings) {
+                    const result = await applyMeetingCreate(m);
+                    if (result.ok) {
+                      await stream.writeSSE({ event: 'meeting_created', data: JSON.stringify({ path: result.path }) });
+                    } else {
+                      await stream.writeSSE({ event: 'meeting_error', data: JSON.stringify({ error: result.error }) });
+                    }
+                  }
+                } catch { /* ignore */ }
+              }
+
+              // Clippy tour feedback: parse [TOUR_FEEDBACK] tags and persist them
+              if (detectedAgent === 'clippy') {
+                try {
+                  const { parseClippyTourFeedback } = await import('./clippy.js');
+                  const feedbacks = parseClippyTourFeedback(fullResponse);
+                  if (feedbacks.length > 0) {
+                    const storeNow = getStore();
+                    const s = storeNow as unknown as { clippyTourFeedback?: import('./clippy.js').ClippyTourFeedback[] };
+                    if (!s.clippyTourFeedback) s.clippyTourFeedback = [];
+                    for (const f of feedbacks) {
+                      s.clippyTourFeedback.push({ id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), ...f });
+                    }
+                    saveStore();
+                  }
+                } catch { /* ignore */ }
+              }
+
+              // رمّان companion memory: parse [REMEMBER] tags and persist them
+              if (detectedAgent === 'research-companion') {
+                try {
+                  const { parseCompanionMemoryActions } = await import('./companion.js');
+                  const remembered = parseCompanionMemoryActions(fullResponse, convId!);
+                  if (remembered.length > 0) {
+                    const storeNow = getStore();
+                    if (!storeNow.companionMemory) (storeNow as unknown as { companionMemory: import('../store/types.js').CompanionMemoryEntry[] }).companionMemory = [];
+                    for (const entry of remembered) {
+                      (storeNow as unknown as { companionMemory: import('../store/types.js').CompanionMemoryEntry[] }).companionMemory.push({
+                        id: crypto.randomUUID(),
+                        ...entry,
+                      });
+                    }
+                    saveStore();
+                  }
+                } catch { /* ignore */ }
+              }
 
               try {
                 const catCreate = [...fullResponse.matchAll(/\[CATEGORY:CREATE\]\s*(\{[\s\S]*?\})/g)];
@@ -1448,6 +1734,15 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 }
               }
             }
+            if (parseReportActions && executeReportActions) {
+              try {
+                const reportActions = parseReportActions(fullResponse);
+                if (reportActions.length > 0) {
+                  const results = executeReportActions(reportActions);
+                  await stream.writeSSE({ event: 'reports', data: JSON.stringify({ results }) });
+                }
+              } catch { /* ignore */ }
+            }
             try {
               const notifs = parseNotifyActions(fullResponse, detectedAgent || 'manager');
               if (notifs.length > 0) {
@@ -1510,7 +1805,13 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
               }
             }
 
-            if (allMentioned.length > 1 && depth === 0) {
+            // Multi-mention chaining: walk the list of @mentions in order.
+            // Previously gated on `depth === 0` which broke sequential
+            // chains past the first hop ("@الراعي ثم @الباحث ثم @المُلخِّص"
+            // would stop at الباحث). We now advance through the chain for
+            // every step until we reach the last mentioned agent OR hit
+            // MAX_DEPTH as the safety stop.
+            if (allMentioned.length > 1 && depth < MAX_DEPTH) {
               const idx = allMentioned.indexOf(detectedAgent);
               const candidate = idx >= 0 && idx < allMentioned.length - 1 ? allMentioned[idx + 1] : null;
               if (candidate) { nextAgent = candidate; chainReason = 'multi-mention'; }
@@ -1540,6 +1841,11 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 maxDepth: MAX_DEPTH,
                 calledBy: AGENT_DISPLAY_NAMES[detectedAgent] || detectedAgent,
                 replyToMessageId: lastAssistantMsg?.id,
+                // Forward the original mention list (if multi-mention
+                // is what's driving this chain) so the client can replay
+                // it on the next turn and the server keeps seeing the
+                // full sequence.
+                chainMentions: chainReason === 'multi-mention' ? allMentioned : undefined,
               }) });
             }
           } catch { /* ignore */ }

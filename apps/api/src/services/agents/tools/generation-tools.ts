@@ -125,10 +125,10 @@ export async function runGenerationTool(
 /** Pick the tool set a specialist is allowed to call. */
 export function toolsForSpecialist(specialist: string): Anthropic.Tool[] {
   const s = specialist;
-  if (s === 'المصمم' || s === 'architect' || s === 'الكرييتف' || s === 'creative') {
+  if (s === 'المصمم' || s === 'architect' || s === 'المبدع' || s === 'creative') {
     return [GENERATE_IMAGE_TOOL, GENERATE_AUDIO_TOOL, GENERATE_VIDEO_TOOL];
   }
-  if (s === 'الدبسا' || s === 'content-creator') {
+  if (s === 'السارد' || s === 'content-creator') {
     return [GENERATE_IMAGE_TOOL];
   }
   return [];

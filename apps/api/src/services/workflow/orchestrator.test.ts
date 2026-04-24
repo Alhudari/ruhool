@@ -69,8 +69,8 @@ describe('workflow orchestrator', () => {
     const planner = makePlannerProvider({
       title: 'بحث وتقرير',
       steps: [
-        { specialist: 'عبدان', task: 'ابحث عن BIM' },
-        { specialist: 'الدبسا', task: 'اكتب تقرير' },
+        { specialist: 'الباحث', task: 'ابحث عن BIM' },
+        { specialist: 'السارد', task: 'اكتب تقرير' },
       ],
     });
     const orch = createWorkflowOrchestrator({
@@ -82,7 +82,7 @@ describe('workflow orchestrator', () => {
     });
     const plan = await orch.planWorkflow({ userRequest: 'ابحث ثم اكتب' });
     expect(plan.steps).toHaveLength(2);
-    expect(plan.steps[0].specialist).toBe('عبدان');
+    expect(plan.steps[0].specialist).toBe('الباحث');
     const { run, steps } = await orch.createRunFromPlan({ plan });
     expect(run.status).toBe('pending');
     expect(steps).toHaveLength(2);
@@ -96,11 +96,11 @@ describe('workflow orchestrator', () => {
     const runId = crypto.randomUUID();
     const now = new Date().toISOString();
     const step1: WorkflowStepRecord = {
-      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'عبدان',
+      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'الباحث',
       task: 'task-1', status: 'pending', createdAt: now, updatedAt: now,
     };
     const step2: WorkflowStepRecord = {
-      id: crypto.randomUUID(), runId, stepIndex: 1, specialist: 'الدبسا',
+      id: crypto.randomUUID(), runId, stepIndex: 1, specialist: 'السارد',
       task: 'task-2', status: 'pending', createdAt: now, updatedAt: now,
     };
     store.workflowRuns = [{
@@ -133,7 +133,7 @@ describe('workflow orchestrator', () => {
     expect(seenPriors[0]).toBe(0);
     const updated1 = store.workflowSteps!.find((s) => s.id === step1.id)!;
     expect(updated1.status).toBe('completed');
-    expect(updated1.output).toBe('output-for-عبدان');
+    expect(updated1.output).toBe('output-for-الباحث');
 
     // Step 2 was enqueued via setImmediate; flush it by calling directly.
     await orch.executeStep(step2.id);
@@ -150,7 +150,7 @@ describe('workflow orchestrator', () => {
     const runId = crypto.randomUUID();
     const now = new Date().toISOString();
     const step: WorkflowStepRecord = {
-      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'عبدان',
+      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'الباحث',
       task: 't', status: 'pending', createdAt: now, updatedAt: now,
     };
     store.workflowRuns = [{
@@ -191,11 +191,11 @@ describe('workflow orchestrator — conversation bridge (Wave C)', () => {
     const convId = 'conv-x';
     const now = new Date().toISOString();
     const s1: WorkflowStepRecord = {
-      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'عبدان',
+      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'الباحث',
       task: 'ابحث عن BIM', status: 'pending', createdAt: now, updatedAt: now,
     };
     const s2: WorkflowStepRecord = {
-      id: crypto.randomUUID(), runId, stepIndex: 1, specialist: 'الدبسا',
+      id: crypto.randomUUID(), runId, stepIndex: 1, specialist: 'السارد',
       task: 'اكتب تقرير', status: 'pending', createdAt: now, updatedAt: now,
     };
     store.workflowRuns = [{
@@ -229,23 +229,23 @@ describe('workflow orchestrator — conversation bridge (Wave C)', () => {
 
     // Call 1: step-1 started (progress).
     expect(calls[0]).toMatchObject({
-      conversationId: convId, kind: 'progress', agentId: 'عبدان', workflowStepId: s1.id,
+      conversationId: convId, kind: 'progress', agentId: 'الباحث', workflowStepId: s1.id,
     });
     expect(calls[0].content.startsWith('بديت:')).toBe(true);
 
     // Call 2: step-1 completed (text).
     expect(calls[1]).toMatchObject({
-      conversationId: convId, kind: 'text', agentId: 'عبدان', workflowStepId: s1.id,
-      content: 'output-for-عبدان',
+      conversationId: convId, kind: 'text', agentId: 'الباحث', workflowStepId: s1.id,
+      content: 'output-for-الباحث',
     });
 
     // Call 3: step-2 started.
     expect(calls[2]).toMatchObject({
-      conversationId: convId, kind: 'progress', agentId: 'الدبسا', workflowStepId: s2.id,
+      conversationId: convId, kind: 'progress', agentId: 'السارد', workflowStepId: s2.id,
     });
     // Call 4: step-2 completed.
     expect(calls[3]).toMatchObject({
-      conversationId: convId, kind: 'text', agentId: 'الدبسا', workflowStepId: s2.id,
+      conversationId: convId, kind: 'text', agentId: 'السارد', workflowStepId: s2.id,
     });
   });
 
@@ -255,7 +255,7 @@ describe('workflow orchestrator — conversation bridge (Wave C)', () => {
     const convId = 'conv-y';
     const now = new Date().toISOString();
     const step: WorkflowStepRecord = {
-      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'عبدان',
+      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'الباحث',
       task: 't', status: 'pending', createdAt: now, updatedAt: now,
     };
     store.workflowRuns = [{
@@ -289,7 +289,7 @@ describe('workflow orchestrator — conversation bridge (Wave C)', () => {
     const runId = crypto.randomUUID();
     const now = new Date().toISOString();
     const step: WorkflowStepRecord = {
-      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'عبدان',
+      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'الباحث',
       task: 't', status: 'pending', createdAt: now, updatedAt: now,
     };
     store.workflowRuns = [{

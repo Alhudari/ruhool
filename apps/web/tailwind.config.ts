@@ -32,6 +32,7 @@ const config: Config = {
         sans: ['var(--font-sans)'],
         mono: ['var(--font-mono)'],
         serif: ['var(--font-serif)'],
+        display: ['var(--font-display)'],
         arabic: ['var(--font-arabic)'],
       },
       borderRadius: {

@@ -23,7 +23,7 @@ function makeManagerProvider() {
         type: 'tool_use' as const,
         id: 'toolu_01TEST',
         name: 'delegate_to_specialist',
-        input: { specialist: 'عبدان', task: 'ابحث عن BIM', context: 'PhD' },
+        input: { specialist: 'الباحث', task: 'ابحث عن BIM', context: 'PhD' },
       };
       yield { type: 'usage' as const, usage: { inputTokens: 42, outputTokens: 7, cachedTokens: 0 } };
       yield { type: 'done' as const };
@@ -93,12 +93,12 @@ describe('chat.ts tool_use SSE wiring (AGT-05 live)', () => {
     expect(sseEvents[0].event).toBe('tool_result');
     const payload = sseEvents[0].data as { specialist: string; output: string; toolUseId: string };
     expect(payload.toolUseId).toBe('toolu_01TEST');
-    expect(payload.specialist).toBe('عبدان');
+    expect(payload.specialist).toBe('الباحث');
     expect(payload.output).toBe('تم البحث');
   });
 
   it('threads prior specialist outputs across sequential delegations in the same turn (Phase 1)', async () => {
-    // Manager emits TWO tool_use blocks in sequence: delegate to عبدان then to شواشة.
+    // Manager emits TWO tool_use blocks in sequence: delegate to الباحث then to المُلخِّص.
     const managerProvider: UnifiedProvider = {
       name: 'anthropic',
       chat: vi.fn(async function* () {
@@ -106,13 +106,13 @@ describe('chat.ts tool_use SSE wiring (AGT-05 live)', () => {
           type: 'tool_use' as const,
           id: 'toolu_abdan',
           name: 'delegate_to_specialist',
-          input: { specialist: 'عبدان', task: 'ابحث في BIM' },
+          input: { specialist: 'الباحث', task: 'ابحث في BIM' },
         };
         yield {
           type: 'tool_use' as const,
           id: 'toolu_shwasha',
           name: 'delegate_to_specialist',
-          input: { specialist: 'شواشة', task: 'لخّص ما قاله عبدان' },
+          input: { specialist: 'المُلخِّص', task: 'لخّص ما قاله الباحث' },
         };
         yield { type: 'done' as const };
       }),
@@ -122,7 +122,7 @@ describe('chat.ts tool_use SSE wiring (AGT-05 live)', () => {
     const abdanProvider: UnifiedProvider = {
       name: 'anthropic',
       chat: vi.fn(async function* () {
-        yield { type: 'text' as const, content: 'عبدان يقول: السلام عليكم' };
+        yield { type: 'text' as const, content: 'الباحث يقول: السلام عليكم' };
         yield { type: 'usage' as const, usage: { inputTokens: 5, outputTokens: 2, cachedTokens: 0 } };
         yield { type: 'done' as const };
       }),
@@ -131,7 +131,7 @@ describe('chat.ts tool_use SSE wiring (AGT-05 live)', () => {
     const shwashaProvider: UnifiedProvider = {
       name: 'anthropic',
       chat: vi.fn(async function* () {
-        yield { type: 'text' as const, content: 'شواشة: ملخّص' };
+        yield { type: 'text' as const, content: 'المُلخِّص: ملخّص' };
         yield { type: 'usage' as const, usage: { inputTokens: 5, outputTokens: 2, cachedTokens: 0 } };
         yield { type: 'done' as const };
       }),
@@ -157,7 +157,7 @@ describe('chat.ts tool_use SSE wiring (AGT-05 live)', () => {
           priorMessages: priorForCall,
           roundNumber: roundCounter,
         });
-        const provider = inp.specialist === 'عبدان' ? abdanProvider : shwashaProvider;
+        const provider = inp.specialist === 'الباحث' ? abdanProvider : shwashaProvider;
         const result = await specialistsDispatch({
           specialist: inp.specialist,
           task: inp.task,
@@ -175,25 +175,25 @@ describe('chat.ts tool_use SSE wiring (AGT-05 live)', () => {
     }
 
     expect(dispatchCalls).toHaveLength(2);
-    // Round 1 — عبدان: no prior rounds yet.
-    expect(dispatchCalls[0].specialist).toBe('عبدان');
+    // Round 1 — الباحث: no prior rounds yet.
+    expect(dispatchCalls[0].specialist).toBe('الباحث');
     expect(dispatchCalls[0].roundNumber).toBe(1);
     expect(dispatchCalls[0].priorMessages).toEqual([]);
-    // Round 2 — شواشة: sees عبدان's output.
-    expect(dispatchCalls[1].specialist).toBe('شواشة');
+    // Round 2 — المُلخِّص: sees الباحث's output.
+    expect(dispatchCalls[1].specialist).toBe('المُلخِّص');
     expect(dispatchCalls[1].roundNumber).toBe(2);
     const round2Prior = dispatchCalls[1].priorMessages as Array<{ role: string; content: string; agent?: string }>;
     expect(round2Prior).toHaveLength(1);
     expect(round2Prior[0].role).toBe('assistant');
-    expect(round2Prior[0].agent).toBe('عبدان');
-    expect(round2Prior[0].content).toContain('عبدان يقول');
+    expect(round2Prior[0].agent).toBe('الباحث');
+    expect(round2Prior[0].content).toContain('الباحث يقول');
   });
 
   it('leaves toolUseDispatched=false when the provider never emits a tool_use chunk', async () => {
     const plainProvider: UnifiedProvider = {
       name: 'anthropic',
       chat: vi.fn(async function* () {
-        yield { type: 'text' as const, content: 'أحلتها لعبدان ✓' };
+        yield { type: 'text' as const, content: 'أحلتها لالباحث ✓' };
         yield { type: 'done' as const };
       }),
       estimateCost: () => 0,
