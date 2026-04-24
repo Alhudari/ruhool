@@ -56,6 +56,7 @@ export function ConversationsPageView() {
   const [agentFilter, setAgentFilter] = useState<string>('all');
   const [projectFilter, setProjectFilter] = useState<string>('all');
   const [groupFilter, setGroupFilter] = useState<'all' | 'individual' | 'group'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const [confirmDel, setConfirmDel] = useState<{ ids: string[]; impacts: DeletionImpact | null } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -85,13 +86,19 @@ export function ConversationsPageView() {
       const isGroup = (cv.participants?.length || 1) > 1;
       if (groupFilter === 'group' && !isGroup) return false;
       if (groupFilter === 'individual' && isGroup) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const title = (cv.title || '').toLowerCase();
+        const agentName = (AGENT_NAMES[cv.agentId ?? '']?.ar || cv.agentId || '').toLowerCase();
+        if (!title.includes(q) && !agentName.includes(q)) return false;
+      }
       return true;
     }).sort((a, b) => {
       const ap = pinnedIds.includes(a.id), bp = pinnedIds.includes(b.id);
       if (ap !== bp) return ap ? -1 : 1;
       return new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime();
     });
-  }, [convs, agentFilter, projectFilter, groupFilter, showArchived, pinnedIds]);
+  }, [convs, agentFilter, projectFilter, groupFilter, showArchived, pinnedIds, searchQuery]);
 
   const allSelectedVisible = filtered.length > 0 && filtered.every((c) => selected.has(c.id));
   const toggleAll = () => {
@@ -188,6 +195,13 @@ export function ConversationsPageView() {
 
       {/* Filters */}
       <div className="flex items-center gap-2 flex-wrap">
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder={isRTL ? 'ابحث في المحادثات...' : 'Search conversations...'}
+          className="h-9 rounded-[var(--radius)] bg-surface border border-border text-sm px-3 min-w-[160px] focus:outline-none focus:ring-2 focus:ring-ring"
+        />
         <select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)}
           className="h-9 rounded-[var(--radius)] bg-surface border border-border text-sm px-2">
           <option value="all">{isRTL ? 'كل الوكلاء' : 'All agents'}</option>
