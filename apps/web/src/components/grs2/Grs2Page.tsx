@@ -1,10 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, Circle, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { CheckCircle2, Circle, Loader2, ChevronDown, ChevronUp, ClipboardList, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
 import { useAppStore } from '@/store/app';
+
+interface Grs2Reminder {
+  needsGrs2: boolean;
+  urgentFollowUp: boolean;
+  currentMonth: string;
+  daysUntilMonthEnd: number;
+}
 
 interface Grs2Record {
   id: string;
@@ -84,18 +91,21 @@ export function Grs2Page() {
   const [contentDraft, setContentDraft] = useState('');
   const [supervisorDraft, setSupervisorDraft] = useState('');
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
+  const [reminder, setReminder] = useState<Grs2Reminder | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [cur, all] = await Promise.all([
+      const [cur, all, rem] = await Promise.all([
         apiFetch<Grs2Record>('/api/grs2/current'),
         apiFetch<Grs2Record[]>('/api/grs2'),
+        apiFetch<Grs2Reminder>('/api/grs2/reminders').catch(() => null),
       ]);
       setCurrent(cur);
       setContentDraft(cur.content ?? '');
       setSupervisorDraft(cur.supervisorResponse ?? '');
       setHistory(all.filter(r => r.month !== cur.month));
+      setReminder(rem);
     } catch { /* ignore */ }
     finally { setLoading(false); }
   }, []);
@@ -141,13 +151,42 @@ export function Grs2Page() {
 
   return (
     <div className="flex flex-col gap-6 p-6 max-w-2xl mx-auto w-full" dir={isRTL ? 'rtl' : 'ltr'}>
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">{isRTL ? 'تقرير GRS2 الشهري' : 'Monthly GRS2 Report'}</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {isRTL ? 'تتبع تقديم تقرير التقدم الشهري لجامعة برمنغهام' : 'Track your monthly progress report submission to University of Birmingham'}
-        </p>
+      {/* Header — follows page header pattern */}
+      <div className="flex items-center gap-3">
+        <div className="w-11 h-11 rounded-[var(--radius-lg)] bg-accent/10 text-accent flex items-center justify-center shrink-0">
+          <ClipboardList size={22} />
+        </div>
+        <div>
+          <h1 className="text-xl font-bold text-on-surface">{isRTL ? 'تقارير GRS2 الشهرية' : 'Monthly GRS2 Reports'}</h1>
+          <p className="text-xs text-on-surface-tertiary">
+            {isRTL ? 'تتبع تقديم تقرير التقدم الشهري — جامعة برمنغهام' : 'Track monthly progress report submission — University of Birmingham'}
+          </p>
+        </div>
       </div>
+
+      {/* Overdue warning */}
+      {reminder && (reminder.needsGrs2 || reminder.urgentFollowUp) && (
+        <div className={cn(
+          'rounded-xl border p-4 flex items-start gap-3',
+          reminder.urgentFollowUp ? 'bg-red-500/10 border-red-500/20' : 'bg-amber-500/10 border-amber-500/20'
+        )}>
+          <AlertTriangle className={cn('h-5 w-5 shrink-0 mt-0.5', reminder.urgentFollowUp ? 'text-red-500' : 'text-amber-500')} />
+          <div>
+            <p className={cn('text-sm font-semibold', reminder.urgentFollowUp ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400')}>
+              {isRTL
+                ? (reminder.urgentFollowUp
+                    ? `متابعة عاجلة — ${reminder.daysUntilMonthEnd} أيام متبقية`
+                    : `تقرير شهر ${reminder.currentMonth} لم يُقدَّم بعد`)
+                : (reminder.urgentFollowUp
+                    ? `Urgent follow-up — ${reminder.daysUntilMonthEnd} days remaining`
+                    : `Report for ${reminder.currentMonth} not submitted yet`)}
+            </p>
+            <p className="text-xs text-on-surface-secondary mt-0.5">
+              {isRTL ? 'يُوصى بإتمامه قبل نهاية الشهر' : 'Recommended to complete before month end'}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Current month card */}
       {current && (
@@ -180,11 +219,11 @@ export function Grs2Page() {
           </div>
 
           {/* Dates row */}
-          {(current.submittedAt || current.supervisorApprovedAt || current.universityApprovedAt) && (
-            <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground border rounded-lg p-3 bg-muted/30">
+          {(current.submittedAt || current.supervisorApprovedAt || current.studentConfirmedAt || current.universityApprovedAt) && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-muted-foreground border rounded-lg p-3 bg-muted/30">
               {current.submittedAt && (
                 <div>
-                  <p className="font-medium text-foreground">{isRTL ? 'تاريخ التقديم' : 'Submitted'}</p>
+                  <p className="font-medium text-foreground">{isRTL ? 'التقديم' : 'Submitted'}</p>
                   <p>{new Date(current.submittedAt).toLocaleDateString('en-GB')}</p>
                 </div>
               )}
@@ -192,6 +231,12 @@ export function Grs2Page() {
                 <div>
                   <p className="font-medium text-foreground">{isRTL ? 'موافقة المشرف' : 'Supervisor'}</p>
                   <p>{new Date(current.supervisorApprovedAt).toLocaleDateString('en-GB')}</p>
+                </div>
+              )}
+              {current.studentConfirmedAt && (
+                <div>
+                  <p className="font-medium text-foreground">{isRTL ? 'تأكيد الطالب' : 'Student Confirmed'}</p>
+                  <p>{new Date(current.studentConfirmedAt).toLocaleDateString('en-GB')}</p>
                 </div>
               )}
               {current.universityApprovedAt && (
