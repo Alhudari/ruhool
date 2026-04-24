@@ -22,9 +22,12 @@ interface Note {
   themes: string[];
 }
 
+type NodeType = 'paper' | 'note' | 'person' | 'conference' | 'standard' | 'my-writing' | 'research-cluster';
+type EdgeType = 'paper-note' | 'theme' | 'authored-by' | 'cited-by' | 'part-of' | 'leads-to' | 'presented-at';
+
 interface GraphNode {
   id: string;
-  type: 'paper' | 'note';
+  type: NodeType;
   label: string;
   x: number;
   y: number;
@@ -38,8 +41,32 @@ interface GraphNode {
 interface GraphLink {
   source: string;
   target: string;
-  type: 'paper-note' | 'theme';
+  type: EdgeType;
 }
+
+// Node colors by type
+const NODE_COLORS: Record<NodeType, string> = {
+  paper: '#60a5fa',            // blue
+  note: '#34d399',             // green (varies by note subtype)
+  person: '#c084fc',           // purple
+  conference: '#fb923c',       // orange
+  standard: '#facc15',         // yellow
+  'my-writing': '#4ade80',     // green
+  'research-cluster': '#38bdf8', // sky
+};
+
+// Edge colors by type
+const EDGE_COLORS: Record<EdgeType, string> = {
+  'paper-note': '#94a3b8',
+  theme: '#6366f1',
+  'authored-by': '#a855f7',    // purple
+  'cited-by': '#f59e0b',       // amber
+  'part-of': '#3b82f6',        // blue
+  'leads-to': '#22c55e',       // green
+  'presented-at': '#f97316',   // orange
+};
+
+const MAX_VISIBLE_NODES = 200;
 
 const NOTE_COLORS: Record<string, string> = {
   claim: '#60a5fa',
@@ -157,8 +184,13 @@ export function KnowledgeGraph() {
       }
     });
 
-    nodesRef.current = nodes;
-    linksRef.current = links;
+    // Cap at MAX_VISIBLE_NODES to prevent browser slowdown
+    const cappedNodes = nodes.slice(0, MAX_VISIBLE_NODES);
+    const cappedNodeIds = new Set(cappedNodes.map(n => n.id));
+    const cappedLinks = links.filter(l => cappedNodeIds.has(l.source) && cappedNodeIds.has(l.target));
+
+    nodesRef.current = cappedNodes;
+    linksRef.current = cappedLinks;
 
     // Simple force simulation
     let iterations = 0;
@@ -322,9 +354,9 @@ export function KnowledgeGraph() {
                   y1={s.y}
                   x2={t.x}
                   y2={t.y}
-                  stroke={link.type === 'theme' ? '#f472b6' : '#4b5563'}
+                  stroke={EDGE_COLORS[link.type] ?? '#4b5563'}
                   strokeWidth={link.type === 'theme' ? 1.5 : 1}
-                  strokeDasharray={link.type === 'theme' ? '4,4' : undefined}
+                  strokeDasharray={link.type === 'theme' || link.type === 'cited-by' ? '4,4' : undefined}
                   opacity={0.4}
                 />
               );
