@@ -3,8 +3,23 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Search, Loader2, BookOpen, Brain, Calendar, FileText, Inbox,
-  Filter, ExternalLink, Database,
+  Filter, ExternalLink, Database, Clock, X,
 } from 'lucide-react';
+
+const HISTORY_KEY = 'ruhool.search.history';
+const MAX_HISTORY = 50;
+
+interface SearchHistoryEntry { id: string; query: string; timestamp: string; resultCount: number }
+
+function loadHistory(): SearchHistoryEntry[] {
+  if (typeof window === 'undefined') return [];
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '[]'); } catch { return []; }
+}
+
+function saveHistory(entries: SearchHistoryEntry[]) {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(entries.slice(0, MAX_HISTORY)));
+}
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
@@ -40,6 +55,36 @@ export function SearchPage() {
   const [kind, setKind] = useState<string>('all');
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
+  const [history, setHistory] = useState<SearchHistoryEntry[]>(() => loadHistory());
+
+  const addToHistory = useCallback((query: string, resultCount: number) => {
+    setHistory(prev => {
+      const filtered = prev.filter(e => e.query !== query);
+      const entry: SearchHistoryEntry = {
+        id: Date.now().toString(),
+        query,
+        timestamp: new Date().toISOString(),
+        resultCount,
+      };
+      const next = [entry, ...filtered].slice(0, MAX_HISTORY);
+      saveHistory(next);
+      return next;
+    });
+  }, []);
+
+  const deleteHistoryEntry = useCallback((id: string) => {
+    setHistory(prev => {
+      const next = prev.filter(e => e.id !== id);
+      saveHistory(next);
+      return next;
+    });
+  }, []);
+
+  const clearHistory = useCallback(() => {
+    setHistory([]);
+    saveHistory([]);
+  }, []);
 
   const search = useCallback(async () => {
     if (q.trim().length < 2) return;
@@ -49,9 +94,10 @@ export function SearchPage() {
       if (kind !== 'all') params.set('kind', kind);
       const res = await apiFetch<{ hits: SearchHit[] }>(`/api/search?${params}`);
       setHits(res.hits);
+      addToHistory(q.trim(), res.hits.length);
     } catch { /* ignore */ }
     setSearching(false);
-  }, [q, scope, kind]);
+  }, [q, scope, kind, addToHistory]);
 
   // Debounced search on input change
   useEffect(() => {
@@ -81,6 +127,8 @@ export function SearchPage() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setTimeout(() => setInputFocused(false), 200)}
             placeholder={isRTL ? 'اكتب كلمات البحث...' : 'Type to search...'}
             autoFocus
             className={cn(
@@ -88,6 +136,39 @@ export function SearchPage() {
               isRTL ? 'pr-12 pl-4' : 'pl-12 pr-4'
             )}
           />
+          {/* History dropdown — shown when focused and query is empty */}
+          {inputFocused && !q.trim() && history.length > 0 && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-xl shadow-lg z-20 overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-2 border-b border-border">
+                <span className="text-xs text-on-surface-tertiary">
+                  {isRTL ? 'بحث سابق' : 'Recent searches'}
+                </span>
+                <button onClick={clearHistory} className="text-xs text-accent hover:underline">
+                  {isRTL ? 'مسح الكل' : 'Clear all'}
+                </button>
+              </div>
+              <ul className="max-h-64 overflow-y-auto divide-y divide-border">
+                {history.slice(0, 10).map(e => (
+                  <li key={e.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-secondary transition-colors">
+                    <Clock className="h-3.5 w-3.5 text-on-surface-tertiary shrink-0" />
+                    <button
+                      className="flex-1 text-sm text-start text-on-surface-secondary hover:text-on-surface"
+                      onClick={() => { setQ(e.query); setInputFocused(false); }}
+                    >
+                      {e.query}
+                    </button>
+                    <span className="text-[10px] text-on-surface-tertiary">{e.resultCount} {isRTL ? 'نتيجة' : 'results'}</span>
+                    <button
+                      onClick={() => deleteHistoryEntry(e.id)}
+                      className="text-on-surface-tertiary hover:text-error shrink-0"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         {/* Filters */}
