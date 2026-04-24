@@ -523,10 +523,28 @@ function FilesTab({ cluster, language, onProvenanceUpdate }: FilesTabProps) {
     browseDir(prev);
   };
 
+  const [viewerEntry, setViewerEntry] = useState<BrowseEntry | null>(null);
+  const apiBase = getApiBase();
+
   const openFile = (entry: BrowseEntry) => {
-    const apiBase = getApiBase();
-    const url = `${apiBase}/api/research/file?path=${encodeURIComponent(entry.path)}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+    if (entry.viewMode === 'pdf' || entry.viewMode === 'image' || entry.viewMode === 'text') {
+      setViewerEntry(entry);
+    } else {
+      const url = `${apiBase}/api/research/file?path=${encodeURIComponent(entry.path)}`;
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const VIEW_BADGE: Record<string, string> = {
+    pdf:      'bg-red-500/10 text-red-600',
+    image:    'bg-purple-500/10 text-purple-600',
+    table:    'bg-green-500/10 text-green-600',
+    video:    'bg-blue-500/10 text-blue-600',
+    text:     'bg-teal-500/10 text-teal-600',
+    archive:  'bg-amber-500/10 text-amber-600',
+    outline:  'bg-indigo-500/10 text-indigo-600',
+    'open-app': 'bg-gray-500/10 text-gray-500',
+    blocked:  'bg-red-600/20 text-red-700',
   };
 
   const sorted = [...entries].sort((a, b) => {
@@ -602,7 +620,7 @@ function FilesTab({ cluster, language, onProvenanceUpdate }: FilesTabProps) {
                   </button>
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="text-[10px] text-on-surface-tertiary">{formatSize(entry.size)}</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-tertiary text-on-surface-secondary">
+                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-medium', VIEW_BADGE[entry.viewMode] ?? 'bg-surface-tertiary text-on-surface-secondary')}>
                       {entry.viewMode}
                     </span>
                     {hasProv && (
@@ -660,6 +678,61 @@ function FilesTab({ cluster, language, onProvenanceUpdate }: FilesTabProps) {
           language={language}
         />
       )}
+
+      {/* Inline file viewer modal */}
+      {viewerEntry && (() => {
+        const fileUrl = `${apiBase}/api/research/file?path=${encodeURIComponent(viewerEntry.path)}`;
+        const downloadUrl = `${apiBase}/api/research/file?path=${encodeURIComponent(viewerEntry.path)}&download=1`;
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setViewerEntry(null); }}
+          >
+            <div className="bg-surface border border-border rounded-[var(--radius-lg)] w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl">
+              {/* Viewer header */}
+              <div className="flex items-center gap-3 px-4 py-3 border-b border-border shrink-0">
+                <span className="text-lg">{getFileIcon(viewerEntry.ext)}</span>
+                <span className="text-sm font-medium text-on-surface truncate flex-1">{viewerEntry.name}</span>
+                <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0', VIEW_BADGE[viewerEntry.viewMode] ?? 'bg-surface-tertiary text-on-surface-secondary')}>
+                  {viewerEntry.viewMode}
+                </span>
+                <a href={downloadUrl} download className="p-1.5 rounded hover:bg-surface-secondary text-on-surface-secondary" title="Download">⬇</a>
+                <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded hover:bg-surface-secondary text-on-surface-secondary" title="Open in new tab">↗</a>
+                <button onClick={() => setViewerEntry(null)} className="p-1.5 rounded hover:bg-surface-secondary text-on-surface-secondary">✕</button>
+              </div>
+              {/* Viewer body */}
+              <div className="flex-1 overflow-auto bg-surface-secondary">
+                {viewerEntry.viewMode === 'pdf' && (
+                  <iframe
+                    src={fileUrl}
+                    className="w-full h-full min-h-[70vh]"
+                    title={viewerEntry.name}
+                  />
+                )}
+                {viewerEntry.viewMode === 'image' && (
+                  <div className="flex items-center justify-center p-4 min-h-[60vh]">
+                    <img src={fileUrl} alt={viewerEntry.name} className="max-w-full max-h-[70vh] object-contain rounded" />
+                  </div>
+                )}
+                {viewerEntry.viewMode === 'text' && (
+                  <iframe
+                    src={fileUrl}
+                    className="w-full min-h-[70vh]"
+                    title={viewerEntry.name}
+                  />
+                )}
+              </div>
+              {/* Viewer footer */}
+              <div className="px-4 py-2 border-t border-border flex items-center gap-3 text-[11px] text-on-surface-tertiary shrink-0">
+                <span>{formatSize(viewerEntry.size)}</span>
+                <span>·</span>
+                <span>{new Date(viewerEntry.modifiedAt).toLocaleDateString()}</span>
+                {cluster.jurisdiction?.code && <span>· {FLAG[cluster.jurisdiction.code] ?? ''} {cluster.jurisdiction.code}</span>}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -935,21 +1008,26 @@ export function ResearchHub() {
 
   return (
     <div className={cn('flex flex-col h-full overflow-hidden', isRTL && 'dir-rtl')}>
-      {/* Page header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-        <div className="flex items-center gap-3">
-          <FlaskConical size={20} className="text-accent" />
-          <h1 className="text-lg font-semibold text-on-surface">
-            {isRTL ? 'مركز البحث' : 'Research Hub'}
-          </h1>
+      {/* Page header — follows spec pattern */}
+      <div className="flex items-center gap-3 px-6 py-4 border-b border-border shrink-0">
+        <div className="w-11 h-11 rounded-[var(--radius-lg)] bg-accent/10 text-accent flex items-center justify-center shrink-0">
+          <FlaskConical size={22} />
         </div>
-        <button
-          onClick={() => setShowNewForm(v => !v)}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius)] text-sm bg-accent text-on-accent hover:bg-accent-hover transition-colors"
-        >
-          {showNewForm ? <X size={15} /> : <Plus size={15} />}
-          {isRTL ? 'مجموعة جديدة' : 'New Cluster'}
-        </button>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-xl font-bold text-on-surface">{isRTL ? 'مركز البحث' : 'Research Hub'}</h1>
+          <p className="text-xs text-on-surface-tertiary">
+            {isRTL ? 'مجموعات بحثية حسب الدولة والبعد' : 'Research clusters by jurisdiction & dimension'}
+          </p>
+        </div>
+        <div className="ms-auto">
+          <button
+            onClick={() => setShowNewForm(v => !v)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius)] text-sm bg-accent text-on-accent hover:bg-accent-hover transition-colors"
+          >
+            {showNewForm ? <X size={15} /> : <Plus size={15} />}
+            {isRTL ? 'مجموعة جديدة' : 'New Cluster'}
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 flex overflow-hidden">
