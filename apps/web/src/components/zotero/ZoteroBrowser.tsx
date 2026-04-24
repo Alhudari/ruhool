@@ -430,7 +430,11 @@ export function ZoteroBrowser() {
           </button>
         </div>
         {loading ? (
-          <div className="p-6 text-center"><Loader2 className="h-5 w-5 animate-spin text-on-surface-tertiary mx-auto" /></div>
+          <div className="p-3 space-y-2">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-7 rounded bg-surface-secondary animate-pulse" style={{ opacity: 1 - i * 0.15 }} />
+            ))}
+          </div>
         ) : error ? (
           <div className="p-4 text-center">
             <AlertTriangle className="h-6 w-6 text-warning mx-auto mb-2" />

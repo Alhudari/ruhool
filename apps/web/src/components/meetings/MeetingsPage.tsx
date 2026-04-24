@@ -74,6 +74,7 @@ export function MeetingsPage() {
   const isRTL = language === 'ar';
 
   const [sessions, setSessions] = useState<MeetingSession[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(true);
   const [active, setActive] = useState<MeetingSession | null>(null);
   const [draft, setDraft] = useState('');
   const [chatMsgs, setChatMsgs] = useState<ChatMsg[]>([]);
@@ -87,9 +88,9 @@ export function MeetingsPage() {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const loadSessions = useCallback(async () => {
+    setLoadingSessions(true);
     try {
       const data = await apiFetch<MeetingSession[]>('/api/meetings/sessions').catch(() => [] as MeetingSession[]);
-      // Sort by meeting number descending, then by date
       const sorted = [...data].sort((a, b) => {
         const noA = a.record?.No ?? 0;
         const noB = b.record?.No ?? 0;
@@ -97,7 +98,9 @@ export function MeetingsPage() {
         return (b.record?.date ?? b.updatedAt ?? '').localeCompare(a.record?.date ?? a.updatedAt ?? '');
       });
       setSessions(sorted);
-    } catch { /* ignore */ }
+    } catch { /* ignore */ } finally {
+      setLoadingSessions(false);
+    }
   }, []);
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
@@ -250,11 +253,17 @@ export function MeetingsPage() {
           </button>
         </div>
         <div className="flex-1 overflow-y-auto">
-          {sessions.length === 0 && (
+          {loadingSessions ? (
+            <div className="p-3 space-y-2">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="rounded-md bg-accent/30 animate-pulse h-12" />
+              ))}
+            </div>
+          ) : sessions.length === 0 ? (
             <p className="text-xs text-muted-foreground p-4">
               {isRTL ? 'لا توجد اجتماعات. اضغط + لبدء جلسة.' : 'No meetings. Press + to start.'}
             </p>
-          )}
+          ) : null}
           {sessions.map((s) => (
             <button key={s.id}
               onClick={() => selectSession(s)}

@@ -773,6 +773,7 @@ export interface MeetingSessionRecord {
   savedToObsidian?: boolean;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string;
 }
 
 export interface Grs2Record {

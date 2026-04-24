@@ -694,8 +694,13 @@ export function TasksPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="animate-spin text-on-surface-tertiary" size={24} />
+      <div className="max-w-5xl mx-auto px-4 md:px-6 py-6">
+        <div className="h-8 w-48 bg-surface-secondary rounded animate-pulse mb-6" />
+        <div className="space-y-3">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="h-14 rounded-xl bg-surface-secondary animate-pulse" style={{ opacity: 1 - i * 0.12 }} />
+          ))}
+        </div>
       </div>
     );
   }

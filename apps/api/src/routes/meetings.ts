@@ -34,7 +34,8 @@ interface MeetingSessionRecord {
   record: MeetingRecord | null;
   obsidianPath: string | null;
   chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>;
-  draft: string; // raw free-form notes from the user
+  draft: string;
+  deletedAt?: string;
 }
 
 function getMeetingSessions(store: StoreData): MeetingSessionRecord[] {
@@ -74,7 +75,9 @@ export function registerMeetingsRoutes(app: Hono, deps: MeetingsRoutesDeps): voi
 
   // ── List sessions ──────────────────────────────────────────────────
   app.get('/api/meetings/sessions', (c) => {
-    const sessions = getMeetingSessions(getStore()).map(({ chatHistory: _ch, ...s }) => s);
+    const sessions = getMeetingSessions(getStore())
+      .filter((s) => !s.deletedAt)
+      .map(({ chatHistory: _ch, ...s }) => s);
     c.header('Cache-Control', 'private, max-age=60');
     return c.json(sessions);
   });

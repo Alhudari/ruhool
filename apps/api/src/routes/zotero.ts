@@ -509,6 +509,7 @@ export function registerZoteroRoutes(app: Hono, deps?: ZoteroRoutesDeps): void {
           roots.push(c);
         }
       }
+      c.header('Cache-Control', 'private, max-age=300');
       return c.json({ collections: cols, tree: roots, total: cols.length });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
@@ -542,6 +543,7 @@ export function registerZoteroRoutes(app: Hono, deps?: ZoteroRoutesDeps): void {
       const items = await zoteroListItems(collection, Number.isFinite(limit) ? limit : 100);
       const payload = { items, total: items.length };
       zoteroCache.set(key, { data: payload, at: Date.now() });
+      c.header('Cache-Control', 'private, max-age=300');
       return c.json(payload);
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
@@ -563,6 +565,7 @@ export function registerZoteroRoutes(app: Hono, deps?: ZoteroRoutesDeps): void {
       const items = await zoteroListItemsRich(collection, Number.isFinite(limit) ? limit : 500);
       const payload = { items, total: items.length };
       zoteroCache.set(key, { data: payload, at: Date.now() });
+      c.header('Cache-Control', 'private, max-age=300');
       return c.json(payload);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
