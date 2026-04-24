@@ -13,7 +13,7 @@ const ARTIFACTS_HELP = [
   { illustration: '🕒', title: { ar: 'التاريخ المحفوظ', en: 'Version History' },
     body: { ar: 'كل تعديل يُحفظ — تقدر ترجع لأي إصدار سابق.', en: 'Every edit is saved — roll back to any prior version.' } },
   { illustration: '🤝', title: { ar: 'طلب من الوكيل', en: 'Ask an Agent' },
-    body: { ar: 'في المحادثة، اطلب من الصفرا أو الدبسا تعديل المستند. يظهر التحديث فوراً هنا.', en: 'In chat, ask Al-Naqid or Al-Sarid to edit the artifact. Updates appear here instantly.' } },
+    body: { ar: 'في المحادثة، اطلب من الناقد أو السارد تعديل المستند. يظهر التحديث فوراً هنا.', en: 'In chat, ask Al-Naqid or Al-Sarid to edit the artifact. Updates appear here instantly.' } },
 ];
 
 interface Artifact {

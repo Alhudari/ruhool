@@ -32,7 +32,7 @@ const BUILTIN_AGENTS = [
   { id: 'comparator', name: { en: 'Al-Muqarin', ar: 'المُقارِن' } },
   { id: 'architect', name: { en: "Al-Ra'i", ar: 'الراعي' } },
   { id: 'content-creator', name: { en: 'Al-Sarid', ar: 'السارد' } },
-  { id: 'creative', name: { en: 'Creative', ar: 'الكرييتف' } },
+  { id: 'creative', name: { en: "Al-Mubdi'", ar: 'المبدع' } },
 ];
 
 const TRIGGERS: Array<{ key: keyof AgentNotificationSettings['triggers']; label: { en: string; ar: string } }> = [

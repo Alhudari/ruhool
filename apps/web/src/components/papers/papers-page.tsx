@@ -282,7 +282,7 @@ function ReadingView({ paper, notes, onBack, language }: { paper: Paper; notes: 
               >
                 <HelpCircle size={14} className="text-accent shrink-0" />
                 <span className="text-xs font-medium text-accent flex-1">
-                  {isRTL ? 'أسئلة شواشة الموجهة' : "Shawasha's Guided Questions"}
+                  {isRTL ? 'أسئلة المُلخِّص الموجهة' : "Al-Mulakhkhis's Guided Questions"}
                 </span>
                 {showGuided ? <ChevronUp size={12} className="text-accent" /> : <ChevronDown size={12} className="text-accent" />}
               </button>

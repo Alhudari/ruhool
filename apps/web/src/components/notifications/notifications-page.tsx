@@ -16,7 +16,7 @@ const AGENT_NAMES: Record<string, { en: string; ar: string }> = {
   comparator: { en: 'Al-Muqarin', ar: 'المُقارِن' },
   architect: { en: "Al-Al-Musammim", ar: "المصمم" },
   'content-creator': { en: 'Al-Sarid', ar: 'السارد' },
-  creative: { en: 'Creative', ar: 'الكرييتف' },
+  creative: { en: "Al-Mubdi'", ar: 'المبدع' },
   'tasks-agent': { en: 'Maham', ar: 'مهام' },
 };
 

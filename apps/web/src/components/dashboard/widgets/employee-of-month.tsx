@@ -16,7 +16,7 @@ const AGENT_LABELS: Record<string, { ar: string; en: string; emoji: string }> = 
   comparator: { ar: 'المُقارِن', en: 'Al-Muqarin', emoji: '⚖️' },
   architect: { ar: 'المصمم', en: 'Al-Al-Musammim', emoji: '🏗️' },
   'content-creator': { ar: 'السارد', en: 'Al-Sarid', emoji: '🎨' },
-  creative: { ar: 'الكرييتف', en: 'Creative', emoji: '🎬' },
+  creative: { ar: 'المبدع', en: "Al-Mubdi'", emoji: '🎬' },
   'tasks-agent': { ar: 'مهام', en: 'Maham', emoji: '✅' },
   analyst: { ar: 'المحلل', en: 'Analyst', emoji: '📊' },
   munazzim: { ar: 'المنظّم', en: 'Munazzim', emoji: '📂' },
