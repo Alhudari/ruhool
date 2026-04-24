@@ -153,7 +153,9 @@ export function registerDispatchRoutes(app: Hono, deps: DispatchRoutesDeps): voi
       });
     };
 
-    const result = await dispatchHierarchical(
+    let result;
+    try {
+    result = await dispatchHierarchical(
       {
         dispatchId,
         userMessage: parsed.data.message,
@@ -222,6 +224,9 @@ export function registerDispatchRoutes(app: Hono, deps: DispatchRoutesDeps): voi
       },
     );
 
+    } catch (err) {
+      return c.json({ error: "dispatch failed", details: err instanceof Error ? err.message : String(err) }, 500);
+    }
     deps.saveStore?.();
     return c.json({ ...result, conversationId });
   });
