@@ -280,12 +280,13 @@ function AlKhuwyPopup({ open, onClose, isRTL }: { open: boolean; onClose: () => 
 }
 
 // ── Tab IDs ────────────────────────────────────────────────────────────
-type Tab = 'overview' | 'meetings' | 'grs2' | 'tasks' | 'library-stats' | 'insights' | 'calendar';
+type Tab = 'overview' | 'meetings' | 'grs2' | 'tasks' | 'library-stats' | 'insights' | 'calendar' | 'supervision';
 const TABS: { id: Tab; icon: React.ElementType; label: { en: string; ar: string } }[] = [
   { id: 'overview',      icon: Layers,       label: { en: 'Overview',      ar: 'نظرة عامة' } },
   { id: 'meetings',      icon: Calendar,     label: { en: 'Meetings',      ar: 'الاجتماعات' } },
   { id: 'grs2',          icon: ClipboardList,label: { en: 'GRS2',          ar: 'GRS2' } },
   { id: 'tasks',         icon: CheckSquare,  label: { en: 'Tasks',         ar: 'المهام' } },
+  { id: 'supervision',   icon: GraduationCap,label: { en: 'Supervision',   ar: 'الإشراف' } },
   { id: 'calendar',      icon: Calendar,     label: { en: 'Calendar',      ar: 'التقويم' } },
   { id: 'library-stats', icon: BookMarked,   label: { en: 'Library',       ar: 'المكتبة' } },
   { id: 'insights',      icon: Lightbulb,    label: { en: 'Insights',      ar: 'رؤى' } },
@@ -1553,6 +1554,77 @@ export function PhDDashboard() {
 
         {/* ══════════════════════════════════════════════════════ */}
         {/* ══════════════════════════════════════════════════════ */}
+        {/* ══════════════════════════════════════════════════════ */}
+        {/* SUPERVISION TAB                                      */}
+        {/* ══════════════════════════════════════════════════════ */}
+        {tab === 'supervision' && (
+          <div className="space-y-5">
+            <div className="rounded-xl border border-border bg-surface-secondary p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <GraduationCap className="h-5 w-5 text-accent" />
+                <h2 className="text-base font-bold text-on-surface">
+                  {isRTL ? 'نظرة الإشراف' : 'Supervision Overview'}
+                </h2>
+              </div>
+              <p className="text-sm text-on-surface-secondary mb-4">
+                {isRTL
+                  ? 'جامعة برمنغهام — دكتوراه BIM في الكويت — المشرف د. ريتشارد'
+                  : 'University of Birmingham — BIM in Kuwait PhD — Supervisor: Dr Richard'}
+              </p>
+              {/* Next meeting countdown */}
+              {nextMeetingDays !== null && (
+                <div className={cn(
+                  'rounded-lg border p-3 flex items-center gap-3 mb-4',
+                  nextMeetingDays <= 3 ? 'bg-blue-500/10 border-blue-500/20' : 'bg-surface border-border'
+                )}>
+                  <Clock className={cn('h-5 w-5', nextMeetingDays <= 3 ? 'text-blue-500' : 'text-on-surface-tertiary')} />
+                  <div>
+                    <p className="text-sm font-semibold text-on-surface">
+                      {isRTL ? 'الاجتماع القادم' : 'Next Meeting'}:
+                      {' '}{nextMeetingDays <= 0 ? (isRTL ? 'اليوم!' : 'Today!') : nextMeetingDays === 1 ? (isRTL ? 'غداً' : 'Tomorrow') : `${nextMeetingDays} ${isRTL ? 'أيام' : 'days'}`}
+                    </p>
+                    {nextMeeting && <p className="text-xs text-on-surface-tertiary">{nextMeeting}</p>}
+                  </div>
+                </div>
+              )}
+              {/* Scope points */}
+              {scopePoints.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-semibold text-on-surface-tertiary uppercase tracking-wider mb-3">
+                    {isRTL ? `نقاط النطاق (${scopePoints.length})` : `Scope Points (${scopePoints.length})`}
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {scopePoints.sort((a,b) => a.number - b.number).map(sp => {
+                      const statusColor =
+                        sp.status === 'completed' ? 'text-success bg-success/10' :
+                        sp.status === 'paused' ? 'text-warning bg-warning/10' :
+                        sp.status === 'dropped' ? 'text-error/50 bg-error/5' :
+                        'text-info bg-info/10';
+                      return (
+                        <div key={sp.id} className="rounded-lg border border-border bg-surface p-3 flex items-start gap-2">
+                          <span className="text-[11px] font-mono text-on-surface-tertiary shrink-0 mt-0.5">S{sp.number}</span>
+                          <p className="text-xs text-on-surface-secondary flex-1 leading-snug">{sp.title}</p>
+                          <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0', statusColor)}>
+                            {sp.status === 'completed' ? (isRTL ? 'مكتمل' : 'Done') :
+                             sp.status === 'paused' ? (isRTL ? 'موقوف' : 'Paused') :
+                             sp.status === 'dropped' ? (isRTL ? 'ملغى' : 'Dropped') :
+                             (isRTL ? 'نشط' : 'Active')}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <div className="mt-4 pt-4 border-t border-border">
+                <a href="/meetings" className="text-sm text-accent hover:underline">
+                  → {isRTL ? 'عرض كل الاجتماعات' : 'View all meetings'}
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* CALENDAR TAB                                         */}
         {/* ══════════════════════════════════════════════════════ */}
         {tab === 'calendar' && (() => {

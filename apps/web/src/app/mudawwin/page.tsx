@@ -1,10 +1,2 @@
-import { AppShell } from '@/components/layout/app-shell';
-import { MudawwinPage } from '@/components/mudawwin/MudawwinPage';
-
-export default function MudawwinRoute() {
-  return (
-    <AppShell>
-      <MudawwinPage />
-    </AppShell>
-  );
-}
+import { redirect } from 'next/navigation';
+export default function MudawwinRoute() { redirect('/meetings'); }

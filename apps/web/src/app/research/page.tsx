@@ -1,6 +1,2 @@
-import { AppShell } from '@/components/layout/app-shell';
-import { ResearchHub } from '@/components/research/ResearchHub';
-
-export default function ResearchPage() {
-  return <AppShell><ResearchHub /></AppShell>;
-}
+import { redirect } from 'next/navigation';
+export default function ResearchRoute() { redirect('/library?type=research-cluster'); }
