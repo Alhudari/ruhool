@@ -45,6 +45,7 @@ import {
   HelpCircle,
   ClipboardList,
   Mail,
+  ListTodo,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
@@ -145,6 +146,7 @@ const NAV_ITEMS_MAP: Record<string, NavItem> = {
   search: { id: 'search', icon: MessageSquare, label: { en: 'Smart Search', ar: 'البحث الذكي' }, href: '/search' },
   canvas: { id: 'canvas', icon: Network, label: { en: 'Canvas', ar: 'الكانفس' }, href: '/canvas' },
   'audit-log': { id: 'audit-log', icon: Eye, label: { en: 'Activity Log', ar: 'سجل النشاط' }, href: '/audit-log' },
+  'agent-tasks': { id: 'agent-tasks', icon: ListTodo, label: { en: 'Agent Tasks', ar: 'مهام الوكلاء' }, href: '/agent-tasks' },
   setup: { id: 'setup', icon: Settings, label: { en: 'Setup / Reset', ar: 'الإعداد / التصفير' }, href: '/setup' },
   ambient: { id: 'ambient', icon: HelpCircle, label: { en: 'Ambient (TV)', ar: 'شاشة العرض' }, href: '/ambient' },
 };
@@ -332,6 +334,7 @@ function NavItemButton({
   pendingApprovals,
   unreadNotifications,
   inboxUnprocessed,
+  runningTaskCount,
   onNavigate,
 }: {
   item: NavItem;
@@ -342,12 +345,14 @@ function NavItemButton({
   pendingApprovals: number;
   unreadNotifications: number;
   inboxUnprocessed?: number;
+  runningTaskCount?: number;
   onNavigate: (id: string, href: string) => void;
 }) {
   const badge =
     item.id === 'approvals' ? pendingApprovals :
     item.id === 'notifications' ? unreadNotifications :
-    item.id === 'inbox' ? (inboxUnprocessed ?? 0) : 0;
+    item.id === 'inbox' ? (inboxUnprocessed ?? 0) :
+    item.id === 'agent-tasks' ? (runningTaskCount ?? 0) : 0;
   return (
     <a
       href={item.href}
@@ -409,6 +414,7 @@ export function Sidebar({ onMobileNavigate }: { onMobileNavigate?: () => void } 
   const [customAgentNames, setCustomAgentNames] = useState<Record<string, { en: string; ar: string }>>({});
   const [activeWorkspace, setActiveWorkspace] = useState<string>(loadActiveWorkspace);
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
+  const [runningTaskCount, setRunningTaskCount] = useState(0);
 
   useEffect(() => {
     apiFetch<Conversation[]>('/api/conversations')
@@ -427,6 +433,11 @@ export function Sidebar({ onMobileNavigate }: { onMobileNavigate?: () => void } 
       .catch(() => {});
     fetchInbox();
     const inboxInterval = setInterval(fetchInbox, 60_000);
+    const fetchRunning = () => apiFetch<{ total: number }>('/api/agent-tasks?status=running&limit=1')
+      .then((d) => setRunningTaskCount(d.total))
+      .catch(() => {});
+    fetchRunning();
+    const runningInterval = setInterval(fetchRunning, 15_000);
     apiFetch<Array<{ id: string; name: { en: string; ar: string } }>>('/api/custom-agents')
       .then((agents) => {
         const map: Record<string, { en: string; ar: string }> = {};
@@ -434,7 +445,7 @@ export function Sidebar({ onMobileNavigate }: { onMobileNavigate?: () => void } 
         setCustomAgentNames(map);
       })
       .catch(() => {});
-    return () => { clearInterval(notifInterval); clearInterval(inboxInterval); };
+    return () => { clearInterval(notifInterval); clearInterval(inboxInterval); clearInterval(runningInterval); };
   }, []);
 
   // Sync workspace from localStorage on mount + whenever the top
@@ -604,6 +615,7 @@ export function Sidebar({ onMobileNavigate }: { onMobileNavigate?: () => void } 
               pendingApprovals={pendingApprovals}
               unreadNotifications={unreadNotifications}
               inboxUnprocessed={inboxUnprocessed}
+              runningTaskCount={runningTaskCount}
               onNavigate={handleNavigate}
             />
           );
