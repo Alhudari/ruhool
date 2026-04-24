@@ -14,6 +14,9 @@ import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { Logger } from 'pino';
 import { parseNaturalTime } from '../services/natural-time.js';
+import { sanitizeUserInput } from '../services/security/sanitize-input.js';
+import { flag } from '../services/flags.js';
+import { shouldInjectReportActions, buildReportsContextBlock, REPORT_ACTIONS_PROMPT } from '../services/chat/report-actions.js';
 
 import {
   parseAndExecuteActions,
@@ -274,6 +277,11 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       && process.env.CHAT_V2 !== '0'
       && _headerOverrideV2 !== '0'
       && _headerOverrideV2 !== 'false';
+
+    // B-1: sanitize user input to block persona override attempts
+    if (flag('INPUT_SANITIZER') && body.message) {
+      body.message = sanitizeUserInput(body.message);
+    }
 
     let convId = body.conversationId;
     bootLogger.info({ msg: 'chat-route-trace', step: 'entry', conversationId: convId || null, bodyAgentId: body.agentId || null, messageText: (body.message || '').slice(0, 80) }, 'chat-route-trace');
@@ -1185,6 +1193,15 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
         }
 
         const agentHeader = detectedAgent !== 'manager' ? (AGENT_HEADERS[detectedAgent] || '') : '';
+
+        // B-4 STABLE PROMPT: report actions injected here explicitly, not via Proxy.
+        // This keeps system prompts deterministic — same agent always gets the same
+        // base prompt; report context only added when this agent can act on it.
+        if (flag('STABLE_PROMPT')
+            && (detectedAgent === 'manager' || detectedAgent === 'architect' || detectedAgent === 'doctor')
+            && shouldInjectReportActions(store)) {
+          activeSystemPrompt += '\n\n' + REPORT_ACTIONS_PROMPT + buildReportsContextBlock(store);
+        }
 
         await stream.writeSSE({ event: 'thinking', data: JSON.stringify({ agentId: detectedAgent }) });
 

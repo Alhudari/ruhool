@@ -105,7 +105,7 @@ describe('specialists dispatcher', () => {
     expect(capture.lastSystemPrompt).not.toContain('سجل الجولات السابقة');
   });
 
-  it('prepends the identity directive when priorMessages is non-empty', async () => {
+  it('places identity directive LAST in system prompt (B-1 Identity Lock)', async () => {
     const { mock, capture } = makeMockProvider();
     await dispatch({
       specialist: 'المُلخِّص',
@@ -116,14 +116,17 @@ describe('specialists dispatcher', () => {
       deps: { provider: mock, model: 'claude-sonnet-4-6' },
     });
     const sys = capture.lastSystemPrompt || '';
-    // BUG-2 FIX: directive now opens with a bilingual banner. Check for the
-    // banner and the Arabic identity line within the first block instead of
-    // a literal prefix match.
-    expect(sys.startsWith('=== هوية الوكيل / AGENT IDENTITY')).toBe(true);
+    // B-1: identity must be LAST so user messages cannot override it
+    expect(sys).toContain('=== هوية الوكيل / AGENT IDENTITY');
     expect(sys).toContain('أنت المُلخِّص');
     expect(sys).toContain('STRICTLY FORBIDDEN');
     expect(sys).toContain('تقمّص');
-    expect(sys).toContain('المُلخِّص');
+    // Identity directive must come AFTER the base prompt content
+    const baseIdx = sys.indexOf('المُلخِّص'); // first occurrence in base prompt
+    const identityIdx = sys.lastIndexOf('=== هوية الوكيل / AGENT IDENTITY');
+    expect(identityIdx).toBeGreaterThan(baseIdx);
+    // Must end with the identity card closing marker
+    expect(sys.trimEnd()).toMatch(/=== نهاية بطاقة الهوية \/ END IDENTITY CARD ===\s*$/);
   });
 
   it('includes a closing reinforcement after the transcript', async () => {
@@ -201,11 +204,11 @@ describe('specialists dispatcher', () => {
     const occurrences = (sys.match(/ء/g) || []).length;
     expect(occurrences).toBeLessThanOrEqual(700);
     expect(occurrences).toBeGreaterThan(400);
-    expect(sys.length).toBeLessThan(RESEARCH_SYSTEM_PROMPT.length + 2_000);
+    expect(sys.length).toBeLessThan(RESEARCH_SYSTEM_PROMPT.length + 4_000); // +4k for security + identity blocks
   });
 
   // ─── BUG-2 regression tests ───────────────────────────────────────────────
-  it('BUG-2: identity directive is prepended even when priorMessages is undefined', async () => {
+  it('B-1: identity directive is always present and placed last (even without priorMessages)', async () => {
     const { mock, capture } = makeMockProvider();
     await dispatch({
       specialist: 'الباحث',
@@ -213,9 +216,13 @@ describe('specialists dispatcher', () => {
       deps: { provider: mock, model: 'claude-sonnet-4-6' },
     });
     const sys = capture.lastSystemPrompt || '';
-    expect(sys.startsWith('=== هوية الوكيل / AGENT IDENTITY')).toBe(true);
+    expect(sys).toContain('=== هوية الوكيل / AGENT IDENTITY');
     expect(sys).toContain('أنت الباحث');
     expect(sys).toContain('STRICTLY FORBIDDEN');
+    // Identity is LAST — base prompt precedes it
+    const baseStart = sys.indexOf('الباحث');
+    const identityStart = sys.lastIndexOf('=== هوية الوكيل');
+    expect(identityStart).toBeGreaterThan(baseStart);
   });
 
   it('BUG-2: identity directive names الباحث when dispatched via English alias "abdan"', async () => {
