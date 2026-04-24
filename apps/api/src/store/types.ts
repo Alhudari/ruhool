@@ -746,6 +746,24 @@ export interface Grs2Record {
   reminderSent?: boolean;
 }
 
+export interface MilestoneRecord {
+  id: string;
+  title: string;
+  titleAr: string;
+  date: string;
+  status: 'upcoming' | 'in-progress' | 'completed' | 'delayed';
+  description?: string;
+  links: string[];
+  tags: string[];
+  meetingId?: string;
+  grs2Month?: string;
+  attachments?: string[];
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
+  deletedAt?: string;
+}
+
 export interface TagRecord {
   id: string;
   path: string;      // e.g. "BIM/Standards" — no # in storage
@@ -941,6 +959,7 @@ export interface StoreData {
   companionMemory?: CompanionMemoryEntry[];
   meetingSessions?: MeetingSessionRecord[];
   grs2Records?: Grs2Record[];
+  milestones?: MilestoneRecord[];
   tags?: TagRecord[];
   tagAssignments?: TagAssignment[];
   researchClusters?: ResearchCluster[];

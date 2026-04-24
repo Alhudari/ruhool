@@ -116,7 +116,7 @@ export function MeetingsPage() {
       ? last.record.Attendees.filter((a: string) => !a.toLowerCase().includes('briefly'))
       : ['Dr Davies'];
 
-    const title = `Meeting ${nextNo}`;
+    const title = `Meeting #${nextNo}`;
     const s = await apiFetch<MeetingSession>('/api/meetings/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

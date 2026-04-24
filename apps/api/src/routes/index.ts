@@ -91,6 +91,7 @@ import { registerResearchFilesRoutes } from './research-files.js';
 import { registerResearchClustersRoutes } from './research-clusters.js';
 import { registerGraphRoutes } from './graph.js';
 import { registerScopePointsRoutes } from './scope-points.js';
+import { registerMilestonesRoutes } from './milestones.js';
 
 // Accept a wide superset deps bag; each registrar picks what it needs.
 // Using `unknown` + cast inside to avoid re-declaring every registrar's typed Deps here.
@@ -195,6 +196,7 @@ export function registerAllRoutes(app: Hono, deps: Record<string, unknown>): voi
   registerResearchFilesRoutes(app);
   registerResearchClustersRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
   registerScopePointsRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
+  registerMilestonesRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
   registerShwashaRoutes(app, {
     getStore: d.getStore,
     saveStore: d.saveStore,
