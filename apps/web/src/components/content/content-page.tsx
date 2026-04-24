@@ -148,7 +148,7 @@ export function ContentPage() {
         </div>
         <div>
           <h1 className="text-lg font-semibold text-on-surface">
-            {isRTL ? 'الدبسا — صناعة المحتوى' : 'Al-Dabsa — Content Creator'}
+            {isRTL ? 'الدبسا — صناعة المحتوى' : 'Al-Sarid — Content Creator'}
           </h1>
           <p className="text-xs text-on-surface-tertiary">
             {isRTL ? 'محتوى تعليمي عربي للسوشال ميديا' : 'Arabic educational social media content'}

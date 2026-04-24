@@ -10,12 +10,12 @@ interface Score { agentId: string; score: number; good: number; bad: number; run
 
 const AGENT_LABELS: Record<string, { ar: string; en: string; emoji: string }> = {
   manager: { ar: 'الراعي', en: 'Al-Rai', emoji: '🤠' },
-  research: { ar: 'عبدان', en: 'Abdan', emoji: '🔬' },
-  'reading-helper': { ar: 'شواشة', en: 'Shwasha', emoji: '📖' },
-  'writing-critic': { ar: 'الصفرا', en: 'Al-Safra', emoji: '✍️' },
-  comparator: { ar: 'رمّانة', en: 'Rammana', emoji: '⚖️' },
-  architect: { ar: 'المصمم', en: 'Al-Musammim', emoji: '🏗️' },
-  'content-creator': { ar: 'الدبسا', en: 'Al-Dabsa', emoji: '🎨' },
+  research: { ar: 'الباحث', en: 'Al-Bahith', emoji: '🔬' },
+  'reading-helper': { ar: 'المُلخِّص', en: 'Al-Mulakhkhis', emoji: '📖' },
+  'writing-critic': { ar: 'الناقد', en: 'Al-Naqid', emoji: '✍️' },
+  comparator: { ar: 'المُقارِن', en: 'Al-Muqarin', emoji: '⚖️' },
+  architect: { ar: 'المصمم', en: 'Al-Al-Musammim', emoji: '🏗️' },
+  'content-creator': { ar: 'السارد', en: 'Al-Sarid', emoji: '🎨' },
   creative: { ar: 'الكرييتف', en: 'Creative', emoji: '🎬' },
   'tasks-agent': { ar: 'مهام', en: 'Maham', emoji: '✅' },
   analyst: { ar: 'المحلل', en: 'Analyst', emoji: '📊' },

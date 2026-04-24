@@ -25,12 +25,12 @@ interface AgentDisplayInfo {
 
 const BUILTIN_AGENT_DISPLAY: Record<string, AgentDisplayInfo> = {
   manager: { name: { en: "Al-Ra'i", ar: 'الراعي' }, color: 'bg-amber-500/20 text-amber-600 dark:text-amber-400', bgColor: 'bg-amber-500', initial: 'ع' },
-  research: { name: { en: 'Abdan', ar: 'عبدان' }, color: 'bg-purple-500/20 text-purple-600 dark:text-purple-400', bgColor: 'bg-purple-500', initial: 'ع' },
-  'reading-helper': { name: { en: 'Shwasha', ar: 'شواشة' }, color: 'bg-blue-500/20 text-blue-600 dark:text-blue-400', bgColor: 'bg-blue-500', initial: 'ش' },
-  'writing-critic': { name: { en: 'Al-Safra', ar: 'الصفرا' }, color: 'bg-green-500/20 text-green-600 dark:text-green-400', bgColor: 'bg-green-500', initial: 'ص' },
-  comparator: { name: { en: 'Rammana', ar: 'رمّانة' }, color: 'bg-red-500/20 text-red-600 dark:text-red-400', bgColor: 'bg-red-500', initial: 'ر' },
+  research: { name: { en: 'Al-Bahith', ar: 'عبدان' }, color: 'bg-purple-500/20 text-purple-600 dark:text-purple-400', bgColor: 'bg-purple-500', initial: 'ع' },
+  'reading-helper': { name: { en: 'Al-Mulakhkhis', ar: 'شواشة' }, color: 'bg-blue-500/20 text-blue-600 dark:text-blue-400', bgColor: 'bg-blue-500', initial: 'ش' },
+  'writing-critic': { name: { en: 'Al-Naqid', ar: 'الصفرا' }, color: 'bg-green-500/20 text-green-600 dark:text-green-400', bgColor: 'bg-green-500', initial: 'ص' },
+  comparator: { name: { en: 'Al-Muqarin', ar: 'رمّانة' }, color: 'bg-red-500/20 text-red-600 dark:text-red-400', bgColor: 'bg-red-500', initial: 'ر' },
   architect: { name: { en: 'Al-Musammim', ar: 'المصمم' }, color: 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400', bgColor: 'bg-yellow-500', initial: 'م' },
-  'content-creator': { name: { en: 'Al-Dabsa', ar: 'الدبسا' }, color: 'bg-pink-500/20 text-pink-600 dark:text-pink-400', bgColor: 'bg-pink-500', initial: 'د' },
+  'content-creator': { name: { en: 'Al-Sarid', ar: 'الدبسا' }, color: 'bg-pink-500/20 text-pink-600 dark:text-pink-400', bgColor: 'bg-pink-500', initial: 'د' },
   creative: { name: { en: 'The Creative', ar: '\u0627\u0644\u0643\u0631\u064a\u064a\u062a\u0641' }, color: 'bg-rose-500/20 text-rose-600 dark:text-rose-400', bgColor: 'bg-rose-500', initial: '\u0643' },
   'tasks-agent': { name: { en: 'Maham', ar: '\u0645\u0647\u0627\u0645' }, color: 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400', bgColor: 'bg-emerald-500', initial: '\u0645' },
   analyst: { name: { en: 'Al-Muhallil', ar: 'المحلل' }, color: 'bg-teal-500/20 text-teal-600 dark:text-teal-400', bgColor: 'bg-teal-500', initial: 'م' },
@@ -40,12 +40,12 @@ const BUILTIN_AGENT_DISPLAY: Record<string, AgentDisplayInfo> = {
 
 const ALL_BUILTIN_AGENTS = [
   { id: 'manager', name: { en: "Al-Ra'i", ar: 'الراعي' }, desc: { en: 'The guide', ar: 'القائد' } },
-  { id: 'research', name: { en: 'Abdan', ar: 'عبدان' }, desc: { en: 'Deep research', ar: 'بحث عميق' } },
-  { id: 'reading-helper', name: { en: 'Shwasha', ar: 'شواشة' }, desc: { en: 'Reading helper', ar: 'مساعد القراءة' } },
-  { id: 'writing-critic', name: { en: 'Al-Safra', ar: 'الصفرا' }, desc: { en: 'Writing critic', ar: 'ناقدة الكتابة' } },
-  { id: 'comparator', name: { en: 'Rammana', ar: 'رمّانة' }, desc: { en: 'Comparator', ar: 'المقارنة' } },
+  { id: 'research', name: { en: 'Al-Bahith', ar: 'عبدان' }, desc: { en: 'Deep research', ar: 'بحث عميق' } },
+  { id: 'reading-helper', name: { en: 'Al-Mulakhkhis', ar: 'شواشة' }, desc: { en: 'Reading helper', ar: 'مساعد القراءة' } },
+  { id: 'writing-critic', name: { en: 'Al-Naqid', ar: 'الصفرا' }, desc: { en: 'Writing critic', ar: 'ناقدة الكتابة' } },
+  { id: 'comparator', name: { en: 'Al-Muqarin', ar: 'رمّانة' }, desc: { en: 'Comparator', ar: 'المقارنة' } },
   { id: 'architect', name: { en: 'Al-Musammim', ar: 'المصمم' }, desc: { en: 'Agent architect', ar: 'مدير الوكلاء' } },
-  { id: 'content-creator', name: { en: 'Al-Dabsa', ar: 'الدبسا' }, desc: { en: 'Content creator', ar: 'صناعة المحتوى' } },
+  { id: 'content-creator', name: { en: 'Al-Sarid', ar: 'الدبسا' }, desc: { en: 'Content creator', ar: 'صناعة المحتوى' } },
   { id: 'creative', name: { en: 'The Creative', ar: '\u0627\u0644\u0643\u0631\u064a\u064a\u062a\u0641' }, desc: { en: 'Video creator', ar: '\u0635\u0627\u0646\u0639 \u0627\u0644\u0641\u064a\u062f\u064a\u0648' } },
   { id: 'tasks-agent', name: { en: 'Maham', ar: '\u0645\u0647\u0627\u0645' }, desc: { en: 'Task manager', ar: '\u0645\u062f\u064a\u0631 \u0627\u0644\u0645\u0647\u0627\u0645' } },
   { id: 'analyst', name: { en: 'Al-Muhallil', ar: 'المحلل' }, desc: { en: 'Subscription & cost analyst', ar: 'محلل الاشتراكات والتكاليف' } },
@@ -1208,7 +1208,7 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-on-surface-tertiary mb-1">
-                  {isRTL ? 'عبدان' : 'Abdan'}
+                  {isRTL ? 'عبدان' : 'Al-Bahith'}
                 </p>
                 <TaskProgressCard
                   taskId={taskId}

@@ -437,9 +437,9 @@ function CreateWorkflowForm({
                     className="w-full px-3 py-2 rounded-[var(--radius)] bg-surface-secondary border border-border text-on-surface text-sm focus:outline-none focus:ring-1 focus:ring-accent"
                   >
                     <option value="manager">Ruhool (Manager)</option>
-                    <option value="research">Abdan (Research)</option>
-                    <option value="reading-helper">Shwasha (Reading)</option>
-                    <option value="writing-critic">Al-Safra (Writing Critic)</option>
+                    <option value="research">Al-Bahith (Research)</option>
+                    <option value="reading-helper">Al-Mulakhkhis (Reading)</option>
+                    <option value="writing-critic">Al-Naqid (Writing Critic)</option>
                   </select>
                   <textarea
                     value={step.prompt}

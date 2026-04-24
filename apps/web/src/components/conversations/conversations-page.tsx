@@ -24,12 +24,12 @@ interface DeletionImpact { messages: number; memories: number; tasks: number; ap
 
 const AGENT_NAMES: Record<string, { ar: string; en: string }> = {
   manager: { ar: 'الراعي', en: "Al-Ra'i" },
-  research: { ar: 'عبدان', en: 'Abdan' },
-  'reading-helper': { ar: 'شواشة', en: 'Shwasha' },
-  'writing-critic': { ar: 'الصفرا', en: 'Al-Safra' },
-  comparator: { ar: 'رمّانة', en: 'Rammana' },
+  research: { ar: 'عبدان', en: 'Al-Bahith' },
+  'reading-helper': { ar: 'شواشة', en: 'Al-Mulakhkhis' },
+  'writing-critic': { ar: 'الصفرا', en: 'Al-Naqid' },
+  comparator: { ar: 'رمّانة', en: 'Al-Muqarin' },
   architect: { ar: 'المصمم', en: 'Al-Musammim' },
-  'content-creator': { ar: 'الدبسا', en: 'Al-Dabsa' },
+  'content-creator': { ar: 'الدبسا', en: 'Al-Sarid' },
   creative: { ar: 'الكرييتف', en: 'Creative' },
   'tasks-agent': { ar: 'مهام', en: 'Maham' },
   analyst: { ar: 'المحلل', en: 'Al-Muhallil' },

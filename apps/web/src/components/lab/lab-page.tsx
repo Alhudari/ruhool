@@ -43,8 +43,8 @@ const CREATIVE_AGENTS: CreativeAgent[] = [
   },
   {
     id: 'content-creator',
-    nameAr: 'الدبسا',
-    nameEn: 'Al-Dabsa',
+    nameAr: 'السارد',
+    nameEn: 'Al-Sarid',
     descAr: 'كاروسيل، ريلز، مواضيع سوشال',
     descEn: 'Carousels, reels, social threads',
     avatar: '✍️',

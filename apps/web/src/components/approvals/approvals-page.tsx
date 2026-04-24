@@ -55,10 +55,10 @@ const TYPE_COLORS: Record<string, string> = {
 const AGENT_NAMES: Record<string, { en: string; ar: string }> = {
   architect: { en: 'Al-Ra\'i', ar: 'الراعي' },
   manager: { en: "Al-Ra'i", ar: 'الراعي' },
-  research: { en: 'Abdan', ar: 'عبدان' },
-  'reading-helper': { en: 'Shwasha', ar: 'شواشة' },
-  'writing-critic': { en: 'Al-Safra', ar: 'الصفرا' },
-  comparator: { en: 'Rammana', ar: 'رمّانة' },
+  research: { en: 'Al-Bahith', ar: 'عبدان' },
+  'reading-helper': { en: 'Al-Mulakhkhis', ar: 'شواشة' },
+  'writing-critic': { en: 'Al-Naqid', ar: 'الصفرا' },
+  comparator: { en: 'Al-Muqarin', ar: 'رمّانة' },
 };
 
 export function ApprovalsPage() {

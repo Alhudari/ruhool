@@ -26,12 +26,12 @@ interface AgentNotificationSettings {
 const BUILTIN_AGENTS = [
   { id: 'manager', name: { en: 'Al-Ra\'i', ar: 'الراعي' } },
   { id: 'tasks-agent', name: { en: 'Maham', ar: 'مهام' } },
-  { id: 'research', name: { en: 'Abdan', ar: 'عبدان' } },
-  { id: 'reading-helper', name: { en: 'Shwasha', ar: 'شواشة' } },
-  { id: 'writing-critic', name: { en: 'Al-Safra', ar: 'الصفرا' } },
-  { id: 'comparator', name: { en: 'Rammana', ar: 'رمّانة' } },
+  { id: 'research', name: { en: 'Al-Bahith', ar: 'الباحث' } },
+  { id: 'reading-helper', name: { en: 'Al-Mulakhkhis', ar: 'المُلخِّص' } },
+  { id: 'writing-critic', name: { en: 'Al-Naqid', ar: 'الناقد' } },
+  { id: 'comparator', name: { en: 'Al-Muqarin', ar: 'المُقارِن' } },
   { id: 'architect', name: { en: "Al-Ra'i", ar: 'الراعي' } },
-  { id: 'content-creator', name: { en: 'Al-Dabsa', ar: 'الدبسا' } },
+  { id: 'content-creator', name: { en: 'Al-Sarid', ar: 'السارد' } },
   { id: 'creative', name: { en: 'Creative', ar: 'الكرييتف' } },
 ];
 
