@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useGuardedRouter } from '@/lib/navigation/guarded-router';
 import {
   ArrowLeft,
   FileText,
@@ -23,7 +23,7 @@ interface PromptEntry {
 
 export function PromptsLibraryPage() {
   const { language } = useAppStore();
-  const router = useRouter();
+  const router = useGuardedRouter();
   const isRTL = language === 'ar';
 
   const [prompts, setPrompts] = useState<PromptEntry[]>([]);

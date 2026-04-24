@@ -34,8 +34,8 @@ interface CreativeAgent {
 const CREATIVE_AGENTS: CreativeAgent[] = [
   {
     id: 'creative',
-    nameAr: 'الكرييتف',
-    nameEn: 'The Creative',
+    nameAr: 'المبدع',
+    nameEn: 'Al-Mubdi',
     descAr: 'إخراج فيديوهات وإعلانات قصيرة',
     descEn: 'Video production and short ads',
     avatar: '🎬',
@@ -43,8 +43,8 @@ const CREATIVE_AGENTS: CreativeAgent[] = [
   },
   {
     id: 'content-creator',
-    nameAr: 'الدبسا',
-    nameEn: 'Al-Dabsa',
+    nameAr: 'السارد',
+    nameEn: 'Al-Sarid',
     descAr: 'كاروسيل، ريلز، مواضيع سوشال',
     descEn: 'Carousels, reels, social threads',
     avatar: '✍️',

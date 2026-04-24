@@ -39,7 +39,10 @@ function getDbUrl(): string {
 }
 
 async function query(sql: string, params: unknown[] = []): Promise<unknown[]> {
-  // Use the postgres client directly for simple queries
+  // Use the postgres client directly for simple queries.
+  // `postgres` is only installed on the Vercel deployment target, not the
+  // local workspace — skip the type lookup so local typecheck stays green.
+  // @ts-expect-error -- optional peer, installed on cloud target only
   const { default: postgres } = await import('postgres');
   const sql_client = postgres(getDbUrl(), {
     ssl: getDbUrl().includes('supabase.co') || getDbUrl().includes('neon.tech') ? 'require' : false,

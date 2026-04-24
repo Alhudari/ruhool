@@ -29,7 +29,7 @@ describe('orchestrator residuals — G7 + G8', () => {
     const runId = crypto.randomUUID();
     const now = new Date().toISOString();
     const step: WorkflowStepRecord = {
-      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'عبدان',
+      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'الباحث',
       task: 't', status: 'pending', timeoutMs: 50, maxAttempts: 3, attemptCount: 0,
       createdAt: now, updatedAt: now,
     };
@@ -63,7 +63,7 @@ describe('orchestrator residuals — G7 + G8', () => {
     const runId = crypto.randomUUID();
     const now = new Date().toISOString();
     const step: WorkflowStepRecord = {
-      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'عبدان',
+      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'الباحث',
       task: 't', status: 'pending', timeoutMs: 5000, maxAttempts: 3, attemptCount: 0,
       createdAt: now, updatedAt: now,
     };

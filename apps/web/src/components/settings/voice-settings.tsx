@@ -5,6 +5,7 @@ import { Mic, Play, Square, Check, Loader2, User, User2, RefreshCw, Sparkles, Up
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch, API_BASE_URL } from '@/lib/api';
+import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
 
 interface Voice {
   voiceId: string;
@@ -37,6 +38,9 @@ export function VoiceSettings() {
   const [cloneFiles, setCloneFiles] = useState<File[]>([]);
   const [cloning, setCloning] = useState(false);
   const cloneInputRef = useRef<HTMLInputElement | null>(null);
+
+  const cloneDirty = cloneOpen && (cloneName.trim().length > 0 || cloneFiles.length > 0);
+  useUnsavedChanges(cloneDirty);
 
   const loadMyVoices = () => {
     apiFetch<{ voices: typeof myVoices }>('/api/voice/mine').then((r) => setMyVoices(r.voices || [])).catch(() => setMyVoices([]));
@@ -148,7 +152,7 @@ export function VoiceSettings() {
 
   if (error) {
     return (
-      <div className="p-6 rounded-[var(--radius-lg)] border border-amber-500/30 bg-amber-500/10 text-sm text-amber-700 dark:text-amber-400">
+      <div className="p-6 rounded-[var(--radius-lg)] border border-warning/30 bg-warning/10 text-sm text-warning">
         {isRTL ? 'يحتاج مفتاح ElevenLabs أولاً. أضفه من الإعدادات ← خدمات خارجية.' : 'Needs ElevenLabs API key. Add it from Settings → External Services.'}
       </div>
     );
@@ -241,7 +245,7 @@ export function VoiceSettings() {
                 <button onClick={() => save(v.voiceId)} className={cn('px-2 py-1 rounded text-[10px] font-semibold', selected === v.voiceId ? 'bg-accent text-on-accent' : 'bg-surface border border-border text-on-surface-secondary')}>
                   {selected === v.voiceId ? (isRTL ? '✓ مختار' : '✓ Selected') : (isRTL ? 'اختر' : 'Select')}
                 </button>
-                <button onClick={() => deleteClone(v.voiceId)} className="p-1 text-red-500 hover:bg-red-500/10 rounded ms-1" title={isRTL ? 'حذف' : 'Delete'}>
+                <button onClick={() => deleteClone(v.voiceId)} className="p-1 text-error hover:bg-error/10 rounded ms-1" title={isRTL ? 'حذف' : 'Delete'}>
                   <Trash2 size={12} />
                 </button>
               </div>
@@ -311,7 +315,7 @@ export function VoiceSettings() {
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {isCached(v) && !isPlaying && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 font-medium" title={isRTL ? 'مخزّن — تشغيل فوري' : 'Cached — instant play'}>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-success/10 text-success font-medium" title={isRTL ? 'مخزّن — تشغيل فوري' : 'Cached — instant play'}>
                       ⚡ {isRTL ? 'مخزّن' : 'cached'}
                     </span>
                   )}
@@ -320,8 +324,8 @@ export function VoiceSettings() {
                     disabled={generating === v.voiceId}
                     className={cn(
                       'p-2 rounded-full transition-colors',
-                      isPlaying ? 'bg-red-500 text-white'
-                        : generating === v.voiceId ? 'bg-amber-500 text-white'
+                      isPlaying ? 'bg-error text-white'
+                        : generating === v.voiceId ? 'bg-warning text-white'
                         : 'bg-surface-secondary hover:bg-accent hover:text-on-accent text-on-surface-secondary'
                     )}
                     title={isCached(v) ? (isRTL ? 'تشغيل (مخزّن)' : 'Play (cached)') : (isRTL ? 'توليد + تشغيل' : 'Generate + play')}
@@ -333,7 +337,7 @@ export function VoiceSettings() {
                   {isCached(v) && (
                     <button
                       onClick={() => regenerate(v)}
-                      className="p-2 rounded-full bg-surface-secondary hover:bg-amber-500/20 text-on-surface-tertiary hover:text-amber-600"
+                      className="p-2 rounded-full bg-surface-secondary hover:bg-warning/20 text-on-surface-tertiary hover:text-warning"
                       title={isRTL ? 'إعادة توليد (يستهلك حصة)' : 'Regenerate (uses quota)'}
                     >
                       <RefreshCw size={12} />
@@ -344,7 +348,7 @@ export function VoiceSettings() {
                     disabled={isSelected || saving}
                     className={cn(
                       'px-3 py-2 rounded text-xs font-semibold transition-colors',
-                      isSelected ? 'bg-emerald-500/20 text-emerald-600 cursor-default' : 'bg-accent text-on-accent hover:opacity-90'
+                      isSelected ? 'bg-success/20 text-success cursor-default' : 'bg-accent text-on-accent hover:opacity-90'
                     )}
                   >
                     {isSelected ? <Check size={14} /> : (isRTL ? 'اختر' : 'Select')}

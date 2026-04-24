@@ -1,41 +1,66 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { Settings, Key, Palette, Languages, Shield, HardDrive, FileText, DollarSign, Bell, CheckCircle, CheckSquare, Globe, Mic, Clock } from 'lucide-react';
+import { useState, useEffect, Suspense, lazy } from 'react';
+import { useGuardedRouter } from '@/lib/navigation/guarded-router';
+import { Settings, Key, Palette, Languages, Shield, HardDrive, FileText, DollarSign, Bell, CheckCircle, CheckSquare, Globe, Mic, Mic2, Clock, Users, BookOpen, Mail } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
-import { ProvidersSettings } from './providers-settings';
 import { PrivacySettings } from './privacy-settings';
 import { BackupsSettings } from './backups-settings';
 import { BudgetSettings } from './budget-settings';
 import { NotificationSettings } from './notification-settings';
-import { ExternalApisSettings } from './external-apis-settings';
 import { VoiceSettings } from './voice-settings';
 import { TimezoneSettings } from './timezone-settings';
 import { TasksNotesSettings } from './tasks-notes-settings';
+import { VoiceProfileSettings } from './voice-profile-settings';
+import { SettingsSkeleton } from './SettingsSkeleton';
+// Lazy-loaded: four heavier settings panes land behind a Suspense
+// boundary so the settings page paints instantly even on a slow
+// first load of those bundles.
+const ProvidersSettings = lazy(() => import('./providers-settings').then((m) => ({ default: m.ProvidersSettings })));
+const ExternalApisSettings = lazy(() => import('./external-apis-settings').then((m) => ({ default: m.ExternalApisSettings })));
+const AgentNamesSettings = lazy(() => import('./agent-names-settings').then((m) => ({ default: m.AgentNamesSettings })));
+const ShwashaSettings = lazy(() => import('./shwasha-settings').then((m) => ({ default: m.ShwashaSettings })));
+const GoogleTasksSettings = lazy(() => import('./google-tasks-settings').then((m) => ({ default: m.GoogleTasksSettings })));
+const ReportsSettings = lazy(() => import('./reports-settings').then((m) => ({ default: m.ReportsSettings })));
 import { apiFetch } from '@/lib/api';
 
+// R13 IA pass: tabs regrouped into four semantic bands so related
+// settings sit together. Order within each band is stable.
 const TABS = [
+  // ── Connections ──
   { id: 'providers', icon: Key, label: { en: 'API Providers', ar: 'مزودي API' } },
   { id: 'external-apis', icon: Globe, label: { en: 'External Services', ar: 'خدمات خارجية' } },
-  { id: 'voice', icon: Mic, label: { en: 'Voice', ar: 'الصوت' } },
-  { id: 'timezone', icon: Clock, label: { en: 'Time Zones', ar: 'المناطق الزمنية' } },
+  { id: 'google-tasks', icon: CheckSquare, label: { en: 'Google Tasks', ar: 'مزامنة Google Tasks' } },
+  { id: 'reports', icon: Mail, label: { en: 'Reports', ar: 'التقارير' } },
+
+  // ── Agents ──
+  { id: 'agents-names', icon: Users, label: { en: 'Agent Names', ar: 'أسماء الوكلاء' } },
+  { id: 'shwasha', icon: BookOpen, label: { en: 'Al-Mulakhkhis', ar: 'المُلخِّص' } },
+  { id: 'prompts', icon: FileText, label: { en: 'Prompts Library', ar: 'مكتبة التعليمات' } },
+  { id: 'approvals', icon: CheckCircle, label: { en: 'Approval Level', ar: 'مستوى الموافقة' } },
+
+  // ── Identity & Preferences ──
   { id: 'appearance', icon: Palette, label: { en: 'Appearance', ar: 'المظهر' } },
   { id: 'language', icon: Languages, label: { en: 'Language', ar: 'اللغة' } },
-  { id: 'privacy', icon: Shield, label: { en: 'Privacy', ar: 'الخصوصية' } },
-  { id: 'budget', icon: DollarSign, label: { en: 'Budget', ar: 'الميزانية' } },
-  { id: 'notifications', icon: Bell, label: { en: 'Notifications', ar: 'الإشعارات' } },
+  { id: 'timezone', icon: Clock, label: { en: 'Time Zones', ar: 'المناطق الزمنية' } },
+  { id: 'voice', icon: Mic, label: { en: 'Voice', ar: 'الصوت' } },
+  { id: 'voice-profile', icon: Mic2, label: { en: 'My Voice', ar: 'أسلوبي' } },
+
+  // ── Life & Finance ──
   { id: 'tasks-notes', icon: CheckSquare, label: { en: 'Tasks & Notes', ar: 'المهام والملاحظات' } },
+  { id: 'budget', icon: DollarSign, label: { en: 'Budget', ar: 'الميزانية' } },
+
+  // ── Notifications & Safety ──
+  { id: 'notifications', icon: Bell, label: { en: 'Notifications', ar: 'الإشعارات' } },
   { id: 'agent-notifications', icon: Bell, label: { en: 'Agent Notifications', ar: 'تنبيهات الوكلاء' } },
-  { id: 'approvals', icon: CheckCircle, label: { en: 'Approval Level', ar: 'مستوى الموافقة' } },
+  { id: 'privacy', icon: Shield, label: { en: 'Privacy', ar: 'الخصوصية' } },
   { id: 'backups', icon: HardDrive, label: { en: 'Backups', ar: 'النسخ الاحتياطية' } },
-  { id: 'prompts', icon: FileText, label: { en: 'Prompts Library', ar: 'مكتبة التعليمات' } },
 ];
 
 export function SettingsPage() {
   const { language } = useAppStore();
-  const router = useRouter();
+  const router = useGuardedRouter();
   const [activeTab, setActiveTab] = useState('providers');
   const isRTL = language === 'ar';
 
@@ -70,9 +95,28 @@ export function SettingsPage() {
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          {activeTab === 'providers' && <ProvidersSettings />}
-          {activeTab === 'external-apis' && <ExternalApisSettings />}
+          {activeTab === 'providers' && (
+            <Suspense fallback={<SettingsSkeleton rows={5} />}>
+              <ProvidersSettings />
+            </Suspense>
+          )}
+          {activeTab === 'external-apis' && (
+            <Suspense fallback={<SettingsSkeleton rows={9} />}>
+              <ExternalApisSettings />
+            </Suspense>
+          )}
           {activeTab === 'voice' && <VoiceSettings />}
+          {activeTab === 'agents-names' && (
+            <Suspense fallback={<SettingsSkeleton rows={6} />}>
+              <AgentNamesSettings />
+            </Suspense>
+          )}
+          {activeTab === 'shwasha' && (
+            <Suspense fallback={<SettingsSkeleton rows={4} />}>
+              <ShwashaSettings />
+            </Suspense>
+          )}
+          {activeTab === 'voice-profile' && <VoiceProfileSettings />}
           {activeTab === 'timezone' && <TimezoneSettings />}
           {activeTab === 'appearance' && (
             <AppearanceSettings />
@@ -84,6 +128,16 @@ export function SettingsPage() {
           {activeTab === 'budget' && <BudgetSettings />}
           {activeTab === 'notifications' && <NotificationSettings />}
           {activeTab === 'tasks-notes' && <TasksNotesSettings />}
+          {activeTab === 'google-tasks' && (
+            <Suspense fallback={<SettingsSkeleton rows={3} />}>
+              <GoogleTasksSettings />
+            </Suspense>
+          )}
+          {activeTab === 'reports' && (
+            <Suspense fallback={<SettingsSkeleton rows={4} />}>
+              <ReportsSettings />
+            </Suspense>
+          )}
           {activeTab === 'agent-notifications' && <AgentNotificationsRedirect router={router} />}
           {activeTab === 'approvals' && <ApprovalLevelSettings />}
           {activeTab === 'backups' && <BackupsSettings />}
@@ -214,14 +268,14 @@ function LanguageSettings() {
   );
 }
 
-function PromptsRedirect({ router }: { router: ReturnType<typeof useRouter> }) {
+function PromptsRedirect({ router }: { router: ReturnType<typeof useGuardedRouter> }) {
   useEffect(() => {
     router.push('/settings/prompts');
   }, [router]);
   return null;
 }
 
-function AgentNotificationsRedirect({ router }: { router: ReturnType<typeof useRouter> }) {
+function AgentNotificationsRedirect({ router }: { router: ReturnType<typeof useGuardedRouter> }) {
   useEffect(() => {
     router.push('/settings/notifications');
   }, [router]);

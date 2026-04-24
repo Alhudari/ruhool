@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { DollarSign, Bell, Save, Loader2 } from 'lucide-react';
+import { DollarSign, Bell, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
+import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
+import { SaveBar, useSaveBarHeight } from '@/components/settings/save-bar';
 
 interface BudgetData {
   monthlyBudget: number;
@@ -21,9 +23,11 @@ export function BudgetSettings() {
 
   const [monthlyBudget, setMonthlyBudget] = useState(0);
   const [budgetAlertPercent, setBudgetAlertPercent] = useState(75);
+  const [original, setOriginal] = useState<BudgetData | null>(null);
   const [currentSpend, setCurrentSpend] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchBudget = useCallback(async () => {
@@ -35,6 +39,7 @@ export function BudgetSettings() {
       ]);
       setMonthlyBudget(budget.monthlyBudget);
       setBudgetAlertPercent(budget.budgetAlertPercent);
+      setOriginal({ monthlyBudget: budget.monthlyBudget, budgetAlertPercent: budget.budgetAlertPercent });
       setCurrentSpend(usage.totalCost);
     } catch {
       // Use defaults if endpoint not available yet
@@ -46,19 +51,34 @@ export function BudgetSettings() {
     fetchBudget();
   }, [fetchBudget]);
 
+  const dirty =
+    original !== null &&
+    (monthlyBudget !== original.monthlyBudget || budgetAlertPercent !== original.budgetAlertPercent);
+  useUnsavedChanges(dirty);
+  const saveBarPad = useSaveBarHeight(dirty || !!successMessage);
+
   const handleSave = async () => {
     setSaving(true);
+    setErrorMessage(null);
     try {
       await apiFetch('/api/settings/budget', {
         method: 'PUT',
         body: JSON.stringify({ monthlyBudget, budgetAlertPercent }),
       });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch {
-      // silently fail
+      setOriginal({ monthlyBudget, budgetAlertPercent });
+      setSuccessMessage(isRTL ? 'حُفظ' : 'Saved');
+      setTimeout(() => setSuccessMessage(null), 2000);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : (isRTL ? 'فشل الحفظ' : 'Save failed'));
     }
     setSaving(false);
+  };
+
+  const discard = () => {
+    if (!original) return;
+    setMonthlyBudget(original.monthlyBudget);
+    setBudgetAlertPercent(original.budgetAlertPercent);
+    setErrorMessage(null);
   };
 
   const budgetUsedPercent =
@@ -135,7 +155,7 @@ export function BudgetSettings() {
                 <span
                   className={cn(
                     'font-medium tabular-nums',
-                    isOverAlert ? 'text-red-400' : 'text-on-surface'
+                    isOverAlert ? 'text-error' : 'text-on-surface'
                   )}
                 >
                   ${currentSpend.toFixed(2)} / ${monthlyBudget.toFixed(2)}
@@ -146,7 +166,7 @@ export function BudgetSettings() {
                 <div
                   className={cn(
                     'h-full rounded-full transition-all duration-500',
-                    isOverAlert ? 'bg-red-400' : 'bg-accent'
+                    isOverAlert ? 'bg-error' : 'bg-accent'
                   )}
                   style={{ width: `${budgetUsedPercent}%` }}
                 />
@@ -160,7 +180,7 @@ export function BudgetSettings() {
               </div>
 
               {isOverAlert && (
-                <p className="text-xs text-red-400 mt-1">
+                <p className="text-xs text-error mt-1">
                   {isRTL
                     ? 'تحذير: تجاوزت حد التنبيه للميزانية!'
                     : 'Warning: You have exceeded your budget alert threshold!'}
@@ -168,33 +188,18 @@ export function BudgetSettings() {
               )}
             </div>
           )}
-
-          {/* Save Button */}
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className={cn(
-              'flex items-center gap-2 px-4 py-2 rounded-[var(--radius)] text-sm font-medium transition-colors',
-              saved
-                ? 'bg-green-500/20 text-green-400'
-                : 'bg-accent text-on-accent hover:bg-accent-hover'
-            )}
-          >
-            {saving ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <Save size={16} />
-            )}
-            {saved
-              ? isRTL
-                ? 'تم الحفظ!'
-                : 'Saved!'
-              : isRTL
-                ? 'حفظ'
-                : 'Save'}
-          </button>
         </>
       )}
+
+      <div style={{ height: saveBarPad }} aria-hidden="true" />
+      <SaveBar
+        dirty={dirty}
+        saving={saving}
+        onSave={handleSave}
+        onDiscard={discard}
+        successMessage={successMessage}
+        errorMessage={errorMessage}
+      />
     </div>
   );
 }

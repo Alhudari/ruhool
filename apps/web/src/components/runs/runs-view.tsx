@@ -107,11 +107,11 @@ export function RunsView() {
             className="bg-input border border-border rounded-[var(--radius)] px-2 py-1 text-xs"
           >
             <option value="manager">الراعي (manager)</option>
-            <option value="research">عبدان (research)</option>
+            <option value="research">الباحث (research)</option>
             <option value="analyst">المحلل (analyst)</option>
             <option value="architect">المصمم (architect)</option>
-            <option value="content-creator">الدبسا (content)</option>
-            <option value="creative">الكرييتف (video)</option>
+            <option value="content-creator">السارد (content)</option>
+            <option value="creative">المبدع (video)</option>
           </select>
           <button
             onClick={startRun}

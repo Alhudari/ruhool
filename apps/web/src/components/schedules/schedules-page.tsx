@@ -35,10 +35,10 @@ interface AgentOption {
 
 const BUILTIN_AGENTS: AgentOption[] = [
   { id: 'manager', name: { en: 'Al-Ra\'i', ar: 'الراعي' } },
-  { id: 'research', name: { en: 'Abdan', ar: 'عبدان' } },
-  { id: 'reading-helper', name: { en: 'Shwasha', ar: 'شواشة' } },
-  { id: 'writing-critic', name: { en: 'Al-Safra', ar: 'الصفرا' } },
-  { id: 'content-creator', name: { en: 'Al-Dabsa', ar: 'الدبسا' } },
+  { id: 'research', name: { en: 'Al-Bahith', ar: 'الباحث' } },
+  { id: 'reading-helper', name: { en: 'Al-Mulakhkhis', ar: 'المُلخِّص' } },
+  { id: 'writing-critic', name: { en: 'Al-Naqid', ar: 'الناقد' } },
+  { id: 'content-creator', name: { en: 'Al-Sarid', ar: 'السارد' } },
 ];
 
 const CRON_PRESETS = [

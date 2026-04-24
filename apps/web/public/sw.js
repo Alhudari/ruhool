@@ -1,5 +1,10 @@
-const CACHE_NAME = 'ruhool-v1';
-const PRECACHE = ['/', '/settings', '/offline'];
+const CACHE_NAME = 'ruhool-v2';
+const PRECACHE = [
+  '/', '/settings', '/offline',
+  '/zotero', '/library', '/sources', '/atomic-notes', '/reading-queue',
+  '/shwasha', '/tasks', '/inbox', '/phd', '/supervision', '/meetings',
+  '/canvas', '/graph', '/search', '/writing',
+];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(

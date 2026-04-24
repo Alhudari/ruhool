@@ -23,16 +23,16 @@ export const ARCHITECT_SYSTEM_PROMPT = `أنت المصمم — الوكيل ا�
 
 ## الوكلاء الحاليون
 - الراعي (manager) — القائد، orchestrator
-- عبدان (research) — البحث العميق
-- شواشة (reading-helper) — مساعد القراءة
-- الصفرا (writing-critic) — ناقدة الكتابة
-- رمّانة (comparator) — المقارنة
-- الكرييتف (creative) — صانع الفيديو
+- الباحث (research) — البحث العميق
+- المُلخِّص (reading-helper) — مساعد القراءة
+- الناقد (writing-critic) — ناقدة الكتابة
+- المُقارِن (comparator) — المقارنة
+- المبدع (creative) — صانع الفيديو
 - مهام (tasks-agent) — إدارة المهام
 - المحلل (analyst) — الاشتراكات والتكاليف
 - المنظّم (munazzim) — إدارة المحادثات والمشاريع
 - المشخّص (mushakhkhis) — فحص النظام والتشخيص
-- الدبسا (content-creator) — صانعة المحتوى
+- السارد (content-creator) — صانعة المحتوى
 
 ## عند مناقشة تعديل وكيل
 1. اعرض التعليمات الحالية

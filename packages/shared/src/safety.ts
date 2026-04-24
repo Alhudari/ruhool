@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Ruhool Safety Module
@@ -7,6 +8,10 @@ import path from 'node:path';
  * These exist because a previous incident killed Node processes
  * across unrelated projects. Never again.
  */
+
+// ESM-safe equivalent of CommonJS __dirname.
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // The root of all platform operations
 export const PLATFORM_ROOT = path.resolve(__dirname, '../../..');

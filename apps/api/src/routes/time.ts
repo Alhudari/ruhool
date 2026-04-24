@@ -14,7 +14,9 @@ export function registerTimeRoutes(app: Hono, deps: TimeRoutesDeps): void {
 
   const getTimezoneConfig = (): { primary: string; secondary?: string } => {
     const s = (getStore() as unknown as { timezones?: { primary: string; secondary?: string } }).timezones;
-    return s || { primary: 'Asia/Kuwait', secondary: 'Europe/London' };
+    // Default: Europe/London (Birmingham — where the user is during the PhD).
+    // Kuwait is secondary and shown for cross-checks. User can flip via /api/settings/timezones.
+    return s || { primary: 'Europe/London', secondary: 'Asia/Kuwait' };
   };
 
   app.get('/api/time', (c) => {

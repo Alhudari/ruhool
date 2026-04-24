@@ -37,11 +37,11 @@ describe('workflow-runs routes', () => {
       totalCostUsd: 0, createdAt: now, updatedAt: now,
     };
     const steps: WorkflowStepRecord[] = [{
-      id: crypto.randomUUID(), runId: run.id, stepIndex: 0, specialist: 'عبدان',
+      id: crypto.randomUUID(), runId: run.id, stepIndex: 0, specialist: 'الباحث',
       task: 'ابحث', status: 'pending', createdAt: now, updatedAt: now,
     }];
     const orchestrator: WorkflowOrchestrator = {
-      planWorkflow: vi.fn(async () => ({ title: 'خطة', steps: [{ specialist: 'عبدان', task: 'ابحث' }] } as PlannedWorkflow)),
+      planWorkflow: vi.fn(async () => ({ title: 'خطة', steps: [{ specialist: 'الباحث', task: 'ابحث' }] } as PlannedWorkflow)),
       createRunFromPlan: vi.fn(async () => ({ run, steps })),
       startRun: vi.fn(async () => {}),
       executeStep: vi.fn(async () => {}),
@@ -73,7 +73,7 @@ describe('workflow-runs routes', () => {
       totalCostUsd: 0, createdAt: now, updatedAt: now,
     }];
     store.workflowSteps = [{
-      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'عبدان',
+      id: crypto.randomUUID(), runId, stepIndex: 0, specialist: 'الباحث',
       task: 'x', status: 'pending', createdAt: now, updatedAt: now,
     }];
     const orchestrator = {
@@ -97,7 +97,7 @@ describe('workflow-runs routes', () => {
     const ch = registry.getRunChannel(runId);
     const received: WorkflowEvent[] = [];
     ch.subscribe((e) => received.push(e));
-    ch.publish({ type: 'workflow-step-completed', runId, stepId: 's1', stepIndex: 0, specialist: 'عبدان', output: 'done' });
+    ch.publish({ type: 'workflow-step-completed', runId, stepId: 's1', stepIndex: 0, specialist: 'الباحث', output: 'done' });
     expect(received).toHaveLength(1);
     expect(received[0].type).toBe('workflow-step-completed');
   });

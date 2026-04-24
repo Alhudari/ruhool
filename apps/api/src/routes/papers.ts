@@ -6,7 +6,16 @@ import type { PaperRecord, StoreData } from '../store/types.js';
 
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
+// pdf-parse v2 is a class API. Wrap it to the v1 function shape callers expect.
+const { PDFParse } = require('pdf-parse') as { PDFParse: new (opts: { data: Buffer }) => { getText(): Promise<{ text: string; numpages: number }>; destroy?: () => Promise<void> } };
+async function pdfParse(buffer: Buffer): Promise<{ text: string; numpages: number }> {
+  const p = new PDFParse({ data: buffer });
+  try {
+    return await p.getText();
+  } finally {
+    if (p.destroy) await p.destroy().catch(() => undefined);
+  }
+}
 
 // Loose type to match the real logActivity signature without tightly coupling.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

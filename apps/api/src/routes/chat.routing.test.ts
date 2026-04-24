@@ -55,7 +55,7 @@ describe('detectMention — @الراعي canonical routing', () => {
   });
 
   it('routes @المصمم to architect (unchanged)', () => {
-    const out = detectMention('@المصمم عدّل عبدان', []);
+    const out = detectMention('@المصمم عدّل الباحث', []);
     expect(out.agentId).toBe('architect');
   });
 

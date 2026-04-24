@@ -795,7 +795,7 @@ export function StudioPage() {
         </div>
         <div>
           <h1 className="text-sm font-semibold text-on-surface">
-            {isRTL ? 'استوديو الكرييتف' : 'Creative Studio'}
+            {isRTL ? 'استوديو المبدع' : 'Creative Studio'}
           </h1>
           <p className="text-[11px] text-on-surface-tertiary">
             {isRTL ? 'صناعة الفيديو بالـ Remotion' : 'Video creation with Remotion'}
@@ -1069,8 +1069,8 @@ export function StudioPage() {
                   </p>
                   <p className="text-sm max-w-md mb-4">
                     {isRTL
-                      ? 'ناقش فكرة فيديو مع الكرييتف. سيساعدك في تطوير الفكرة وبناء ستوري بورد.'
-                      : 'Discuss a video idea with The Creative. It will help develop the idea and build a storyboard.'}
+                      ? 'ناقش فكرة فيديو مع المبدع. سيساعدك في تطوير الفكرة وبناء ستوري بورد.'
+                      : 'Discuss a video idea with Al-Mubdi. It will help develop the idea and build a storyboard.'}
                   </p>
                   <button
                     type="button"
@@ -1448,7 +1448,7 @@ export function StudioPage() {
                             }}
                             className="text-[10px] px-2 py-1 rounded text-rose-600 hover:bg-rose-500/10"
                           >
-                            💬 {isRTL ? 'تحدث مع الكرييتف' : 'Chat with Creative'}
+                            💬 {isRTL ? 'تحدث مع المبدع' : 'Chat with Creative'}
                           </button>
                         </div>
                         <div className="space-y-1">
@@ -1502,7 +1502,7 @@ export function StudioPage() {
                           ))}
                         </div>
                         <p className="text-[10px] text-on-surface-tertiary text-center">
-                          {isRTL ? 'بعد إرسال التعديل، الكرييتف يعيد كتابة الكود — ثم اضغط "إعادة التصدير"' : 'After edit, Creative rewrites the code — then hit "Render Again"'}
+                          {isRTL ? 'بعد إرسال التعديل، المبدع يعيد كتابة الكود — ثم اضغط "إعادة التصدير"' : 'After edit, Creative rewrites the code — then hit "Render Again"'}
                         </p>
                       </div>
                     )}

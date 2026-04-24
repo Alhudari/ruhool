@@ -66,7 +66,7 @@ describe('CHAT_V2 P1 — per-agent bubble SSE contract', () => {
     }
 
     // Pretend we just received a tool_use chunk from the manager provider.
-    const specialist = 'عبدان';
+    const specialist = 'الباحث';
     const messageId = crypto.randomUUID();
 
     await writeSSE({
@@ -74,7 +74,7 @@ describe('CHAT_V2 P1 — per-agent bubble SSE contract', () => {
       data: {
         messageId,
         agentId: specialist,
-        agentDisplay: { ar: 'عبدان', en: 'abdan' },
+        agentDisplay: { ar: 'الباحث', en: 'abdan' },
         kind: 'text',
         replyToAgentId: 'manager',
       },
@@ -105,20 +105,20 @@ describe('CHAT_V2 P1 — per-agent bubble SSE contract', () => {
   it('multi-mention produces multiple independent message rows — one per specialist', async () => {
     const rows: Array<{ agentId: string; content: string; kind: string }> = [];
     const dispatches = [
-      { specialist: 'عبدان', task: 'عرّف نفسك', out: 'أنا عبدان' },
-      { specialist: 'شواشة', task: 'عرّف نفسك', out: 'أنا شواشة' },
+      { specialist: 'الباحث', task: 'عرّف نفسك', out: 'أنا الباحث' },
+      { specialist: 'المُلخِّص', task: 'عرّف نفسك', out: 'أنا المُلخِّص' },
     ];
     for (const d of dispatches) {
       rows.push({ agentId: d.specialist, content: d.out, kind: 'text' });
     }
     expect(rows).toHaveLength(2);
-    expect(new Set(rows.map((r) => r.agentId))).toEqual(new Set(['عبدان', 'شواشة']));
+    expect(new Set(rows.map((r) => r.agentId))).toEqual(new Set(['الباحث', 'المُلخِّص']));
     expect(rows.every((r) => r.kind === 'text')).toBe(true);
   });
 
   it('manager closing text after tool_use is persisted with kind="handoff"', async () => {
     const messageRows: Array<{ agentId: string; kind: string; content: string }> = [];
-    const fullResponse = 'أحلتها لعبدان';
+    const fullResponse = 'أحلتها لالباحث';
     const toolUseDispatched = true;
     const detectedAgent = 'manager';
     const CHAT_V2 = true;
@@ -135,7 +135,7 @@ describe('CHAT_V2 P1 — per-agent bubble SSE contract', () => {
     const specialist = 'abdan';
     events.push({
       event: 'message.start',
-      data: { messageId, agentId: specialist, agentDisplay: { ar: 'عبدان', en: 'Abdan' }, kind: 'text', createdAt: new Date().toISOString() },
+      data: { messageId, agentId: specialist, agentDisplay: { ar: 'الباحث', en: 'Abdan' }, kind: 'text', createdAt: new Date().toISOString() },
     });
     events.push({ event: 'message.delta', data: { messageId, text: 'نتيجة' } });
     events.push({
@@ -155,7 +155,7 @@ describe('CHAT_V2 P1 — per-agent bubble SSE contract', () => {
   });
 
   it('multi-mention fan-out emits one message.start/done per specialist in order', async () => {
-    const specialists = ['عبدان', 'شواشة'];
+    const specialists = ['الباحث', 'المُلخِّص'];
     const events: Array<{ event: string; messageId: string; agentId: string }> = [];
     for (const s of specialists) {
       const mid = crypto.randomUUID();
@@ -163,8 +163,8 @@ describe('CHAT_V2 P1 — per-agent bubble SSE contract', () => {
       events.push({ event: 'message.done', messageId: mid, agentId: s });
     }
     expect(events).toHaveLength(4);
-    expect(events[0].agentId).toBe('عبدان');
-    expect(events[2].agentId).toBe('شواشة');
+    expect(events[0].agentId).toBe('الباحث');
+    expect(events[2].agentId).toBe('المُلخِّص');
     // Each start has a matching done with the same messageId (pair invariant).
     const startIds = events.filter((e) => e.event === 'message.start').map((e) => e.messageId);
     const doneIds = events.filter((e) => e.event === 'message.done').map((e) => e.messageId);
@@ -219,7 +219,7 @@ describe('CHAT_V2 P2 — workflow → conversation bridge', () => {
       id: stepId,
       runId,
       stepIndex: 0,
-      specialist: 'عبدان',
+      specialist: 'الباحث',
       task: 'ابحث عن BIM في الكويت',
       status: 'pending',
       createdAt: new Date().toISOString(),
@@ -249,7 +249,7 @@ describe('CHAT_V2 P2 — workflow → conversation bridge', () => {
     // Before-dispatch progress bubble + after-dispatch text bubble.
     expect(posted.length).toBeGreaterThanOrEqual(2);
     expect(posted[0].kind).toBe('progress');
-    expect(posted[0].agentId).toBe('عبدان');
+    expect(posted[0].agentId).toBe('الباحث');
     expect(posted[0].content.startsWith('بديت:')).toBe(true);
     expect(posted[0].workflowStepId).toBe(stepId);
     expect(posted[1].kind).toBe('text');
@@ -266,7 +266,7 @@ describe('CHAT_V2 P2 — workflow → conversation bridge', () => {
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     });
     (store.workflowSteps as unknown as Array<WorkflowStepRecord>).push({
-      id: stepId, runId, stepIndex: 0, specialist: 'عبدان',
+      id: stepId, runId, stepIndex: 0, specialist: 'الباحث',
       task: 'مهمة فاشلة', status: 'pending',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     });
@@ -299,7 +299,7 @@ describe('CHAT_V2 P2 — workflow → conversation bridge', () => {
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     });
     (store.workflowSteps as unknown as Array<WorkflowStepRecord>).push({
-      id: stepId, runId, stepIndex: 0, specialist: 'عبدان',
+      id: stepId, runId, stepIndex: 0, specialist: 'الباحث',
       task: 't', status: 'pending',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     });
@@ -333,7 +333,7 @@ describe('CHAT_V2 BUG-3 — multi-round delegation', () => {
     // Simulate the chat.ts tool_use branch: manager emits 3 tool_use chunks
     // in a single streamed response (Anthropic parallel tool use). For each,
     // we emit message.start → dispatch → message.delta → message.done.
-    const specialists = ['عبدان', 'شواشة', 'الصفرا'];
+    const specialists = ['الباحث', 'المُلخِّص', 'الناقد'];
     for (const s of specialists) {
       const messageId = crypto.randomUUID();
       await writeSSE({
@@ -354,7 +354,7 @@ describe('CHAT_V2 BUG-3 — multi-round delegation', () => {
     const dones = sseEvents.filter((e) => e.event === 'message.done');
     expect(starts).toHaveLength(3);
     expect(dones).toHaveLength(3);
-    expect(starts.map((e) => e.data.agentId)).toEqual(['عبدان', 'شواشة', 'الصفرا']);
+    expect(starts.map((e) => e.data.agentId)).toEqual(['الباحث', 'المُلخِّص', 'الناقد']);
   });
 
   it('BUG-1 regression: tool_use dispatch does NOT also emit a legacy `text` event with the specialist output', async () => {
@@ -366,9 +366,9 @@ describe('CHAT_V2 BUG-3 — multi-round delegation', () => {
     }
 
     const messageId = crypto.randomUUID();
-    await writeSSE({ event: 'message.start', data: { messageId, agentId: 'عبدان' } });
+    await writeSSE({ event: 'message.start', data: { messageId, agentId: 'الباحث' } });
     await writeSSE({ event: 'message.delta', data: { messageId, text: 'ردي كامل' } });
-    await writeSSE({ event: 'message.done', data: { messageId, agentId: 'عبدان' } });
+    await writeSSE({ event: 'message.done', data: { messageId, agentId: 'الباحث' } });
 
     const textEvents = sseEvents.filter((e) => e.event === 'text');
     // Before the fix, one additive `text` event was also pushed, producing a
@@ -409,7 +409,7 @@ describe('CHAT_V2 BUG-A/B/C — post-fix regressions', () => {
     // closing manager bubble is a single start/delta/done triple at the end.
     const events: Array<{ event: string; agentId: string }> = [];
     // 3 specialists each with their own triple
-    for (const s of ['عبدان', 'شواشة', 'الصفرا']) {
+    for (const s of ['الباحث', 'المُلخِّص', 'الناقد']) {
       events.push({ event: 'message.start', agentId: s });
       events.push({ event: 'message.delta', agentId: s });
       events.push({ event: 'message.done', agentId: s });
@@ -426,8 +426,8 @@ describe('CHAT_V2 BUG-A/B/C — post-fix regressions', () => {
   it('BUG-C: participantAgentIds are deduped (no manager appearing multiple times)', async () => {
     const participants: string[] = ['manager'];
     const push = (id: string) => { if (!participants.includes(id)) participants.push(id); };
-    push('عبدان'); push('عبدان'); push('شواشة'); push('manager'); push('الصفرا'); push('شواشة');
-    expect(participants).toEqual(['manager', 'عبدان', 'شواشة', 'الصفرا']);
+    push('الباحث'); push('الباحث'); push('المُلخِّص'); push('manager'); push('الناقد'); push('المُلخِّص');
+    expect(participants).toEqual(['manager', 'الباحث', 'المُلخِّص', 'الناقد']);
     expect(new Set(participants).size).toBe(participants.length);
   });
 

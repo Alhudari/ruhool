@@ -1,6 +1,8 @@
 import type { Hono } from 'hono';
 import crypto from 'node:crypto';
 import type { StoreData, TaskItem, ActivityRecord } from '../store/types.js';
+import { spawnHabitsForToday, shouldSpawnForDate, todayIsoDate } from '../services/habit-spawner.js';
+import { triggerGoogleTasksSync } from '../services/google-tasks-trigger.js';
 
 export interface TasksRoutesDeps {
   getStore: () => StoreData;
@@ -63,10 +65,25 @@ export function registerTasksRoutes(app: Hono, deps: TasksRoutesDeps): void {
       createdAt: now,
       updatedAt: now,
       completedAt: null,
+      startTime: body.startTime ?? null,
+      endTime: body.endTime ?? null,
+      allDay: body.allDay ?? false,
+      workspaceId: body.workspaceId,
+      crossWorkspace: body.crossWorkspace ?? false,
+      isToday: body.isToday ?? false,
+      scheduledFor: body.scheduledFor ?? null,
+      isHabit: body.isHabit ?? false,
+      habitFrequency: body.habitFrequency,
+      habitDays: body.habitDays,
+      habitTemplateId: body.habitTemplateId,
+      durationMinutes: body.durationMinutes,
+      habitStartDate: body.habitStartDate ?? null,
+      habitEndDate: body.habitEndDate ?? null,
     };
     store.tasks.push(task);
     logActivity('task', `Task created: ${task.title}`, task.notes || '', { agentId: 'tasks-agent', metadata: { taskId: task.id } });
     saveStore();
+    triggerGoogleTasksSync();
     return c.json(task, 201);
   });
 
@@ -81,6 +98,7 @@ export function registerTasksRoutes(app: Hono, deps: TasksRoutesDeps): void {
     if (body.completed === true && !task.completedAt) task.completedAt = new Date().toISOString();
     if (body.completed === false) task.completedAt = null;
     saveStore();
+    triggerGoogleTasksSync();
     return c.json(task);
   });
 
@@ -93,6 +111,7 @@ export function registerTasksRoutes(app: Hono, deps: TasksRoutesDeps): void {
     const deleted = store.tasks.splice(idx, 1)[0];
     logActivity('task', `Task deleted: ${deleted.title}`, '', { agentId: 'tasks-agent', metadata: { taskId: deleted.id } });
     saveStore();
+    triggerGoogleTasksSync();
     return c.json({ ok: true });
   });
 
@@ -106,6 +125,7 @@ export function registerTasksRoutes(app: Hono, deps: TasksRoutesDeps): void {
     task.updatedAt = new Date().toISOString();
     task.completedAt = task.completed ? new Date().toISOString() : null;
     saveStore();
+    triggerGoogleTasksSync();
     return c.json(task);
   });
 
@@ -121,17 +141,36 @@ export function registerTasksRoutes(app: Hono, deps: TasksRoutesDeps): void {
     return c.json(task);
   });
 
+  // R17 — per-workspace task lists. Query `?workspaceId=phd|life|...`
+  // returns that workspace's categories. No query → legacy flat array
+  // (kept for backward compat with older UI versions).
   app.get('/api/tasks/lists', (c) => {
     const store = getStore();
-    if (!store.taskLists) store.taskLists = ['\u0639\u0627\u0645', '\u0627\u0644\u062f\u0643\u062a\u0648\u0631\u0627\u0647', '\u062c\u0645\u0639\u064a\u0629 \u0627\u0644\u0645\u0647\u0646\u062f\u0633\u064a\u0646', '\u0627\u0644\u0645\u062d\u062a\u0648\u0649', '\u0627\u0644\u0645\u0634\u0627\u0631\u064a\u0639'];
+    const workspaceId = c.req.query('workspaceId');
+    const byWs = (store as { taskListsByWorkspace?: Record<string, string[]> }).taskListsByWorkspace;
+    if (workspaceId) {
+      if (!byWs) return c.json([]);
+      return c.json(byWs[workspaceId] ?? []);
+    }
+    if (!store.taskLists) store.taskLists = ['عام'];
     return c.json(store.taskLists);
   });
 
   app.post('/api/tasks/lists', async (c) => {
     const store = getStore();
-    if (!store.taskLists) store.taskLists = [];
-    const body = await c.req.json<{ name: string }>();
+    const body = await c.req.json<{ name: string; workspaceId?: string }>();
     if (!body.name) return c.json({ error: 'name required' }, 400);
+    const wsId = body.workspaceId;
+    if (wsId) {
+      const s = store as unknown as { taskListsByWorkspace?: Record<string, string[]> };
+      if (!s.taskListsByWorkspace) s.taskListsByWorkspace = {};
+      if (!s.taskListsByWorkspace[wsId]) s.taskListsByWorkspace[wsId] = [];
+      if (s.taskListsByWorkspace[wsId].includes(body.name)) return c.json({ error: 'List already exists' }, 409);
+      s.taskListsByWorkspace[wsId].push(body.name);
+      saveStore();
+      return c.json({ ok: true, workspaceId: wsId, lists: s.taskListsByWorkspace[wsId] }, 201);
+    }
+    if (!store.taskLists) store.taskLists = [];
     if (store.taskLists.includes(body.name)) return c.json({ error: 'List already exists' }, 409);
     store.taskLists.push(body.name);
     saveStore();
@@ -140,14 +179,30 @@ export function registerTasksRoutes(app: Hono, deps: TasksRoutesDeps): void {
 
   app.delete('/api/tasks/lists/:name', (c) => {
     const store = getStore();
-    if (!store.taskLists) store.taskLists = [];
     const name = decodeURIComponent(c.req.param('name'));
+    const wsId = c.req.query('workspaceId');
+    if (wsId) {
+      const s = store as unknown as { taskListsByWorkspace?: Record<string, string[]> };
+      const list = s.taskListsByWorkspace?.[wsId];
+      if (!list) return c.json({ error: 'workspace has no lists' }, 404);
+      const idx = list.indexOf(name);
+      if (idx === -1) return c.json({ error: 'Not found' }, 404);
+      list.splice(idx, 1);
+      if (store.tasks) {
+        for (const task of store.tasks) {
+          if ((task as { workspaceId?: string }).workspaceId === wsId && task.list === name) task.list = 'عام';
+        }
+      }
+      saveStore();
+      return c.json({ ok: true, workspaceId: wsId, lists: list });
+    }
+    if (!store.taskLists) store.taskLists = [];
     const idx = store.taskLists.indexOf(name);
     if (idx === -1) return c.json({ error: 'Not found' }, 404);
     store.taskLists.splice(idx, 1);
     if (store.tasks) {
       for (const task of store.tasks) {
-        if (task.list === name) task.list = '\u0639\u0627\u0645';
+        if (task.list === name) task.list = 'عام';
       }
     }
     saveStore();
@@ -183,5 +238,97 @@ export function registerTasksRoutes(app: Hono, deps: TasksRoutesDeps): void {
     store.taskPrefs = { ...(store.taskPrefs || {}), ...(body || {}) };
     saveStore();
     return c.json(store.taskPrefs);
+  });
+
+  // ── Round 6 — Habits + Today + Progress ─────────────────────────
+  // Spawn logic lives in services/habit-spawner.ts so the hourly
+  // worker and this endpoint stay in lockstep.
+
+  // GET /api/tasks/today — tasks due today + scheduled today + flagged
+  // today across all workspaces. Habits themselves are not returned;
+  // their dated instances are.
+  app.get('/api/tasks/today', (c) => {
+    const store = getStore();
+    if (!store.tasks) store.tasks = [];
+    const today = todayIsoDate();
+    const rows = store.tasks.filter((t) => {
+      if (t.isHabit) return false;
+      if (t.completed && t.completedAt && t.completedAt.slice(0, 10) !== today) return false;
+      if (t.isToday) return true;
+      if (t.scheduledFor === today) return true;
+      if (t.dueDate === today) return true;
+      return false;
+    });
+    return c.json(rows);
+  });
+
+  // POST /api/tasks/habits/spawn-due — idempotently spawns today's
+  // instance of every habit that needs one. Called manually by the UI
+  // or by the hourly scheduler tick.
+  app.post('/api/tasks/habits/spawn-due', (c) => {
+    const store = getStore();
+    const created = spawnHabitsForToday(store);
+    if (created.length > 0) saveStore();
+    return c.json({ created: created.length, instances: created });
+  });
+
+  // GET /api/tasks/habits/:id/stats — progress figures for a habit.
+  // Returns streak, completion rate, and a 30-day history grid.
+  app.get('/api/tasks/habits/:id/stats', (c) => {
+    const store = getStore();
+    const id = c.req.param('id');
+    const habit = (store.tasks ?? []).find((t) => t.id === id && t.isHabit);
+    if (!habit) return c.json({ error: 'habit not found' }, 404);
+
+    const instances = (store.tasks ?? []).filter((t) => t.habitTemplateId === id);
+    const completedByDate = new Map<string, boolean>();
+    for (const inst of instances) {
+      const d = inst.scheduledFor ?? inst.completedAt?.slice(0, 10);
+      if (d) completedByDate.set(d, inst.completed);
+    }
+
+    // 30-day history (oldest → newest).
+    const history: Array<{ date: string; done: boolean; expected: boolean }> = [];
+    const today = new Date();
+    for (let i = 29; i >= 0; i -= 1) {
+      const d = new Date(today.getTime() - i * 24 * 60 * 60 * 1000);
+      const iso = d.toISOString().slice(0, 10);
+      const expected = shouldSpawnForDate(habit, iso);
+      const done = completedByDate.get(iso) ?? false;
+      history.push({ date: iso, done, expected });
+    }
+
+    // Current streak: walk back from today over EXPECTED days until a miss.
+    let currentStreak = 0;
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      const h = history[i];
+      if (!h.expected) continue;
+      if (h.done) currentStreak += 1;
+      else break;
+    }
+
+    // Longest streak in the 30-day window.
+    let longestStreak = 0;
+    let run = 0;
+    for (const h of history) {
+      if (!h.expected) continue;
+      if (h.done) { run += 1; longestStreak = Math.max(longestStreak, run); }
+      else run = 0;
+    }
+
+    const expectedDays = history.filter((h) => h.expected).length;
+    const completedDays = history.filter((h) => h.expected && h.done).length;
+    const completionRate = expectedDays > 0 ? completedDays / expectedDays : 0;
+
+    return c.json({
+      habitId: id,
+      totalInstances: instances.length,
+      completedDays,
+      expectedDays,
+      completionRate: Number(completionRate.toFixed(3)),
+      currentStreak,
+      longestStreak,
+      history,
+    });
   });
 }
