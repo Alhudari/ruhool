@@ -11,6 +11,7 @@ import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
+import { WikilinkEditor } from '@/components/shared';
 
 interface GRS2Info {
   input?: string;
@@ -96,6 +97,18 @@ interface FullSupervisionDoc {
 }
 
 const VAULT_NAME = 'PhD';
+
+interface PlatformScopePoint {
+  id: string;
+  number: number;
+  title: string;
+  description?: string;
+  phase?: string;
+  status?: 'active' | 'completed' | 'paused' | 'dropped';
+  notes?: string;
+  tags?: string[];
+  links?: string[];
+}
 
 const PROSE_CLASSES =
   'text-sm text-on-surface leading-relaxed break-words prose prose-sm max-w-none ' +
@@ -219,13 +232,33 @@ export function SupervisionDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('overview');
   const [openDoc, setOpenDoc] = useState<string | null>(null);
+  const [platformScopePoints, setPlatformScopePoints] = useState<PlatformScopePoint[]>([]);
+  const [scopeEdits, setScopeEdits] = useState<Record<string, string>>({});
 
   const load = () => {
     setLoading(true); setError(null);
-    apiFetch<SupervisionData>('/api/vault/supervision')
-      .then(setData)
+    Promise.all([
+      apiFetch<SupervisionData>('/api/vault/supervision'),
+      apiFetch<{ scopePoints: PlatformScopePoint[] }>('/api/scope-points').catch(() => ({ scopePoints: [] })),
+    ])
+      .then(([sup, spRes]) => {
+        setData(sup);
+        setPlatformScopePoints(spRes.scopePoints);
+      })
       .catch((e) => setError(e instanceof Error ? e.message : 'failed'))
       .finally(() => setLoading(false));
+  };
+
+  const saveScopeNotes = async (sp: PlatformScopePoint) => {
+    const notes = scopeEdits[sp.id] ?? sp.notes ?? '';
+    try {
+      const updated = await apiFetch<PlatformScopePoint>(`/api/scope-points/${sp.id}`, {
+        method: 'PATCH', body: JSON.stringify({ notes }),
+      });
+      setPlatformScopePoints((prev) =>
+        prev.map((p) => p.id === updated.id ? updated : p)
+      );
+    } catch { /* silently ignore — user still has their text */ }
   };
 
   useEffect(load, []);
@@ -641,42 +674,118 @@ export function SupervisionDashboard() {
 
         {/* SCOPE POINTS */}
         {tab === 'scope-points' && (
-          <div className="space-y-4">
-            <p className="text-xs text-on-surface-tertiary">
-              {isRTL
-                ? 'النقاط التفصيلية لنطاق البحث — مستمدة من التوصيات مع المشرف.'
-                : 'Detailed scope points for the research — derived from supervisor recommendations.'}
-            </p>
-            <div className="grid md:grid-cols-2 gap-4">
-              {!data?.scopePoints.length ? (
-                <p className="text-sm text-on-surface-tertiary py-10 col-span-2 text-center">
-                  {isRTL ? 'لا توجد نقاط نطاق' : 'No scope points found'}
+          <div className="space-y-6">
+
+            {/* Platform scope points — editable with WikilinkEditor */}
+            {platformScopePoints.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-on-surface">
+                    {isRTL ? 'نقاط النطاق — المنصة' : 'Scope Points — Platform'}
+                  </h3>
+                  <span className="text-xs text-on-surface-tertiary">
+                    {platformScopePoints.length} {isRTL ? 'نقطة' : 'points'}
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {platformScopePoints.sort((a, b) => a.number - b.number).map((sp) => {
+                    const statusColor = sp.status === 'completed'
+                      ? 'text-emerald-500 bg-emerald-500/10'
+                      : sp.status === 'paused'
+                        ? 'text-amber-500 bg-amber-500/10'
+                        : 'text-blue-500 bg-blue-500/10';
+                    const statusLabel = sp.status === 'completed'
+                      ? (isRTL ? 'مكتمل' : 'Done')
+                      : sp.status === 'paused'
+                        ? (isRTL ? 'موقوف' : 'Paused')
+                        : (isRTL ? 'نشط' : 'Active');
+                    const notes = scopeEdits[sp.id] ?? sp.notes ?? '';
+                    return (
+                      <div key={sp.id} className="rounded-xl border border-border bg-surface-secondary p-4">
+                        <div className="flex items-start gap-3 mb-3">
+                          <div className="h-8 w-8 rounded-lg bg-accent/10 text-accent flex items-center justify-center shrink-0 text-xs font-bold">
+                            S{sp.number}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start gap-2">
+                              <h4 className="text-sm font-semibold text-on-surface flex-1">{sp.title}</h4>
+                              <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0', statusColor)}>
+                                {statusLabel}
+                              </span>
+                            </div>
+                            {sp.description && (
+                              <p className="text-xs text-on-surface-tertiary mt-1">{sp.description}</p>
+                            )}
+                            {sp.phase && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface-tertiary text-on-surface-tertiary mt-1 inline-block">{sp.phase}</span>
+                            )}
+                          </div>
+                        </div>
+                        <WikilinkEditor
+                          value={notes}
+                          onChange={(val) => setScopeEdits((prev) => ({ ...prev, [sp.id]: val }))}
+                          onBlur={() => saveScopeNotes(sp)}
+                          placeholder={isRTL ? 'أضف ملاحظات أو [[وصلات]]...' : 'Add notes or [[wikilinks]]...'}
+                          rows={2}
+                          dir={isRTL ? 'rtl' : 'ltr'}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Vault scope points — read-only from Obsidian */}
+            {(data?.scopePoints.length ?? 0) > 0 && (
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-on-surface">
+                  {isRTL ? 'نقاط النطاق — مخزن الملاحظات' : 'Scope Points — Vault (Obsidian)'}
+                </h3>
+                <p className="text-xs text-on-surface-tertiary -mt-1">
+                  {isRTL
+                    ? 'ملفات من مجلد الإشراف — مستمدة من التوصيات مع المشرف.'
+                    : 'Files from supervision folder — derived from supervisor recommendations.'}
                 </p>
-              ) : (
-                data.scopePoints.map((f, idx) => (
-                  <button
-                    key={f.path}
-                    onClick={() => setOpenDoc(f.path)}
-                    style={{ animationDelay: `${idx * 40}ms` }}
-                    className="text-start rounded-xl border border-border bg-surface-secondary p-4 hover:border-accent hover:bg-surface-tertiary transition-all group animate-[fadeInUp_0.35s_ease-out_both]"
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="h-8 w-8 rounded-lg bg-accent/10 text-accent flex items-center justify-center shrink-0 text-xs font-bold group-hover:scale-110 transition-transform">
-                        {f.name.match(/^S(\d+)/)?.[1] ?? (idx + 1)}
+                <div className="grid md:grid-cols-2 gap-4">
+                  {data!.scopePoints.map((f, idx) => (
+                    <button
+                      key={f.path}
+                      onClick={() => setOpenDoc(f.path)}
+                      style={{ animationDelay: `${idx * 40}ms` }}
+                      className="text-start rounded-xl border border-border bg-surface-secondary p-4 hover:border-accent hover:bg-surface-tertiary transition-all group animate-[fadeInUp_0.35s_ease-out_both]"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="h-8 w-8 rounded-lg bg-accent/10 text-accent flex items-center justify-center shrink-0 text-xs font-bold group-hover:scale-110 transition-transform">
+                          {f.name.match(/^S(\d+)/)?.[1] ?? (idx + 1)}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h4 className="text-sm font-semibold text-on-surface group-hover:text-accent transition-colors line-clamp-2">
+                            {f.title || f.name}
+                          </h4>
+                          {f.preview && (
+                            <p className="text-xs text-on-surface-secondary mt-1 line-clamp-2">{f.preview}</p>
+                          )}
+                        </div>
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <h4 className="text-sm font-semibold text-on-surface group-hover:text-accent transition-colors line-clamp-2">
-                          {f.title || f.name}
-                        </h4>
-                        {f.preview && (
-                          <p className="text-xs text-on-surface-secondary mt-1 line-clamp-2">{f.preview}</p>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Empty state */}
+            {!data?.scopePoints.length && !platformScopePoints.length && (
+              <div className="py-16 text-center">
+                <Target className="h-10 w-10 text-on-surface-tertiary opacity-30 mx-auto mb-3" />
+                <p className="text-sm font-medium text-on-surface-tertiary">
+                  {isRTL ? 'لا توجد نقاط نطاق بعد' : 'No scope points yet'}
+                </p>
+                <p className="text-xs text-on-surface-tertiary mt-1">
+                  {isRTL ? 'أضف نقاطاً من Obsidian أو من لوحة الإشراف' : 'Add points via Obsidian or the supervision panel'}
+                </p>
+              </div>
+            )}
           </div>
         )}
 
