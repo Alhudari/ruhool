@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Send,
   Paperclip,
@@ -153,6 +153,7 @@ interface AgentData {
 export function HomePage() {
   const { language, setActiveConversation, activeConversationId } = useAppStore();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [message, setMessage] = useState('');
   const [isChatting, setIsChatting] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -173,6 +174,16 @@ export function HomePage() {
   const [agentSearch, setAgentSearch] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isRTL = language === 'ar';
+
+  // Pre-fill from ?q= URL param (e.g. from papers page "chat with agent" button)
+  useEffect(() => {
+    const q = searchParams?.get('q');
+    if (q && !isChatting) {
+      setMessage(q);
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Ctrl+K / Cmd+K focuses the chat input
   useEffect(() => {
