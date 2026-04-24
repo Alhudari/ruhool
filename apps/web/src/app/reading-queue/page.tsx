@@ -1,10 +1,2 @@
-import { AppShell } from '@/components/layout/app-shell';
-import { ReadingQueuePage } from '@/components/reading-queue/ReadingQueuePage';
-
-export default function ReadingQueueRoute() {
-  return (
-    <AppShell>
-      <ReadingQueuePage />
-    </AppShell>
-  );
-}
+import { redirect } from 'next/navigation';
+export default function ReadingQueueRoute() { redirect('/library?readingStatus=to-read'); }

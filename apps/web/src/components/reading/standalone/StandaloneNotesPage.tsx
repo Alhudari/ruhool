@@ -249,26 +249,6 @@ export function StandaloneNotesPage({ initialSessionId }: { initialSessionId: st
     }
   };
 
-  // ── Save to Obsidian ──────────────────────────────────────────────
-  const saveToObsidian = async () => {
-    if (!session) return;
-    setSaving(true);
-    try {
-      await flushSave(body); // ensure latest body is persisted
-      await apiFetch(`/api/shwasha/sessions/${session.id}/save-to-obsidian`, {
-        method: 'POST',
-        body: JSON.stringify({}),
-      });
-      setSavedAt(new Date().toISOString());
-      // Also flush metadata
-      await saveMeta();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'save failed');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   // ── Loading / error states ────────────────────────────────────────
   if (loading) return (
     <div className="flex-1 flex items-center justify-center bg-surface">

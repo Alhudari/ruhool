@@ -40,7 +40,6 @@ interface MeetingSession {
   updatedAt: string;
   title: string;
   record: MeetingRecord | null;
-  obsidianPath: string | null;
   draft: string;
   chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
 }
@@ -229,24 +228,6 @@ export function MeetingsPage() {
       setChatMsgs((prev) => [...prev, { role: 'assistant', content: `Error: ${e instanceof Error ? e.message : String(e)}` }]);
     } finally {
       setIsChatting(false);
-    }
-  };
-
-  const saveToObsidian = async () => {
-    if (!active?.record) return;
-    setIsSaving(true);
-    setError(null);
-    try {
-      const res = await apiFetch<{ ok: boolean; path: string; meetingNo: number }>(
-        `/api/meetings/sessions/${active.id}/save`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
-      );
-      setActive((prev) => prev ? { ...prev, obsidianPath: res.path } : prev);
-      loadSessions();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Save failed');
-    } finally {
-      setIsSaving(false);
     }
   };
 

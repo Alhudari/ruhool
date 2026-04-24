@@ -138,11 +138,6 @@ function DocModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const openInObsidian = () => {
-    const url = `obsidian://open?vault=${VAULT_NAME}&file=${encodeURIComponent(path.replace(/\.md$/, ''))}`;
-    window.open(url, '_blank');
-  };
-
   return (
     <div
       className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-[fadeInUp_0.2s_ease-out]"

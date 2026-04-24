@@ -244,7 +244,6 @@ export function SourcesPage() {
             {filtered.map((s) => {
               const Icon = KIND_ICONS[s.kind] ?? Box;
               const cfg = KIND_COLORS[s.kind];
-              const obsidianUrl = `obsidian://open?vault=${VAULT_NAME}&file=${s.path.split('/').map(encodeURIComponent).join('/').replace(/\.md$/, '')}`;
               return (
                 <div key={s.path} className="rounded-xl border border-border bg-surface-secondary hover:border-border-hover transition-colors p-4 flex flex-col gap-2">
                   <div className="flex items-start gap-2">

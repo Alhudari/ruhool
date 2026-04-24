@@ -83,7 +83,7 @@ function ToastItem({
   return (
     <div className={cn(
       'relative flex items-start gap-3 rounded-xl border bg-surface shadow-2xl px-4 py-3.5 min-w-[280px] max-w-[420px]',
-      'animate-in slide-in-from-bottom-4 fade-in duration-200'
+      'toast-enter'
     )}>
       {/* Progress bar */}
       <div className="absolute bottom-0 left-0 right-0 h-0.5 rounded-b-xl bg-surface-tertiary overflow-hidden">
