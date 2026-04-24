@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
 import { ItemMenu, ShowArchivedToggle } from '@/components/ui/item-menu';
+import { AgentOrgCard } from './agent-org-card';
 
 interface Agent {
   id: string;
@@ -230,6 +231,11 @@ export function AgentsListPage() {
             })}
           </div>
         )}
+      </div>
+
+      {/* Agent Organization — Dispatch Hierarchy */}
+      <div className="mt-8 border border-border rounded-xl p-4 bg-surface-variant/30">
+        <AgentOrgCard />
       </div>
     </div>
   );
