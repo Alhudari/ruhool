@@ -15,6 +15,7 @@ import {
   Library,
   Monitor,
   Quote,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -137,6 +138,27 @@ export function SourceSelector() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Phase 5: Library entity pre-reading gate
+  interface LibEntityMin { id: string; title: string; type: string; zoteroKey?: string }
+  const [entitySearch, setEntitySearch] = useState('');
+  const [entityResults, setEntityResults] = useState<LibEntityMin[]>([]);
+  const [linkedEntity, setLinkedEntity] = useState<LibEntityMin | null>(null);
+  const [entitySearchOpen, setEntitySearchOpen] = useState(false);
+  const [skipEntityGate, setSkipEntityGate] = useState(false);
+
+  useEffect(() => {
+    if (!entitySearch.trim()) { setEntityResults([]); return; }
+    const t = setTimeout(async () => {
+      try {
+        const r = await apiFetch<{ entities: LibEntityMin[] }>(
+          `/api/library/entities?search=${encodeURIComponent(entitySearch)}&limit=8`
+        );
+        setEntityResults(r.entities ?? []);
+      } catch { setEntityResults([]); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [entitySearch]);
+
   const [zoteroKey, setZoteroKey] = useState('');
   const [directUrl, setDirectUrl] = useState('');
   const [driveUrl, setDriveUrl] = useState('');
@@ -168,6 +190,7 @@ export function SourceSelector() {
     if (override && override !== mindBlock.trim()) {
       body.mindOverride = override;
     }
+    if (linkedEntity) body.libraryEntityId = linkedEntity.id;
     return body;
   };
 
@@ -355,6 +378,62 @@ export function SourceSelector() {
           ? 'اختر مصدر المادة التي تود أن يساعدك المُلخِّص في قراءتها وتحليلها.'
           : 'Pick a source and Al-Mulakhkhis will help you read and analyze it, page by page.'}
       </p>
+
+      {/* Phase 5: Library entity pre-reading gate */}
+      <div className="mb-6 rounded-xl border border-border bg-surface-secondary/40 p-4">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-semibold text-on-surface-tertiary uppercase tracking-wider">
+            {isRTL ? 'ربط بكيان في المكتبة (موصى به)' : 'Link to Library Entity (recommended)'}
+          </p>
+          {!linkedEntity && !skipEntityGate && (
+            <button onClick={() => setSkipEntityGate(true)}
+              className="text-[11px] text-on-surface-tertiary hover:text-on-surface underline">
+              {isRTL ? 'تخطّ' : 'Skip'}
+            </button>
+          )}
+        </div>
+        {linkedEntity ? (
+          <div className="flex items-center gap-3 rounded-lg border border-success/30 bg-success/5 px-3 py-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-on-surface truncate">{linkedEntity.title}</p>
+              <p className="text-[11px] text-on-surface-tertiary">{linkedEntity.type}</p>
+            </div>
+            <button onClick={() => { setLinkedEntity(null); setEntitySearch(''); }}
+              className="text-on-surface-tertiary hover:text-error shrink-0">
+              <X size={14} />
+            </button>
+          </div>
+        ) : skipEntityGate ? (
+          <div className="flex items-center gap-2 text-xs text-on-surface-tertiary">
+            <span>{isRTL ? 'ستُبدأ الجلسة بدون ربط.' : 'Session will start without a library link.'}</span>
+            <button onClick={() => setSkipEntityGate(false)} className="text-accent hover:underline">
+              {isRTL ? 'ربط' : 'Link one'}
+            </button>
+          </div>
+        ) : (
+          <div className="relative">
+            <input
+              value={entitySearch}
+              onChange={e => { setEntitySearch(e.target.value); setEntitySearchOpen(true); }}
+              onFocus={() => setEntitySearchOpen(true)}
+              placeholder={isRTL ? 'ابحث في المكتبة...' : 'Search library entities...'}
+              className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+            {entitySearchOpen && entityResults.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-lg shadow-lg z-10 divide-y divide-border">
+                {entityResults.map(e => (
+                  <button key={e.id}
+                    onClick={() => { setLinkedEntity(e); setEntitySearch(e.title); setEntitySearchOpen(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-start hover:bg-surface-secondary">
+                    <span className="flex-1 truncate text-on-surface">{e.title}</span>
+                    <span className="text-[10px] text-on-surface-tertiary shrink-0">{e.type}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
         {SOURCES.map((s) => {

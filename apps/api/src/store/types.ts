@@ -282,6 +282,14 @@ export interface ReadingSession {
   impression?: string;
   /** English impression for language practice */
   impressionEn?: string;
+  /** Phase 4+5: link to a Library entity */
+  libraryEntityId?: string;
+  /** Phase 5: reading status for this session */
+  readingStatus?: ReadingStatus;
+  /** Phase 5: reading depth */
+  readingDepth?: ReadingDepth;
+  /** Phase 5: pause note (why paused) */
+  pauseNote?: string;
   createdAt: string;
   updatedAt: string;
   archived?: boolean;
