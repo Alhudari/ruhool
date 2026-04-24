@@ -493,35 +493,33 @@ import { createImageService } from './services/generation/images.js';
 import { createGenerationAudioService } from './services/generation/audio.js';
 import { createVideoService } from './services/generation/video.js';
 
-// A-3: Agent Task Worker — polls every 30s, runs due tasks directly via specialistsDispatch
-startAgentTaskWorker({
-  getStore: () => store,
-  saveStore,
-  runTask: async (task) => {
-    if (task.prompt.startsWith('reminder:')) {
-      return task.prompt.replace('reminder:', '').trim();
-    }
-    const model = 'claude-sonnet-4-6';
-    const provider = pickProviderForModel(model);
-    if (!provider) throw new Error('no provider for agent task worker');
-    const result = await specialistsDispatchImpl({
-      specialist: task.agentId,
-      task: task.prompt,
-      priorMessages: [],
-      roundNumber: 1,
-      deps: {
-        provider,
-        model,
-        logger: { info: (o, m) => bootLogger.info(o, m) },
-        logActivity: ({ from, to, task: t }) => {
-          logActivity('task', `${from} → ${to}`, t.slice(0, 200), { agentId: to });
-        },
-        from: 'worker',
+// A-3/A-5: shared runTask — used by both the worker and the pipelines route
+const agentTaskRunTask = async (task: import('./store/types.js').AgentTaskRecord): Promise<string> => {
+  if (task.prompt.startsWith('reminder:')) {
+    return task.prompt.replace('reminder:', '').trim();
+  }
+  const model = 'claude-sonnet-4-6';
+  const provider = pickProviderForModel(model);
+  if (!provider) throw new Error('no provider for agent task worker');
+  const result = await specialistsDispatchImpl({
+    specialist: task.agentId,
+    task: task.prompt,
+    priorMessages: [],
+    roundNumber: 1,
+    deps: {
+      provider,
+      model,
+      logger: { info: (o, m) => bootLogger.info(o, m) },
+      logActivity: ({ from, to, task: t }) => {
+        logActivity('task', `${from} → ${to}`, t.slice(0, 200), { agentId: to });
       },
-    });
-    return result.output;
-  },
-});
+      from: 'worker',
+    },
+  });
+  return result.output;
+};
+
+startAgentTaskWorker({ getStore: () => store, saveStore, runTask: agentTaskRunTask });
 
 // ─── Phase 5: generation services ───
 const imageService = createImageService({
@@ -658,6 +656,7 @@ const workflowOrchestrator = createWorkflowOrchestrator({
 
 registerAllRoutes(app, {
   serviceHealth, getStore: () => store, saveStore, logger: bootLogger,
+  agentTaskRunTask,
   createNotification, getAgentNotificationSettings,
   saveNoteFile, deleteNoteFile, logActivity,
   anthropicCache: _anthropicCache, builtinSystemPrompts: BUILTIN_SYSTEM_PROMPTS,

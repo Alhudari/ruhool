@@ -1121,6 +1121,8 @@ export interface StoreData {
   timezones?: { primary: string; secondary?: string };
   // ---- A-2: Agent Task Queue ----
   agentTasks?: AgentTaskRecord[];
+  // ---- A-5: Overnight Pipelines ----
+  agentPipelines?: AgentPipelineRecord[];
 }
 
 export interface ProjectFile {
@@ -1292,4 +1294,32 @@ export interface AgentTaskRecord {
   deletedAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// ─── A-5: Overnight Pipeline ─────────────────────────────────────────────────
+
+export interface AgentPipelineStep {
+  stepIndex: number;
+  agentId: string;
+  /** Supports {{input}}, {{step_N_output}}, {{documents}} */
+  promptTemplate: string;
+  label: string | null;
+}
+
+export interface AgentPipelineRecord {
+  id: string;
+  name: { en: string; ar: string };
+  steps: AgentPipelineStep[];
+  status: 'draft' | 'scheduled' | 'running' | 'done' | 'failed';
+  scheduledFor: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  currentStepIndex: number;
+  stepOutputs: Record<number, string>;
+  documents: string[];
+  reportOnComplete: boolean;
+  reportSubject: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
 }

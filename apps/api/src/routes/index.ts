@@ -96,6 +96,7 @@ import { registerNotificationRulesRoutes, seedBuiltInRules } from './notificatio
 import { registerLibraryEntitiesRoutes } from './library-entities.js';
 import { registerPlatformTrashRoutes } from './platform-trash.js';
 import { registerAgentTasksRoutes } from './agent-tasks.js';
+import { registerAgentPipelinesRoutes } from './agent-pipelines.js';
 
 // Accept a wide superset deps bag; each registrar picks what it needs.
 // Using `unknown` + cast inside to avoid re-declaring every registrar's typed Deps here.
@@ -205,6 +206,7 @@ export function registerAllRoutes(app: Hono, deps: Record<string, unknown>): voi
   registerPlatformTrashRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
   registerNotificationRulesRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
   registerAgentTasksRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
+  registerAgentPipelinesRoutes(app, { getStore: d.getStore, saveStore: d.saveStore, runTask: d.agentTaskRunTask });
 
   // Seed built-in notification rules on first run (idempotent)
   const _initStore = d.getStore();

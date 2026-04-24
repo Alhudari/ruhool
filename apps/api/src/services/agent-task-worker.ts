@@ -14,6 +14,27 @@ export function startAgentTaskWorker(deps: WorkerDeps): () => void {
 
   const tick = async () => {
     const store = getStore();
+
+    // Scheduled pipelines (A-5)
+    const duePipelines = (store.agentPipelines ?? []).filter(
+      (p) =>
+        p.status === 'scheduled' &&
+        !p.deletedAt &&
+        p.scheduledFor != null &&
+        new Date(p.scheduledFor) <= new Date()
+    );
+    if (duePipelines.length > 0) {
+      // lazy import to avoid circular dep at module load time
+      const { runPipeline } = await import('../routes/agent-pipelines.js');
+      for (const p of duePipelines) {
+        p.stepOutputs = {};
+        p.currentStepIndex = 0;
+        p.startedAt = null;
+        p.completedAt = null;
+        void runPipeline(p, { getStore, saveStore, runTask });
+      }
+    }
+
     if (!store.agentTasks) return;
 
     const now = new Date();
