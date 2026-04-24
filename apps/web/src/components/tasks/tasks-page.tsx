@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   CheckSquare, Plus, Search, List, LayoutGrid, Pin, PinOff,
   Trash2, Loader2, Calendar, Clock, Tag, ChevronDown, ChevronRight,
-  X, Check, Circle, Square, Flag,
+  X, Check, Circle, Square, Flag, MessageSquare,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
@@ -106,6 +107,7 @@ function isOverdue(task: TaskItem): boolean {
 export function TasksPage() {
   const { language } = useAppStore();
   const isRTL = language === 'ar';
+  const router = useRouter();
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [lists, setLists] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -528,6 +530,14 @@ export function TasksPage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => router.push(`/?q=${encodeURIComponent(isRTL ? '@مهام ساعدني في تنظيم مهامي اليوم' : '@tasks-agent Help me organize my tasks for today')}`)}
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+            title={isRTL ? 'تحدث مع مهام' : 'Chat with Maham'}
+          >
+            <MessageSquare size={14} />
+            {isRTL ? 'مهام' : 'Maham'}
+          </button>
           <button
             onClick={() => setView('list')}
             className={cn('p-2 rounded-lg transition-colors', view === 'list' ? 'bg-surface-secondary text-on-surface' : 'text-on-surface-tertiary hover:text-on-surface')}
