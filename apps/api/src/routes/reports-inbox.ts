@@ -22,7 +22,12 @@ export function registerReportsInboxRoutes(app: Hono, deps: ReportsInboxRoutesDe
   // the full body.
   app.get('/api/reports/inbox', (c) => {
     const store = getStore();
-    const all = (store.reportInbox ?? []);
+    const showArchived = c.req.query('archived') === 'true';
+    const all = (store.reportInbox ?? []).filter(i => {
+      if (i.deletedAt) return false;
+      if (!showArchived && i.archivedAt) return false;
+      return true;
+    });
     const total = all.length;
     const rawLimit = parseInt(c.req.query('limit') ?? '50', 10);
     const rawOffset = parseInt(c.req.query('offset') ?? '0', 10);
@@ -54,25 +59,44 @@ export function registerReportsInboxRoutes(app: Hono, deps: ReportsInboxRoutesDe
     return c.json(item);
   });
 
-  // PATCH /api/reports/inbox/:id  { read?: boolean; starred?: boolean }
+  // PATCH /api/reports/inbox/:id  { read?, starred?, archived? }
   app.patch('/api/reports/inbox/:id', async (c) => {
     const store = getStore();
     const item = (store.reportInbox ?? []).find((i) => i.id === c.req.param('id'));
     if (!item) return c.json({ error: 'not found' }, 404);
-    const body = await c.req.json().catch(() => ({})) as { read?: boolean; starred?: boolean };
+    const body = await c.req.json().catch(() => ({})) as { read?: boolean; starred?: boolean; archived?: boolean };
     if (typeof body.read === 'boolean') item.read = body.read;
     if (typeof body.starred === 'boolean') item.starred = body.starred;
+    if (typeof body.archived === 'boolean') {
+      item.archivedAt = body.archived ? new Date().toISOString() : undefined;
+    }
     saveStore();
     return c.json(item);
   });
 
-  // DELETE /api/reports/inbox/:id
+  // DELETE /api/reports/inbox/:id — soft delete (sets deletedAt)
+  // Use ?permanent=true for hard delete
   app.delete('/api/reports/inbox/:id', (c) => {
     const store = getStore();
     if (!store.reportInbox) store.reportInbox = [];
-    const idx = store.reportInbox.findIndex((i) => i.id === c.req.param('id'));
-    if (idx < 0) return c.json({ error: 'not found' }, 404);
-    store.reportInbox.splice(idx, 1);
+    const item = store.reportInbox.find((i) => i.id === c.req.param('id'));
+    if (!item) return c.json({ error: 'not found' }, 404);
+    if (c.req.query('permanent') === 'true') {
+      store.reportInbox = store.reportInbox.filter(i => i.id !== c.req.param('id'));
+    } else {
+      item.deletedAt = new Date().toISOString();
+    }
+    saveStore();
+    return c.json({ ok: true });
+  });
+
+  // POST /api/reports/inbox/:id/restore — undo soft delete
+  app.post('/api/reports/inbox/:id/restore', (c) => {
+    const store = getStore();
+    const item = (store.reportInbox ?? []).find((i) => i.id === c.req.param('id'));
+    if (!item) return c.json({ error: 'not found' }, 404);
+    delete item.deletedAt;
+    delete item.archivedAt;
     saveStore();
     return c.json({ ok: true });
   });

@@ -1239,6 +1239,9 @@ export interface ReportInboxItem {
   starred?: boolean;
   /** Optional free-form tags for filtering ('onboarding', 'daily', ...). */
   tags?: string[];
+  /** J-15: soft delete / archive */
+  archivedAt?: string;
+  deletedAt?: string;
 }
 
 export interface ReportRunRecord {

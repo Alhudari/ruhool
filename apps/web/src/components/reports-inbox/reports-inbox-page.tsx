@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Mail, Star, Trash2, CheckCheck, X, RefreshCw, Loader2 } from 'lucide-react';
+import { Mail, Star, Trash2, CheckCheck, X, RefreshCw, Loader2, Archive, Send } from 'lucide-react';
+import { useToast } from '@/components/shared/Toast';
 import { apiFetch } from '@/lib/api';
 import { useAppStore } from '@/store/app';
 import { cn } from '@/lib/utils';
@@ -76,6 +77,8 @@ export function ReportsInboxPage() {
   const [openItem, setOpenItem] = useState<InboxFullItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
+  const [customRequest, setCustomRequest] = useState('');
+  const { showToast } = useToast();
   const LIMIT = 50;
 
   const load = useCallback(async () => {
@@ -116,15 +119,44 @@ export function ReportsInboxPage() {
   };
 
   const removeItem = async (id: string) => {
-    const before = items;
     setItems((prev) => prev.filter((i) => i.id !== id));
+    setTotal((t) => Math.max(0, t - 1));
+    if (openItem?.id === id) setOpenItem(null);
     try {
       await apiFetch(`/api/reports/inbox/${id}`, { method: 'DELETE' });
-      setTotal((t) => Math.max(0, t - 1));
-      if (openItem?.id === id) setOpenItem(null);
-    } catch {
-      setItems(before);
-    }
+      showToast({
+        message: isRTL ? 'نُقل للمحذوفات' : 'Moved to trash',
+        type: 'info',
+        undo: async () => {
+          await apiFetch(`/api/reports/inbox/${id}/restore`, { method: 'POST' });
+          await load();
+        },
+      });
+    } catch { await load(); }
+  };
+
+  const archiveItem = async (id: string) => {
+    setItems((prev) => prev.filter((i) => i.id !== id));
+    if (openItem?.id === id) setOpenItem(null);
+    try {
+      await apiFetch(`/api/reports/inbox/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ archived: true }),
+      });
+      showToast({
+        message: isRTL ? 'أُرشف التقرير' : 'Report archived',
+        type: 'info',
+        undo: async () => {
+          await apiFetch(`/api/reports/inbox/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ archived: false }),
+          });
+          await load();
+        },
+      });
+    } catch { await load(); }
   };
 
   const regenerateReport = async () => {
@@ -164,6 +196,40 @@ export function ReportsInboxPage() {
             </button>
           )}
         </div>
+        {/* J-15: Custom report request */}
+        <div className="px-3 py-2 border-b border-border flex gap-2">
+          <input
+            value={customRequest}
+            onChange={e => setCustomRequest(e.target.value)}
+            placeholder={isRTL ? 'اطلب تقريراً مخصصاً...' : 'Request a custom report...'}
+            className="flex-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-on-surface focus:outline-none focus:ring-1 focus:ring-accent"
+            onKeyDown={e => e.key === 'Enter' && customRequest.trim() && (
+              apiFetch('/api/reports', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt: customRequest, instant: true }),
+              }).catch(() => {}),
+              setCustomRequest(''),
+              showToast({ message: isRTL ? 'طلب التقرير أُرسل' : 'Report requested', type: 'success' })
+            )}
+          />
+          <button
+            disabled={!customRequest.trim()}
+            onClick={() => {
+              if (!customRequest.trim()) return;
+              apiFetch('/api/reports', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt: customRequest, instant: true }),
+              }).catch(() => {});
+              setCustomRequest('');
+              showToast({ message: isRTL ? 'طلب التقرير أُرسل' : 'Report requested', type: 'success' });
+            }}
+            className="p-1.5 rounded-lg bg-accent text-on-accent disabled:opacity-40"
+          >
+            <Send size={12} />
+          </button>
+        </div>
         {loading ? (
           <div className="p-8 text-sm text-on-surface-secondary text-center">{isRTL ? 'جاري التحميل...' : 'Loading...'}</div>
         ) : items.length === 0 ? (
@@ -200,13 +266,16 @@ export function ReportsInboxPage() {
                     <div className={cn('text-sm truncate mt-0.5', !i.read && 'font-medium')}>{i.subject}</div>
                     <div className="text-xs text-on-surface-muted truncate mt-0.5">{i.preview}</div>
                   </div>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); removeItem(i.id); }}
-                    className="shrink-0 p-1 text-on-surface-muted hover:text-red-600"
-                    aria-label="حذف"
-                  >
-                    <Trash2 size={13} />
-                  </button>
+                  <div className="flex shrink-0">
+                    <button onClick={(e) => { e.stopPropagation(); archiveItem(i.id); }}
+                      className="p-1 text-on-surface-muted hover:text-amber-600" aria-label="أرشف">
+                      <Archive size={13} />
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); removeItem(i.id); }}
+                      className="p-1 text-on-surface-muted hover:text-red-600" aria-label="حذف">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </li>
               );
             })}
