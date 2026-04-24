@@ -35,7 +35,7 @@ const CREATIVE_AGENTS: CreativeAgent[] = [
   {
     id: 'creative',
     nameAr: 'المبدع',
-    nameEn: 'The Creative',
+    nameEn: "Al-Mubdi'",
     descAr: 'إخراج فيديوهات وإعلانات قصيرة',
     descEn: 'Video production and short ads',
     avatar: '🎬',
