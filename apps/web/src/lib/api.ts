@@ -30,95 +30,111 @@ export function apiStream(
 ) {
   const controller = new AbortController();
   let doneCalled = false;
+  let retries = 0;
+  const MAX_RETRIES = 3;
 
-  fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify(body),
-    signal: controller.signal,
-  }).then(async (res) => {
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      onError?.(err.error || `API error: ${res.status}`);
-      return;
-    }
+  async function attemptStream(attempt: number): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
 
-    const reader = res.body?.getReader();
-    if (!reader) return;
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        onError?.(err.error || `API error: ${res.status}`);
+        return;
+      }
 
-    const decoder = new TextDecoder();
-    let buffer = '';
+      const reader = res.body?.getReader();
+      if (!reader) return;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      const decoder = new TextDecoder();
+      let buffer = '';
 
-      buffer += decoder.decode(value, { stream: true });
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      // Parse SSE events properly
-      const parts = buffer.split('\n\n');
-      buffer = parts.pop() || ''; // Keep incomplete part
+        buffer += decoder.decode(value, { stream: true });
 
-      for (const part of parts) {
-        const lines = part.split('\n');
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+
+        for (const part of parts) {
+          const lines = part.split('\n');
+          let eventName = '';
+          let dataStr = '';
+
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              eventName = line.slice(7).trim();
+            } else if (line.startsWith('data: ')) {
+              dataStr = line.slice(6);
+            }
+          }
+
+          if (!dataStr) continue;
+
+          try {
+            const data = JSON.parse(dataStr);
+            if (eventName === 'done') {
+              if (!doneCalled) {
+                doneCalled = true;
+                onDone?.();
+              }
+            } else if (eventName === 'error') {
+              onError?.(data.error || data.message);
+            } else if (eventName) {
+              onChunk(eventName, data);
+            }
+          } catch {
+            // Skip malformed JSON
+          }
+        }
+      }
+
+      // Handle any remaining buffer
+      if (buffer.trim()) {
+        const lines = buffer.split('\n');
         let eventName = '';
         let dataStr = '';
-
         for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            eventName = line.slice(7).trim();
-          } else if (line.startsWith('data: ')) {
-            dataStr = line.slice(6);
-          }
+          if (line.startsWith('event: ')) eventName = line.slice(7).trim();
+          else if (line.startsWith('data: ')) dataStr = line.slice(6);
         }
-
-        if (!dataStr) continue;
-
-        try {
-          const data = JSON.parse(dataStr);
-          if (eventName === 'done') {
-            if (!doneCalled) {
-              doneCalled = true;
-              onDone?.();
-            }
-          } else if (eventName === 'error') {
-            onError?.(data.error);
-          } else if (eventName) {
-            onChunk(eventName, data);
-          }
-        } catch {
-          // Skip malformed JSON
+        if (eventName === 'done' && !doneCalled) {
+          doneCalled = true;
+          onDone?.();
+        } else if (eventName && dataStr) {
+          try {
+            const data = JSON.parse(dataStr);
+            if (eventName === 'error') onError?.(data.error || data.message);
+            else onChunk(eventName, data);
+          } catch {}
         }
       }
-    }
 
-    // Handle any remaining buffer
-    if (buffer.trim()) {
-      const lines = buffer.split('\n');
-      let eventName = '';
-      let dataStr = '';
-      for (const line of lines) {
-        if (line.startsWith('event: ')) eventName = line.slice(7).trim();
-        else if (line.startsWith('data: ')) dataStr = line.slice(6);
-      }
-      if (eventName === 'done' && !doneCalled) {
-        doneCalled = true;
-        onDone?.();
-      } else if (eventName && dataStr) {
-        try {
-          const data = JSON.parse(dataStr);
-          if (eventName === 'error') onError?.(data.error);
-          else onChunk(eventName, data);
-        } catch {}
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') return;
+      // Exponential backoff: 3s → 6s → 12s, max 3 retries
+      if (attempt < MAX_RETRIES && !doneCalled) {
+        retries = attempt + 1;
+        const delay = Math.min(3000 * Math.pow(2, attempt), 30_000);
+        onChunk('reconnecting', { attempt: retries, delayMs: delay });
+        await new Promise((r) => setTimeout(r, delay));
+        if (!controller.signal.aborted) {
+          return attemptStream(retries);
+        }
+      } else {
+        onError?.((err as Error).message);
       }
     }
+  }
 
-    // Server always sends an explicit 'done' event — no fallback needed
-  }).catch((err) => {
-    if (err.name !== 'AbortError') {
-      onError?.(err.message);
-    }
-  });
+  void attemptStream(0);
 
   return () => controller.abort();
 }

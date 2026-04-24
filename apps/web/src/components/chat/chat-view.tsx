@@ -172,6 +172,10 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
   // CHAT_V2 Wave D: per-agent "typing…" indicator list. Populated on message.start,
   // drained on message.done/error.
   const [activeStreamingAgents, setActiveStreamingAgents] = useState<string[]>([]);
+  // A-1: thinking agent — shows "يفكر..." before text starts
+  const [thinkingAgentId, setThinkingAgentId] = useState<string | null>(null);
+  // A-1: reconnect notice
+  const [reconnectAttempt, setReconnectAttempt] = useState<number | null>(null);
   // For sequential multi-mention follow-up
   const nextAgentToTriggerRef = useRef<string | null>(null);
   // Targeted agents for next message (multi-select via participant chips)
@@ -624,6 +628,12 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
             if (d.participants) {
               setParticipants(d.participants as string[]);
             }
+          } else if (event === 'thinking') {
+            // A-1: server signals LLM is about to generate
+            setThinkingAgentId((d.agentId as string) || responseAgentId);
+          } else if (event === 'reconnecting') {
+            // A-1: connection dropped, retrying
+            setReconnectAttempt((d.attempt as number) || 1);
           } else if (event === 'text') {
             // BUG-1 FIX: if v2 is active, legacy `text` would produce a second
             // duplicate bubble at stream close. Drop it.
@@ -694,6 +704,7 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
               }
             }
           } else if (event === 'message.delta' && isChatV2Enabled()) {
+            setThinkingAgentId(null); // A-1: text arriving, stop thinking indicator
             const msgId = d.messageId as string;
             const chunk = (d.text as string) || '';
             if (msgId && chunk) {
@@ -762,6 +773,8 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
           setStreamingContent('');
           setIsStreaming(false);
           setActiveStreamingAgents([]);
+          setThinkingAgentId(null);
+          setReconnectAttempt(null);
           setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
           collected = '';
           setTimeout(() => inputRef.current?.focus(), 50);
@@ -1334,8 +1347,8 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
                   >
                     <Copy size={14} />
                   </button>
-                  {/* Retry — only on USER messages. Removes this message + everything
-                      after it, then re-sends it so the agent(s) reply again. */}
+                  {/* Retry — on USER messages: removes + resends.
+                      On ASSISTANT errored messages: removes + retriggers last user msg. */}
                   {msg.role === 'user' && (
                     <button
                       onClick={() => {
@@ -1344,13 +1357,30 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
                         if (idx < 0) return;
                         const userText = msg.content;
                         const userAgentId = msg.agentId;
-                        // Drop this user message and everything after it; sendMessage
-                        // will append a fresh copy and open a new stream.
                         setMessages((prev) => prev.slice(0, idx));
                         setTimeout(() => sendMessage(userText, userAgentId), 30);
                       }}
                       className="p-1.5 rounded-[var(--radius)] text-on-surface-tertiary hover:text-accent hover:bg-accent/10"
                       title={isRTL ? 'أعد الإرسال' : 'Resend'}
+                    >
+                      <RotateCcw size={14} />
+                    </button>
+                  )}
+                  {/* A-1: retry on failed assistant messages */}
+                  {msg.role === 'assistant' && msg.errored && (
+                    <button
+                      onClick={() => {
+                        if (isStreamingRef.current) return;
+                        const idx = messages.findIndex((m) => m.id === msg.id);
+                        // Find the last user message before this error
+                        const lastUser = [...messages.slice(0, idx)].reverse().find((m) => m.role === 'user');
+                        if (!lastUser) return;
+                        const userIdx = messages.findIndex((m) => m.id === lastUser.id);
+                        setMessages((prev) => prev.slice(0, userIdx));
+                        setTimeout(() => sendMessage(lastUser.content, lastUser.agentId), 30);
+                      }}
+                      className="p-1.5 rounded-[var(--radius)] text-red-400 hover:text-accent hover:bg-accent/10"
+                      title={isRTL ? 'أعد المحاولة' : 'Retry'}
                     >
                       <RotateCcw size={14} />
                     </button>
@@ -1378,6 +1408,30 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
                   />
                 );
               })}
+
+          {/* A-1: thinking indicator — before first token arrives */}
+          {thinkingAgentId && !activeStreamingAgents.includes(thinkingAgentId) && (() => {
+            const info = agentDisplay[thinkingAgentId] || BUILTIN_AGENT_DISPLAY.manager;
+            return (
+              <div className="flex gap-3 items-center px-1">
+                <div className={cn('w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-white text-xs font-medium shadow-sm animate-pulse', info.bgColor)}>
+                  {info.initial}
+                </div>
+                <p className="text-xs italic text-on-surface-tertiary animate-pulse">
+                  {isRTL ? `${info.name.ar} يفكر…` : `${info.name.en} is thinking…`}
+                </p>
+              </div>
+            );
+          })()}
+
+          {/* A-1: reconnect notice */}
+          {reconnectAttempt !== null && (
+            <div className="flex justify-center">
+              <p className="text-xs text-amber-500 bg-amber-500/10 px-3 py-1 rounded-full animate-pulse">
+                {isRTL ? `إعادة الاتصال… (محاولة ${reconnectAttempt}/3)` : `Reconnecting… (attempt ${reconnectAttempt}/3)`}
+              </p>
+            </div>
+          )}
 
           {/* Active background task cards */}
           {Array.from(activeTasks.entries()).map(([taskId]) => (

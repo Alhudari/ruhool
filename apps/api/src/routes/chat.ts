@@ -451,9 +451,11 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       });
     }
 
+    // Context window guard: last 30 messages to avoid token overflow
+    const CHAT_HISTORY_LIMIT = 30;
     const history = store.messages.filter((m) => m.conversationId === convId)
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      .slice(-60); // keep last 60 messages to avoid context window overflow
+      .slice(-CHAT_HISTORY_LIMIT);
     const chatMsgs: Array<{ role: string; content: string | Array<{ type: string; [k: string]: unknown }> }> = [];
     for (const m of history) {
       const last = chatMsgs[chatMsgs.length - 1];
@@ -1132,6 +1134,8 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
 
         const agentHeader = detectedAgent !== 'manager' ? (AGENT_HEADERS[detectedAgent] || '') : '';
 
+        await stream.writeSSE({ event: 'thinking', data: JSON.stringify({ agentId: detectedAgent }) });
+
         const routedProvider = pickProviderForModel(model);
         if (!routedProvider) {
           await stream.writeSSE({ event: 'error', data: JSON.stringify({ error: `No provider configured for model "${model}". Add its API key in Settings.` }) });
@@ -1376,7 +1380,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
               { agentId: detectedAgent, metadata: { provider: routedProvider.name, model, inputTokens: chunk.usage!.inputTokens, outputTokens: chunk.usage!.outputTokens, cost, durationMs: Date.now() - startTime } });
             await stream.writeSSE({ event: 'usage', data: JSON.stringify(chunk.usage) });
           } else if (chunk.type === 'error') {
-            await stream.writeSSE({ event: 'error', data: JSON.stringify({ error: chunk.error }) });
+            await stream.writeSSE({ event: 'error', data: JSON.stringify({ message: chunk.error, retryable: true }) });
           } else if (chunk.type === 'done') {
             if (doneSent) continue;
             doneSent = true;
