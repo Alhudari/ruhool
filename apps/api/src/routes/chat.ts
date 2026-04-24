@@ -42,6 +42,7 @@ import {
   detectDirectiveMentions as _detectDirectiveMentions,
 } from '../services/chat/mention.js';
 import { getCachedResponse, setCacheEntry } from '../services/chat/response-cache.js';
+import { rateLimit } from '../middleware/rate-limit.js';
 import { askPlayMaker as _askPlayMaker, type PlayMakerHint } from '../services/chat/play-maker.js';
 import {
   parseTextMarkerDelegations,
@@ -237,7 +238,9 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
     return c.json({ matches, topicMatches });
   });
 
-  app.post('/api/chat', async (c) => {
+  const chatLimit = rateLimit({ capacity: 20, refillPerSec: 2 });
+
+  app.post('/api/chat', chatLimit, async (c) => {
     const store = getStore();
     const body = await c.req.json<{
       conversationId?: string;
@@ -420,7 +423,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       if (rq) {
         rq.add('research', { taskId }, { jobId: taskId });
       } else {
-        setTimeout(() => runResearch(taskId), 0);
+        setTimeout(() => { void runResearch(taskId).catch((err) => { console.error({ err, taskId }, "runResearch failed"); }); }, 0);
       }
 
       const responseText = isArabic
@@ -444,7 +447,8 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
     }
 
     const history = store.messages.filter((m) => m.conversationId === convId)
-      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      .slice(-60); // keep last 60 messages to avoid context window overflow
     const chatMsgs: Array<{ role: string; content: string | Array<{ type: string; [k: string]: unknown }> }> = [];
     for (const m of history) {
       const last = chatMsgs[chatMsgs.length - 1];
@@ -673,6 +677,10 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       let doneSent = false;
       const startTime = Date.now();
 
+      // Abort controller — cancelled when the client disconnects so LLM calls can stop early.
+      const abortController = new AbortController();
+      c.req.raw.signal?.addEventListener('abort', () => abortController.abort(), { once: true });
+
       // BUG B FIX: SSE keepalive. Browsers / proxies will drop an idle EventSource
       // after ~30s of silence, which surfaced as "Error: network error" when a
       // multi-round manager turn produced a long quiet period between tool_use
@@ -681,7 +689,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       let keepaliveDone = false;
       const keepaliveTimer: NodeJS.Timeout = setInterval(() => {
         if (keepaliveDone) return;
-        stream.writeSSE({ event: 'ping', data: '{}' }).catch(() => { /* connection closed */ });
+        stream.writeSSE({ event: 'ping', data: '{}' }).catch(() => { abortController.abort(); });
       }, 15_000);
       const stopKeepalive = () => { keepaliveDone = true; clearInterval(keepaliveTimer); };
 
@@ -1019,7 +1027,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
         }
 
         if (body.context) {
-          activeSystemPrompt += '\n\n[\u0633\u064A\u0627\u0642 \u0625\u0636\u0627\u0641\u064A \u0645\u0646 \u0627\u0644\u0648\u0627\u062C\u0647\u0629]\n' + body.context + '\n';
+          activeSystemPrompt += '\n\n[\u0633\u064A\u0627\u0642 \u0625\u0636\u0627\u0641\u064A \u0645\u0646 \u0627\u0644\u0648\u0627\u062C\u0647\u0629]\n' + body.context.replace(new RegExp('</?(?:system|prompt|instruction)[^>]*>', 'gi'), '').slice(0, 2000) + '\n';
         }
 
         try {
@@ -1033,7 +1041,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
 
         try {
           const tzConfig = (store as unknown as { timezones?: { primary: string; secondary?: string } }).timezones
-            || { primary: 'Europe/London', secondary: 'Asia/Kuwait' };
+            || { primary: 'Asia/Kuwait', secondary: 'Europe/London' };
           const now = new Date();
           const fmt = (tz: string, locale: string, long = false) => new Intl.DateTimeFormat(locale, {
             timeZone: tz, hour12: false,
@@ -1678,8 +1686,8 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 }
               } catch { /* ignore */ }
 
-              autoSummarizeIfNeeded(convId!);
-              autoTitleIfNeeded(convId!);
+              void autoSummarizeIfNeeded(convId!).catch(() => { /* background — ignore */ });
+              void autoTitleIfNeeded(convId!).catch(() => { /* background — ignore */ });
               try {
                 const recent = store.messages
                   .filter((m) => m.conversationId === convId)
@@ -1749,8 +1757,8 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 await stream.writeSSE({ event: 'notifications', data: JSON.stringify({ notifications: notifs }) });
               }
             } catch { /* ignore */ }
-            autoSummarizeIfNeeded(convId!);
-            autoTitleIfNeeded(convId!);
+            void autoSummarizeIfNeeded(convId!).catch(() => { /* background — ignore */ });
+            void autoTitleIfNeeded(convId!).catch(() => { /* background — ignore */ });
             try {
               const recent = store.messages
                 .filter((m) => m.conversationId === convId)

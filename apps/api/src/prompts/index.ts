@@ -20,3 +20,4 @@ export { TASKS_AGENT_SYSTEM_PROMPT } from './specialists/tasks-agent.js';
 export { MUSHAKHKHIS_SYSTEM_PROMPT } from './specialists/mushakhkhis.js';
 export { MUNAZZIM_SYSTEM_PROMPT } from './specialists/munazzim.js';
 export { ANALYST_SYSTEM_PROMPT } from './specialists/analyst.js';
+export { RESEARCH_COMPANION_SYSTEM_PROMPT } from './specialists/research-companion.js';

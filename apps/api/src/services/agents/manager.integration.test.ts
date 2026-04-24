@@ -48,12 +48,12 @@ describe('AGT-05 integration — round-trip delegation', () => {
   it('tool_use path wins when present; text markers are ignored', () => {
     const content: FakeBlock[] = [
       textBlock('تمام. أحلتها لعبدان ✓'), // legacy marker in prose
-      toolUseBlock('abdan', 'ابحث عن الإبل', 'سياق سابق'),
+      toolUseBlock('research', 'ابحث عن الإبل', 'سياق سابق'),
     ];
     const tool = parseToolUseDelegations(content);
     expect(tool).toHaveLength(1);
     expect(tool[0]).toMatchObject({
-      specialist: 'abdan',
+      specialist: 'research',
       task: 'ابحث عن الإبل',
       source: 'tool_use',
     });
@@ -71,8 +71,8 @@ describe('AGT-05 integration — round-trip delegation', () => {
     }) as Parameters<typeof logDelegations>[1];
     logDelegations(
       [
-        { specialist: 'abdan', task: 'research', source: 'tool_use' },
-        { specialist: 'shwasha', task: 'summarise', source: 'tool_use' },
+        { specialist: 'research', task: 'research', source: 'tool_use' },
+        { specialist: 'reading-helper', task: 'summarise', source: 'tool_use' },
       ],
       fakeLog,
       { requestId: 'req-1', conversationId: 'conv-1' },
@@ -80,7 +80,7 @@ describe('AGT-05 integration — round-trip delegation', () => {
     expect(calls).toHaveLength(2);
     expect(calls[0][0]).toBe('chat');
     expect(calls[0][1]).toBe('delegation');
-    expect((calls[0][3] as { agentId: string }).agentId).toBe('abdan');
+    expect((calls[0][3] as { agentId: string }).agentId).toBe('research');
   });
 
   it('tool definition enumerates the allowed specialists', () => {
@@ -89,8 +89,8 @@ describe('AGT-05 integration — round-trip delegation', () => {
       string,
       { enum?: string[] }
     >;
-    expect(props.specialist.enum).toContain('abdan');
-    expect(props.specialist.enum).toContain('shwasha');
+    expect(props.specialist.enum).toContain('research');
+    expect(props.specialist.enum).toContain('reading-helper');
     expect(props.specialist.enum).not.toContain('manager'); // self-delegation blocked
   });
 });

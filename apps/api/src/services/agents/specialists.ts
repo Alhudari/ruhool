@@ -45,6 +45,7 @@ import {
   ANALYST_SYSTEM_PROMPT,
   RESEARCH_COMPANION_SYSTEM_PROMPT,
 } from '../../prompts/index.js';
+import { BUILTIN_SYSTEM_PROMPTS } from '../../state/builtin-prompts.js';
 import type { UnifiedProvider } from '../llm/index.js';
 import {
   runGenerationTool,
@@ -71,8 +72,13 @@ const SPECIALIST_PROMPTS: Record<string, string> = {
   'المنظّم': MUNAZZIM_SYSTEM_PROMPT,
   'المحلل': ANALYST_SYSTEM_PROMPT,
   'الخوي': RESEARCH_COMPANION_SYSTEM_PROMPT,
+  'الدكتور': BUILTIN_SYSTEM_PROMPTS.doctor,
+  'الفطين': BUILTIN_SYSTEM_PROMPTS.fatin,
+  'المُمرر': BUILTIN_SYSTEM_PROMPTS.playmaker,
+  'المُدوّن': BUILTIN_SYSTEM_PROMPTS.mudawwin,
+  'الكاتب': BUILTIN_SYSTEM_PROMPTS.sayyaq,
+  // English canonical IDs
   'research-companion': RESEARCH_COMPANION_SYSTEM_PROMPT,
-  // English historical IDs
   manager: MANAGER_SYSTEM_PROMPT,
   research: RESEARCH_SYSTEM_PROMPT,
   'reading-helper': READING_HELPER_SYSTEM_PROMPT,
@@ -85,6 +91,12 @@ const SPECIALIST_PROMPTS: Record<string, string> = {
   mushakhkhis: MUSHAKHKHIS_SYSTEM_PROMPT,
   munazzim: MUNAZZIM_SYSTEM_PROMPT,
   analyst: ANALYST_SYSTEM_PROMPT,
+  doctor: BUILTIN_SYSTEM_PROMPTS.doctor,
+  fatin: BUILTIN_SYSTEM_PROMPTS.fatin,
+  playmaker: BUILTIN_SYSTEM_PROMPTS.playmaker,
+  mudawwin: BUILTIN_SYSTEM_PROMPTS.mudawwin,
+  sayyaq: BUILTIN_SYSTEM_PROMPTS.sayyaq,
+  clippy: BUILTIN_SYSTEM_PROMPTS.clippy,
 };
 
 export type SpecialistName = keyof typeof SPECIALIST_PROMPTS;
@@ -122,7 +134,7 @@ const CANONICAL_ARABIC: Record<string, string> = {
   'الفطين': 'fatin',
   'المُمرر': 'playmaker',
   'الخوي': 'research-companion',
-  'المُدوِّن': 'mudawwin',
+  'المُدوّن': 'mudawwin',
   'الكاتب': 'sayyaq',
 };
 
@@ -163,6 +175,7 @@ const TRANSLITERATIONS: Record<string, string> = {
   'almushakhkhis': 'mushakhkhis',
   'al-fatin': 'fatin',
   'al-mumarir': 'playmaker',
+  'al-mumarrir': 'playmaker',
   'al-mudawwin': 'mudawwin',
   'munazzim': 'munazzim',
   'mushakhkhis': 'mushakhkhis',
@@ -244,34 +257,45 @@ export function resolveSpecialistId(input: string): string {
 // { arabic, transliteration } pair so the identity directive can name the
 // specialist in both scripts even when the caller passed an English id.
 const SPECIALIST_IDENTITY: Record<string, { arabic: string; transliteration: string }> = {
-  // Arabic canonical keys map to themselves + their transliteration
+  // Arabic canonical keys — corrected transliterations (R12 names, not retired camel-herd names)
   'الراعي': { arabic: 'الراعي', transliteration: "Al-Ra'i" },
-  'الباحث': { arabic: 'الباحث', transliteration: 'Abdan' },
-  'المُلخِّص': { arabic: 'المُلخِّص', transliteration: 'Shwasha' },
-  'المُقارِن': { arabic: 'المُقارِن', transliteration: 'Rammana' },
-  'الناقد': { arabic: 'الناقد', transliteration: 'Alsafra' },
+  'الباحث': { arabic: 'الباحث', transliteration: 'Al-Bahith' },
+  'المُلخِّص': { arabic: 'المُلخِّص', transliteration: 'Al-Mulakhkhis' },
+  'المُقارِن': { arabic: 'المُقارِن', transliteration: 'Al-Muqarin' },
+  'الناقد': { arabic: 'الناقد', transliteration: 'Al-Naqid' },
   'المصمم': { arabic: 'المصمم', transliteration: 'Al-Musammim' },
-  'السارد': { arabic: 'السارد', transliteration: 'Aldabsa' },
-  'المبدع': { arabic: 'المبدع', transliteration: 'Al-Creative' },
+  'السارد': { arabic: 'السارد', transliteration: 'Al-Sarid' },
+  'المبدع': { arabic: 'المبدع', transliteration: "Al-Mubdi'" },
   'مهام': { arabic: 'مهام', transliteration: 'Mahaam' },
   'المشخّص': { arabic: 'المشخّص', transliteration: 'Al-Mushakhkhis' },
   'المنظّم': { arabic: 'المنظّم', transliteration: 'Al-Munazzim' },
   'المحلل': { arabic: 'المحلل', transliteration: 'Al-Muhallil' },
-  // English IDs map to the same identity as their Arabic counterpart
+  'الخوي': { arabic: 'الخوي', transliteration: 'Al-Khuwy' },
+  'الدكتور': { arabic: 'الدكتور', transliteration: 'Al-Duktor' },
+  'الفطين': { arabic: 'الفطين', transliteration: 'Al-Fatin' },
+  'المُمرر': { arabic: 'المُمرر', transliteration: 'Al-Mumarrir' },
+  'المُدوّن': { arabic: 'المُدوّن', transliteration: 'Al-Mudawwin' },
+  'الكاتب': { arabic: 'الكاتب', transliteration: 'Al-Katib' },
+  // English canonical IDs — same identity as Arabic counterpart
   manager: { arabic: 'الراعي', transliteration: "Al-Ra'i" },
-  research: { arabic: 'الباحث', transliteration: 'Abdan' },
-  'reading-helper': { arabic: 'المُلخِّص', transliteration: 'Shwasha' },
-  comparator: { arabic: 'المُقارِن', transliteration: 'Rammana' },
-  'writing-critic': { arabic: 'الناقد', transliteration: 'Alsafra' },
+  research: { arabic: 'الباحث', transliteration: 'Al-Bahith' },
+  'reading-helper': { arabic: 'المُلخِّص', transliteration: 'Al-Mulakhkhis' },
+  comparator: { arabic: 'المُقارِن', transliteration: 'Al-Muqarin' },
+  'writing-critic': { arabic: 'الناقد', transliteration: 'Al-Naqid' },
   architect: { arabic: 'المصمم', transliteration: 'Al-Musammim' },
-  'content-creator': { arabic: 'السارد', transliteration: 'Aldabsa' },
-  creative: { arabic: 'المبدع', transliteration: 'Al-Creative' },
+  'content-creator': { arabic: 'السارد', transliteration: 'Al-Sarid' },
+  creative: { arabic: 'المبدع', transliteration: "Al-Mubdi'" },
   'tasks-agent': { arabic: 'مهام', transliteration: 'Mahaam' },
   mushakhkhis: { arabic: 'المشخّص', transliteration: 'Al-Mushakhkhis' },
   munazzim: { arabic: 'المنظّم', transliteration: 'Al-Munazzim' },
   analyst: { arabic: 'المحلل', transliteration: 'Al-Muhallil' },
-  'الخوي': { arabic: 'الخوي', transliteration: 'Rumman' },
-  'research-companion': { arabic: 'الخوي', transliteration: 'Rumman' },
+  'research-companion': { arabic: 'الخوي', transliteration: 'Al-Khuwy' },
+  doctor: { arabic: 'الدكتور', transliteration: 'Al-Duktor' },
+  fatin: { arabic: 'الفطين', transliteration: 'Al-Fatin' },
+  playmaker: { arabic: 'المُمرر', transliteration: 'Al-Mumarrir' },
+  mudawwin: { arabic: 'المُدوّن', transliteration: 'Al-Mudawwin' },
+  sayyaq: { arabic: 'الكاتب', transliteration: 'Al-Katib' },
+  clippy: { arabic: 'Clippy', transliteration: 'Clippy' },
 };
 
 export function getSpecialistIdentity(specialist: string): { arabic: string; transliteration: string } {

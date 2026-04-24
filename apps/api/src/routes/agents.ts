@@ -18,6 +18,28 @@ const agentOrgSchema = z.object({
   })).max(20),
 });
 
+const agentOrgWorkspaceSchema = z.object({
+  id: z.string().min(1),
+  label: z.object({ ar: z.string(), en: z.string() }).optional(),
+  icon: z.string().optional(),
+  color: z.string().optional(),
+  ceo: z.string().min(1),
+  departments: z.array(z.object({
+    id: z.string().min(1),
+    label: z.object({ ar: z.string(), en: z.string() }).optional(),
+    icon: z.string().optional(),
+    color: z.string().optional(),
+    manager: z.string().min(1),
+    workers: z.array(z.string().min(1)),
+  })).max(20),
+});
+
+const agentOrgV2Schema = z.object({
+  workspaces: z.array(agentOrgWorkspaceSchema).min(1).max(10),
+  sharedServices: z.array(z.string().min(1)).optional(),
+  platformAdmins: z.array(z.string().min(1)).optional(),
+});
+
 // ── Agent org (company model) ──────────────────────────────────────
 // Editable JSON at data/agent-org.json. Round 4: supports multiple
 // workspaces (PhD + Life). Each workspace has its own CEO and department
@@ -300,17 +322,37 @@ export function registerAgentRoutes(app: Hono, deps: AgentRoutesDeps): void {
 
   app.put('/api/agent-org', async (c) => {
     const raw = await c.req.json().catch(() => null);
-    // Accept either the v2 workspaces-shape OR the legacy v1 shape.
-    const v2 = raw && typeof raw === 'object' && Array.isArray((raw as { workspaces?: unknown }).workspaces);
-    let next: AgentOrg;
+    if (!raw || typeof raw !== 'object') {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
     const store = getStore();
     const knownIds = new Set<string>([
       ...BUILTIN_AGENTS.map((a) => a.id),
       ...(store.customAgents || []).map((a) => 'custom-' + a.id),
     ]);
 
-    if (v2) {
-      const body = raw as AgentOrg;
+    const checkMissing = (org: AgentOrg): string[] => {
+      const missing: string[] = [];
+      for (const ws of org.workspaces) {
+        if (!knownIds.has(ws.ceo)) missing.push(ws.ceo);
+        for (const d of ws.departments) {
+          if (!knownIds.has(d.manager)) missing.push(d.manager);
+          for (const w of d.workers) if (!knownIds.has(w)) missing.push(w);
+        }
+      }
+      return missing;
+    };
+
+    let next: AgentOrg;
+    const isV2 = Array.isArray((raw as { workspaces?: unknown }).workspaces);
+
+    if (isV2) {
+      // v2 path: validate with Zod schema before any casting
+      const parsed = agentOrgV2Schema.safeParse(raw);
+      if (!parsed.success) {
+        return c.json({ error: 'Invalid agent-org v2 payload', issues: parsed.error.issues }, 400);
+      }
+      const body = parsed.data;
       next = {
         version: 2,
         updatedAt: new Date().toISOString(),
@@ -320,30 +362,20 @@ export function registerAgentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           icon: ws.icon,
           color: ws.color,
           ceo: ws.ceo,
-          departments: (ws.departments ?? []).map((d) => ({
+          departments: ws.departments.map((d) => ({
             id: d.id,
             label: d.label ?? { ar: d.id, en: d.id },
             icon: d.icon,
             color: d.color,
             manager: d.manager,
-            workers: d.workers ?? [],
+            workers: d.workers,
           })),
         })),
         sharedServices: body.sharedServices ?? [],
         platformAdmins: body.platformAdmins ?? [],
       };
-      const missing = new Set<string>();
-      for (const ws of next.workspaces) {
-        if (!knownIds.has(ws.ceo)) missing.add(ws.ceo);
-        for (const d of ws.departments) {
-          if (!knownIds.has(d.manager)) missing.add(d.manager);
-          for (const w of d.workers) if (!knownIds.has(w)) missing.add(w);
-        }
-      }
-      if (missing.size > 0) {
-        return c.json({ error: 'Unknown agent ids in org', missing: [...missing] }, 400);
-      }
     } else {
+      // v1 legacy path: validate + registry check + merge into existing org
       const parsed = agentOrgSchema.safeParse(raw);
       if (!parsed.success) {
         return c.json({
@@ -353,24 +385,37 @@ export function registerAgentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         }, 400);
       }
       const body = parsed.data;
+      const phdWorkspace: AgentOrgWorkspace = {
+        id: 'phd',
+        label: { ar: 'الدكتوراه', en: 'PhD' },
+        ceo: body.ceo,
+        departments: body.departments.map((d) => ({
+          id: d.id,
+          label: d.label ?? { ar: d.id, en: d.id },
+          icon: d.icon,
+          color: d.color,
+          manager: d.manager,
+          workers: d.workers,
+        })),
+      };
+      // Merge: replace phd workspace, preserve all others (life, etc.)
+      const existing = readAgentOrg(dataRoot);
+      const otherWorkspaces = (existing?.workspaces ?? []).filter((ws) => ws.id !== 'phd');
       next = {
         version: 2,
         updatedAt: new Date().toISOString(),
-        workspaces: [{
-          id: 'phd',
-          label: { ar: 'الدكتوراه', en: 'PhD' },
-          ceo: body.ceo,
-          departments: body.departments.map((d) => ({
-            id: d.id,
-            label: d.label ?? { ar: d.id, en: d.id },
-            icon: d.icon,
-            color: d.color,
-            manager: d.manager,
-            workers: d.workers,
-          })),
-        }],
+        workspaces: [phdWorkspace, ...otherWorkspaces],
+        sharedServices: existing?.sharedServices ?? [],
+        platformAdmins: existing?.platformAdmins ?? [],
       };
     }
+
+    // Registry check applies to both v1 and v2
+    const missing = checkMissing(next);
+    if (missing.length > 0) {
+      return c.json({ error: 'Unknown agent ids in org', missing }, 400);
+    }
+
     writeAgentOrg(dataRoot, next);
     const deptCount = next.workspaces.reduce((n, ws) => n + ws.departments.length, 0);
     logActivity('system', 'Agent org updated', `workspaces=${next.workspaces.length} depts=${deptCount}`, { metadata: { workspaces: next.workspaces.map((w) => w.id) } });

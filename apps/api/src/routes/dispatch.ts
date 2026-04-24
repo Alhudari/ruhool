@@ -228,7 +228,7 @@ export function registerDispatchRoutes(app: Hono, deps: DispatchRoutesDeps): voi
 
   // SSE streaming variant — emits chain events as the dispatcher progresses.
   // Useful when the UI wants to render the routing chain indicator live.
-  app.get('/api/dispatch/stream', async (c) => {
+  app.get('/api/dispatch/stream', dispatchChatLimit, async (c) => {
     if (!isEnabled()) return c.json({ error: 'dispatch disabled' }, 404);
     const message = c.req.query('message') ?? '';
     const language = (c.req.query('language') === 'en' ? 'en' : 'ar') as 'ar' | 'en';

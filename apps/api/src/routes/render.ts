@@ -92,7 +92,7 @@ export function registerRenderRoutes(app: Hono, deps: RenderRoutesDeps): void {
       } else {
         renderJobs.set(jobId, { status: 'failed', progress: 0, error: result.error });
       }
-    })();
+    })().catch((err) => { console.error({ err, jobId }, "render IIFE failed"); renderJobs.set(jobId, { status: "failed", progress: 0, error: String(err) }); });
 
     return c.json({ ok: true, jobId }, 202);
   });
@@ -119,7 +119,7 @@ export function registerRenderRoutes(app: Hono, deps: RenderRoutesDeps): void {
       } else {
         renderJobs.set(jobId, { status: 'failed', progress: 0, error: result.error });
       }
-    })();
+    })().catch((err) => { console.error({ err, jobId }, "render IIFE failed"); renderJobs.set(jobId, { status: "failed", progress: 0, error: String(err) }); });
 
     return c.json({ ok: true, jobId }, 202);
   });

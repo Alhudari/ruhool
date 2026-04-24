@@ -74,7 +74,7 @@ export function registerAllRoutes(app: Hono, deps: Record<string, unknown>): voi
   registerProviderRoutes(app, { getStore: d.getStore, saveStore: d.saveStore, anthropicCache: d.anthropicCache });
   registerPromptRoutes(app, { getStore: d.getStore, saveStore: d.saveStore, builtinSystemPrompts: d.builtinSystemPrompts, builtInLibrary: d.builtInLibrary });
   registerConversationRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
-  registerAgentRoutes(app, { getStore: d.getStore, saveStore: d.saveStore, logActivity: d.logActivity, builtinSystemPrompts: d.builtinSystemPrompts });
+  registerAgentRoutes(app, { getStore: d.getStore, saveStore: d.saveStore, logActivity: d.logActivity, builtinSystemPrompts: d.builtinSystemPrompts, dataRoot: d.dataDir });
   registerAgentOSRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
   registerArtifactRoutes(app, { getStore: d.getStore, saveStore: d.saveStore });
   registerPapersRoutes(app, { getStore: d.getStore, saveStore: d.saveStore, papersDir: d.papersDir, ensurePapersDir: d.ensurePapersDir, splitIntoSections: d.splitIntoSections, deleteNoteFile: d.deleteNoteFile, logActivity: d.logActivity });

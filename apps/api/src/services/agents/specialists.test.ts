@@ -35,8 +35,8 @@ function makeMockProvider() {
 }
 
 describe('specialists dispatcher', () => {
-  it('resolves عبدان to the abdan (RESEARCH) system prompt', () => {
-    expect(getSpecialistPrompt('عبدان')).toBe(RESEARCH_SYSTEM_PROMPT);
+  it("resolves الباحث to the RESEARCH system prompt", () => {
+    expect(getSpecialistPrompt("الباحث")).toBe(RESEARCH_SYSTEM_PROMPT);
   });
 
   it('runs the task through the mocked LLM using the abdan prompt', async () => {
@@ -120,7 +120,7 @@ describe('specialists dispatcher', () => {
     // banner and the Arabic identity line within the first block instead of
     // a literal prefix match.
     expect(sys.startsWith('=== هوية الوكيل / AGENT IDENTITY')).toBe(true);
-    expect(sys).toContain('أنت شواشة');
+    expect(sys).toContain('أنت المُلخِّص');
     expect(sys).toContain('STRICTLY FORBIDDEN');
     expect(sys).toContain('تقمّص');
     expect(sys).toContain('شواشة');
@@ -142,7 +142,7 @@ describe('specialists dispatcher', () => {
     expect(reminderIdx).toBeGreaterThan(-1);
     expect(endMarkerIdx).toBeGreaterThan(-1);
     expect(reminderIdx).toBeGreaterThan(endMarkerIdx);
-    expect(sys).toContain('تذكير: أنت شواشة');
+    expect(sys).toContain('تذكير: أنت المُلخِّص');
   });
 
   it('wraps each prior message content in guillemet quotes («…»)', async () => {
@@ -214,7 +214,7 @@ describe('specialists dispatcher', () => {
     });
     const sys = capture.lastSystemPrompt || '';
     expect(sys.startsWith('=== هوية الوكيل / AGENT IDENTITY')).toBe(true);
-    expect(sys).toContain('أنت عبدان');
+    expect(sys).toContain('أنت الباحث');
     expect(sys).toContain('STRICTLY FORBIDDEN');
   });
 
@@ -232,8 +232,8 @@ describe('specialists dispatcher', () => {
     // Directive must say "أنت عبدان", NOT "أنت شواشة", even when priorMessages
     // contains شواشة's output. This is the core Bug-2 guarantee: the tool_use
     // delegated path cannot bleed another agent's persona.
-    expect(sys).toContain('أنت عبدان');
-    expect(sys).not.toContain('أنت شواشة');
+    expect(sys).toContain('أنت الباحث');
+    expect(sys).not.toContain('أنت المُلخِّص');
     expect(sys).toContain('ممنوع منعاً باتاً');
   });
 
@@ -250,8 +250,8 @@ describe('specialists dispatcher', () => {
     const sys = capture.lastSystemPrompt || '';
     expect(sys).toContain('STRICTLY FORBIDDEN');
     expect(sys).toContain('ممنوع منعاً باتاً');
-    expect(sys).toContain('Alsafra');
-    expect(sys).toContain('الصفرا');
+    expect(sys).toContain('Al-Naqid');
+    expect(sys).toContain('الناقد');
     expect(sys).toContain('THE RULE');
   });
 });

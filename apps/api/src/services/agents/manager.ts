@@ -16,36 +16,52 @@ import { MANAGER_SYSTEM_PROMPT } from '../../prompts/index.js';
  * plain text instead of a tool_use block.
  */
 
-// Known specialist IDs (baseline — merged with module registry at call time).
+// Known specialist IDs — canonical IDs only (post-R12 rename).
 const KNOWN_SPECIALIST_IDS = [
-  'abdan',
-  'shwasha',
-  'alsafra',
-  'rammana',
-  'aldabsa',
-  'musammim',
+  'research',
+  'reading-helper',
+  'writing-critic',
+  'comparator',
+  'content-creator',
+  'architect',
   'creative',
   'tasks-agent',
   'analyst',
   'munazzim',
   'mushakhkhis',
   'research-companion',
+  'fatin',
+  'playmaker',
+  'mudawwin',
+  'sayyaq',
 ];
 
 // Arabic display names → canonical IDs (for both tool enum and text-marker fallback).
 const ARABIC_TO_ID: Record<string, string> = {
-  الباحث: 'abdan',
-  المُلخِّص: 'shwasha',
-  الناقد: 'alsafra',
-  المُقارِن: 'rammana',
-  السارد: 'aldabsa',
-  المصمم: 'musammim',
+  // Current canonical R12 names
+  الباحث: 'research',
+  المُلخِّص: 'reading-helper',
+  الناقد: 'writing-critic',
+  المُقارِن: 'comparator',
+  السارد: 'content-creator',
+  المصمم: 'architect',
   المبدع: 'creative',
   مهام: 'tasks-agent',
   المحلل: 'analyst',
   المنظّم: 'munazzim',
   المشخّص: 'mushakhkhis',
-  'الخوي': 'research-companion',
+  الخوي: 'research-companion',
+  الفطين: 'fatin',
+  المُمرر: 'playmaker',
+  المُدوّن: 'mudawwin',
+  الكاتب: 'sayyaq',
+  // Legacy camel-herd names — kept so old text-marker records still route
+  عبدان: 'research',
+  شواشة: 'reading-helper',
+  الصفرا: 'writing-critic',
+  رمّانة: 'comparator',
+  الدبسا: 'content-creator',
+  رمّان: 'research-companion',
 };
 
 export interface DelegationRecord {

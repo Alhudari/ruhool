@@ -45,39 +45,39 @@ const CASES: Array<{
   intruderContent: string;
 }> = [
   {
-    target: 'عبدان',
-    intruderDisplay: 'شواشة',
-    intruderAgent: 'shwasha',
+    target: 'الباحث',
+    intruderDisplay: 'المُلخِّص',
+    intruderAgent: 'reading-helper',
     intruderContent: 'يا حلاتها القراءة، خلّنا نتمشّى في النص براحة.',
   },
   {
-    target: 'شواشة',
-    intruderDisplay: 'عبدان',
-    intruderAgent: 'abdan',
+    target: 'المُلخِّص',
+    intruderDisplay: 'الباحث',
+    intruderAgent: 'research',
     intruderContent: 'تقرير بحثي: المصادر المعتمدة بلغت 14 مرجعاً محكّماً.',
   },
   {
-    target: 'الصفرا',
-    intruderDisplay: 'الدبسا',
+    target: 'الناقد',
+    intruderDisplay: 'السارد',
     intruderAgent: 'content-creator',
     intruderContent: 'يا جماعة! Post إنستا نار، كابشن قصير، هاشتاقات حماسية.',
   },
   {
-    target: 'رمّانة',
-    intruderDisplay: 'الصفرا',
+    target: 'المُقارِن',
+    intruderDisplay: 'الناقد',
     intruderAgent: 'writing-critic',
     intruderContent: 'الصياغة مرتبكة، الفقرة الثانية تحتاج تكثيفاً نقدياً صارماً.',
   },
   {
-    target: 'الدبسا',
-    intruderDisplay: 'رمّانة',
+    target: 'السارد',
+    intruderDisplay: 'المُقارِن',
     intruderAgent: 'comparator',
     intruderContent: 'مقارنة: الخيار (أ) يتفوّق على (ب) في ثلاثة محاور من أصل خمسة.',
   },
   {
     target: 'المصمم',
-    intruderDisplay: 'عبدان',
-    intruderAgent: 'abdan',
+    intruderDisplay: 'الباحث',
+    intruderAgent: 'research',
     intruderContent: 'خلاصة المراجعة المنهجية: الفجوة البحثية تتركّز في ثلاثة محاور.',
   },
 ];
