@@ -24,6 +24,7 @@ interface DeletionImpact { messages: number; memories: number; tasks: number; ap
 
 const AGENT_NAMES: Record<string, { ar: string; en: string }> = {
   manager: { ar: 'الراعي', en: "Al-Ra'i" },
+  doctor: { ar: 'الدكتور', en: 'Al-Duktor' },
   research: { ar: 'الباحث', en: 'Al-Bahith' },
   'reading-helper': { ar: 'المُلخِّص', en: 'Al-Mulakhkhis' },
   'writing-critic': { ar: 'الناقد', en: 'Al-Naqid' },
@@ -35,6 +36,12 @@ const AGENT_NAMES: Record<string, { ar: string; en: string }> = {
   analyst: { ar: 'المحلل', en: 'Al-Muhallil' },
   munazzim: { ar: 'المنظّم', en: 'Al-Munazzim' },
   mushakhkhis: { ar: 'المشخّص', en: 'Al-Mushakhkhis' },
+  'research-companion': { ar: 'الخوي', en: 'Al-Khuwy' },
+  fatin: { ar: 'الفطين', en: 'Al-Fatin' },
+  playmaker: { ar: 'المُمرر', en: 'Al-Mumarrir' },
+  mudawwin: { ar: 'المُدوّن', en: 'Al-Mudawwin' },
+  sayyaq: { ar: 'الكاتب', en: 'Al-Katib' },
+  clippy: { ar: 'Clippy', en: 'Clippy' },
 };
 
 export function ConversationsPageView() {

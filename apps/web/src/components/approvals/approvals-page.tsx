@@ -53,12 +53,24 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 const AGENT_NAMES: Record<string, { en: string; ar: string }> = {
-  architect: { en: 'Al-Ra\'i', ar: 'الراعي' },
   manager: { en: "Al-Ra'i", ar: 'الراعي' },
+  doctor: { en: 'Al-Duktor', ar: 'الدكتور' },
+  architect: { en: 'Al-Musammim', ar: 'المصمم' },
   research: { en: 'Al-Bahith', ar: 'الباحث' },
   'reading-helper': { en: 'Al-Mulakhkhis', ar: 'المُلخِّص' },
   'writing-critic': { en: 'Al-Naqid', ar: 'الناقد' },
   comparator: { en: 'Al-Muqarin', ar: 'المُقارِن' },
+  'content-creator': { en: 'Al-Sarid', ar: 'السارد' },
+  creative: { en: "Al-Mubdi'", ar: 'المبدع' },
+  'tasks-agent': { en: 'Maham', ar: 'مهام' },
+  analyst: { en: 'Al-Muhallil', ar: 'المحلل' },
+  munazzim: { en: 'Al-Munazzim', ar: 'المنظّم' },
+  mushakhkhis: { en: 'Al-Mushakhkhis', ar: 'المشخّص' },
+  'research-companion': { en: 'Al-Khuwy', ar: 'الخوي' },
+  fatin: { en: 'Al-Fatin', ar: 'الفطين' },
+  playmaker: { en: 'Al-Mumarrir', ar: 'المُمرر' },
+  mudawwin: { en: 'Al-Mudawwin', ar: 'المُدوّن' },
+  sayyaq: { en: 'Al-Katib', ar: 'الكاتب' },
 };
 
 export function ApprovalsPage() {
