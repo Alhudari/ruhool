@@ -2,19 +2,27 @@
  * Chat-handler display data for agents. Extracted from index.ts (REL-01 stage 2d).
  *
  * AGENT_HEADERS are the Arabic-branded prefix lines injected before assistant
- * replies (e.g. "**[عبدان — البحث العميق]**"). AGENT_DISPLAY_NAMES lives in
- * `services/activity.ts` to avoid duplication; re-exported here for ergonomics.
+ * replies. AGENT_DISPLAY_NAMES lives in `services/activity.ts`; re-exported here.
  */
 export const AGENT_HEADERS: Record<string, string> = {
-  research: '**[عبدان — البحث العميق]**',
-  'reading-helper': '**[شواشة — مساعد القراءة]**',
-  'writing-critic': '**[الصفرا — نقد الكتابة]**',
-  comparator: '**[رمّانة — المقارنة]**',
   manager: '**[الراعي — القائد]**',
+  doctor: '**[الدكتور — مدير غرفة الحياة]**',
+  research: '**[الباحث — البحث العلمي العميق]**',
+  'reading-helper': '**[المُلخِّص — مساعد القراءة]**',
+  'writing-critic': '**[الناقد — نقد الكتابة]**',
+  comparator: '**[المُقارِن — مقارنة الأوراق]**',
   architect: '**[المصمم — مصمم الوكلاء]**',
-  'content-creator': '**[الدبسا — صناعة المحتوى]**',
-  creative: '**[\u0627\u0644\u0643\u0631\u064a\u064a\u062a\u0641 \u2014 \u0635\u0646\u0627\u0639\u0629 \u0627\u0644\u0641\u064a\u062f\u064a\u0648]**',
-  'tasks-agent': '**[\u0645\u0647\u0627\u0645 \u2014 \u0625\u062f\u0627\u0631\u0629 \u0627\u0644\u0645\u0647\u0627\u0645]**',
+  'content-creator': '**[السارد — صناعة المحتوى]**',
+  creative: '**[المبدع — صناعة الفيديو]**',
+  'tasks-agent': '**[مهام — إدارة المهام]**',
+  analyst: '**[المحلل — تحليل الاشتراكات]**',
+  munazzim: '**[المنظّم — إدارة المحادثات]**',
+  mushakhkhis: '**[المشخّص — فحص النظام]**',
+  'research-companion': '**[الخوي — رفيق الدكتوراه]**',
+  fatin: '**[الفطين — وكيل الرؤية]**',
+  playmaker: '**[المُمرر — الذكاء التوجيهي]**',
+  mudawwin: '**[المُدوّن — متابع الاجتماعات]**',
+  sayyaq: '**[الكاتب — مساعد الصياغة]**',
 };
 
 export { AGENT_DISPLAY_NAMES } from '../services/activity.js';

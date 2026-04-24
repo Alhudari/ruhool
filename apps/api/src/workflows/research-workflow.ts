@@ -1,7 +1,7 @@
 import { proxyActivities } from '@temporalio/workflow';
 
 /**
- * ARC-02: durable research workflow for عبدان.
+ * ARC-02: durable research workflow for الباحث (Al-Bahith).
  *
  * Activities are implemented in `../workers/temporal-activities.ts` and proxied
  * here via Temporal's deterministic runtime. The workflow orchestrates:
