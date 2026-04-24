@@ -67,6 +67,16 @@ export function applyStoreDefaults(
     opts.saveStore();
   }
 
+  // B-5: backfill retry fields for existing AgentTaskRecords
+  for (const t of (store.agentTasks ?? [])) {
+    if (t.retryCount === undefined) t.retryCount = 0;
+    if (t.maxRetries === undefined) t.maxRetries = 3;
+    if (t.nextRetryAt === undefined) t.nextRetryAt = null;
+    if (t.timeoutMs === undefined) t.timeoutMs = null;
+    if (t.lastError === undefined) t.lastError = null;
+    if (t.idempotencyKey === undefined) t.idempotencyKey = null;
+  }
+
   let overridesRestored = 0;
   const overrides = store.promptOverrides;
   if (overrides) {

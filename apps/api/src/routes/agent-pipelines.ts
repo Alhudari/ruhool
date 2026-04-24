@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
 import type { Hono } from 'hono';
-import type { StoreData, AgentPipelineRecord, AgentPipelineStep, AgentTaskRecord } from '../store/types.js';
+import type { StoreData, AgentPipelineRecord, AgentPipelineStep, AgentTaskRecord, PipelineFailPolicy } from '../store/types.js';
 import { parseNaturalTime } from '../services/natural-time.js';
+import { RuhoolError } from '../services/errors.js';
+import { flag } from '../services/flags.js';
 
 export type AgentPipelinesDeps = {
   getStore: () => StoreData;
@@ -34,9 +36,13 @@ export async function runPipeline(
   const input = pipeline.documents.join('\n\n');
 
   try {
+    let hadFailure = false;
+
     for (const step of pipeline.steps.sort((a, b) => a.stepIndex - b.stepIndex)) {
       pipeline.currentStepIndex = step.stepIndex;
       pipeline.updatedAt = new Date().toISOString();
+      step.status = 'running';
+      step.error = null;
       saveStore();
 
       const prompt = buildPrompt(step.promptTemplate, input, pipeline.stepOutputs, pipeline.documents);
@@ -60,13 +66,40 @@ export async function runPipeline(
         updatedAt: new Date().toISOString(),
       };
 
-      const result = await runTask(taskRecord);
-      pipeline.stepOutputs[step.stepIndex] = result;
+      try {
+        const result = await runTask(taskRecord);
+        step.status = 'done';
+        step.result = result;
+        pipeline.stepOutputs[step.stepIndex] = result;
+      } catch (err) {
+        step.status = 'failed';
+        step.error = err instanceof Error ? err.message : String(err);
+        hadFailure = true;
+
+        const policy: PipelineFailPolicy = step.onFail ?? 'abort';
+        if (!flag('PIPELINE_RESILIENCE') || policy === 'abort') {
+          throw new RuhoolError(
+            'E_PIPELINE_STEP_FAILED',
+            `Pipeline step ${step.stepIndex} failed: ${step.error}`,
+            { pipelineId: pipeline.id, stepIndex: step.stepIndex }
+          );
+        } else if (policy === 'skip') {
+          step.status = 'skipped';
+          pipeline.stepOutputs[step.stepIndex] = '';
+          // continue to next step
+        } else if (policy === 'ask_user') {
+          pipeline.status = 'awaiting_user';
+          pipeline.updatedAt = new Date().toISOString();
+          saveStore();
+          return; // pause and wait
+        }
+      }
+
       pipeline.updatedAt = new Date().toISOString();
       saveStore();
     }
 
-    pipeline.status = 'done';
+    pipeline.status = hadFailure ? 'partial-failure' : 'done';
     pipeline.completedAt = new Date().toISOString();
 
     if (pipeline.reportOnComplete) {

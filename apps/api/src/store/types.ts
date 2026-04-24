@@ -1294,9 +1294,19 @@ export interface AgentTaskRecord {
   deletedAt?: string;
   createdAt: string;
   updatedAt: string;
+  // B-5: Retry State Machine
+  retryCount?: number;
+  maxRetries?: number;
+  nextRetryAt?: string | null;
+  timeoutMs?: number | null;
+  lastError?: string | null;
+  idempotencyKey?: string | null;
 }
 
 // ─── A-5: Overnight Pipeline ─────────────────────────────────────────────────
+
+export type PipelineStepStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+export type PipelineFailPolicy = 'abort' | 'skip' | 'ask_user';
 
 export interface AgentPipelineStep {
   stepIndex: number;
@@ -1304,13 +1314,18 @@ export interface AgentPipelineStep {
   /** Supports {{input}}, {{step_N_output}}, {{documents}} */
   promptTemplate: string;
   label: string | null;
+  // B-6: resilience fields
+  status?: PipelineStepStatus;
+  result?: string | null;
+  error?: string | null;
+  onFail?: PipelineFailPolicy;
 }
 
 export interface AgentPipelineRecord {
   id: string;
   name: { en: string; ar: string };
   steps: AgentPipelineStep[];
-  status: 'draft' | 'scheduled' | 'running' | 'done' | 'failed';
+  status: 'draft' | 'scheduled' | 'running' | 'done' | 'failed' | 'awaiting_user' | 'partial-failure';
   scheduledFor: string | null;
   startedAt: string | null;
   completedAt: string | null;
