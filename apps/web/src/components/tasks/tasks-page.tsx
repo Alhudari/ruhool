@@ -149,6 +149,7 @@ export function TasksPage() {
     try { window.localStorage.setItem('ruhool.tasks.workspace-filter', workspaceFilter); } catch { /* noop */ }
   }, [workspaceFilter]);
   const [editingTask, setEditingTask] = useState<TaskItem | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [quickAddText, setQuickAddText] = useState('');
   const [newListName, setNewListName] = useState('');
   const [showNewList, setShowNewList] = useState(false);
@@ -180,7 +181,7 @@ export function TasksPage() {
       });
       setTasks(t);
       setLists(l);
-    } catch {} finally { setLoading(false); }
+    } catch (e) { setLoadError(e instanceof Error ? e.message : 'Failed to load tasks'); } finally { setLoading(false); }
   }, [workspaceFilter]);
 
   useEffect(() => { load(); }, [load]);
@@ -640,15 +641,20 @@ export function TasksPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-            <CheckSquare size={18} className="text-emerald-500" />
+          <div className="w-11 h-11 rounded-[var(--radius-lg)] bg-accent/10 text-accent flex items-center justify-center shrink-0">
+            <CheckSquare size={22} />
           </div>
-          <h1 className="text-xl font-semibold text-on-surface">
-            {isRTL ? '\u0645\u0647\u0627\u0645' : 'Tasks'}
-          </h1>
-          <span className="text-sm text-on-surface-tertiary">
-            ({tasks.filter(t => !t.completed).length})
-          </span>
+          <div>
+            <h1 className="text-xl font-bold text-on-surface">
+              {isRTL ? '\u0627\u0644\u0645\u0647\u0627\u0645' : 'Tasks'}
+              <span className="text-sm font-normal text-on-surface-tertiary ms-2">
+                ({tasks.filter(t => !t.completed).length})
+              </span>
+            </h1>
+            <p className="text-xs text-on-surface-tertiary">
+              {isRTL ? '\u0645\u0647\u0627\u0645 \u0627\u0644\u062f\u0643\u062a\u0648\u0631\u0627\u0647 \u0648\u0627\u0644\u062d\u064a\u0627\u0629' : 'PhD & life task management'}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -673,6 +679,14 @@ export function TasksPage() {
           </button>
         </div>
       </div>
+
+      {/* Load error */}
+      {loadError && (
+        <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400 flex items-center justify-between">
+          <span>{loadError}</span>
+          <button onClick={() => { setLoadError(null); load(); }} className="text-xs underline">{isRTL ? 'إعادة المحاولة' : 'Retry'}</button>
+        </div>
+      )}
 
       {/* Search bar */}
       <div className="relative mb-4">
@@ -873,8 +887,8 @@ export function TasksPage() {
 
       {/* Quick Add (bottom floating) */}
       <div className="fixed bottom-4 md:bottom-6 start-1/2 -translate-x-1/2 rtl:translate-x-1/2 w-full max-w-xl px-4">
-        <div className="flex items-center gap-2 bg-surface border border-border rounded-xl shadow-lg px-4 py-2.5">
-          <Plus size={18} className="text-on-surface-tertiary flex-shrink-0" />
+        <div className="flex items-center gap-2 bg-surface border border-amber-500/30 rounded-xl shadow-lg px-4 py-2.5">
+          <Plus size={18} className="text-amber-500 flex-shrink-0" />
           <input
             ref={quickAddRef}
             type="text"
@@ -886,7 +900,7 @@ export function TasksPage() {
             dir={isRTL ? 'rtl' : 'ltr'}
           />
           {quickAddText && (
-            <button onClick={quickAdd} className="p-1.5 rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors">
+            <button onClick={quickAdd} className="p-1.5 rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors">
               <Plus size={16} />
             </button>
           )}
