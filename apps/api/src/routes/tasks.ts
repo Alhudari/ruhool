@@ -177,6 +177,34 @@ export function registerTasksRoutes(app: Hono, deps: TasksRoutesDeps): void {
     return c.json(task);
   });
 
+  // ── Bilingual categories (J-8) ──────────────────────────────────────
+  const BUILTIN_CATEGORIES = [
+    { id: 'phd',      en: 'PhD Research',   ar: 'بحث الدكتوراه' },
+    { id: 'life',     en: 'Life',           ar: 'الحياة' },
+    { id: 'meetings', en: 'Meeting Tasks',  ar: 'مهام الاجتماعات' },
+    { id: 'general',  en: 'General',        ar: 'عام' },
+  ];
+
+  app.get('/api/tasks/categories', (c) => {
+    const store = getStore();
+    const custom = ((store as { taskCategories?: { id: string; en: string; ar: string }[] }).taskCategories ?? []);
+    c.header('Cache-Control', 'private, max-age=300');
+    return c.json([...BUILTIN_CATEGORIES, ...custom]);
+  });
+
+  app.post('/api/tasks/categories', async (c) => {
+    const store = getStore();
+    const body = await c.req.json<{ id: string; en: string; ar: string }>();
+    if (!body.en || !body.ar) return c.json({ error: 'en and ar required' }, 400);
+    const s = store as { taskCategories?: { id: string; en: string; ar: string }[] };
+    if (!s.taskCategories) s.taskCategories = [];
+    const id = body.id || body.en.toLowerCase().replace(/\s+/g, '-');
+    if (s.taskCategories.find(c => c.id === id)) return c.json({ error: 'Category exists' }, 409);
+    s.taskCategories.push({ id, en: body.en, ar: body.ar });
+    saveStore();
+    return c.json({ ok: true, categories: [...BUILTIN_CATEGORIES, ...s.taskCategories] }, 201);
+  });
+
   // R17 — per-workspace task lists. Query `?workspaceId=phd|life|...`
   // returns that workspace's categories. No query → legacy flat array
   // (kept for backward compat with older UI versions).

@@ -1067,7 +1067,7 @@ export interface StoreData {
   promptOverrides?: Record<string, string>;
   permissionOverrides?: Record<string, AgentPermissions>;
   builtinAgentModels?: Record<string, string>;
-  taskCategories?: string[];
+  taskCategories?: { id: string; en: string; ar: string }[];
   apiKeys?: Record<string, string>;
   costTier?: 'zero-cost' | 'saving' | 'medium' | 'max' | string;
   voicePreferences?: { elevenlabsVoiceId?: string; [k: string]: unknown };

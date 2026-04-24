@@ -151,6 +151,7 @@ export function TasksPage() {
   // is today's focus, 'habits' is habit templates only.
   const [todayView, setTodayView] = useState<'all' | 'today' | 'habits' | 'notes'>('all');
   const [quickNotes, setQuickNotes] = useState<TaskItem[]>([]);
+  const [categories, setCategories] = useState<{ id: string; en: string; ar: string }[]>([]);
   useEffect(() => {
     try {
       const v = window.localStorage.getItem('ruhool.tasks.workspace-filter');
@@ -213,10 +214,19 @@ export function TasksPage() {
         if (ao !== bo) return ao - bo;
         return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
       });
+      const cats = await apiFetch<{ id: string; en: string; ar: string }[]>('/api/tasks/categories').catch(() => []);
       setTasks(t);
       setLists(l);
-    } catch (e) { setLoadError(e instanceof Error ? e.message : 'Failed to load tasks'); } finally { setLoading(false); }
+      setCategories(cats);
+    } catch (e) { setLoadError(e instanceof Error ? e.message : 'Failed to load tasks'); }
+    finally { setLoading(false); }
   }, [workspaceFilter]);
+
+  const getCategoryLabel = (listId: string): string => {
+    const cat = categories.find(c => c.id === listId || c.en === listId || c.ar === listId);
+    if (cat) return isRTL ? cat.ar : cat.en;
+    return listId;
+  };
 
   useEffect(() => { load(); }, [load]);
 
@@ -840,7 +850,7 @@ export function TasksPage() {
               activeList === list ? 'bg-accent text-white border-accent' : 'bg-surface border-border text-on-surface-secondary hover:bg-surface-secondary'
             )}
           >
-            {list}
+            {getCategoryLabel(list)}
             {activeList === list && lists.length > 1 && (
               <button
                 onClick={(e) => { e.stopPropagation(); deleteList(list); }}
