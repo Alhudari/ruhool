@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { StickyNote, Loader2, Filter } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { StickyNote, Loader2, Filter, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
@@ -37,6 +38,7 @@ const TYPE_COLORS: Record<string, string> = {
 export function NotesPage() {
   const { language } = useAppStore();
   const isRTL = language === 'ar';
+  const router = useRouter();
   const [notes, setNotes] = useState<Note[]>([]);
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,6 +93,14 @@ export function NotesPage() {
           {isRTL ? 'الملاحظات الذرية' : 'Atomic Notes'}
         </h1>
         <span className="text-sm text-on-surface-tertiary">({filtered.length})</span>
+        <button
+          onClick={() => router.push(`/?q=${encodeURIComponent(isRTL ? '@الكاتب ساعدني في تنظيم ملاحظاتي وربطها ببحثي' : '@sayyaq Help me organize my notes and connect them to my research')}`)}
+          className="ms-auto flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20 transition-colors"
+          title={isRTL ? 'تحدث مع الكاتب' : 'Chat with Al-Katib'}
+        >
+          <MessageSquare size={14} />
+          {isRTL ? 'الكاتب' : 'Al-Katib'}
+        </button>
       </div>
 
       {/* Filters */}
