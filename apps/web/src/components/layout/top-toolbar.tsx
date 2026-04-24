@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Languages, Sun, Moon, Palette } from 'lucide-react';
+import { Languages, Sun, Moon, Palette, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { GlobalSearch } from './global-search';
 import { WorkspaceSwitcher } from './workspace-switcher';
 import { NotificationBell } from '@/components/notifications/notification-bell';
+import { AgentTaskDialog } from '@/components/agents/AgentTaskDialog';
 
 // Vintage analog-style digital clock — monospace + sweep progress bar
 function VintageClock({ language }: { language: 'en' | 'ar' }) {
@@ -70,6 +71,19 @@ export function TopToolbar() {
   const { language, setLanguage, theme, setTheme, themeVariant, setThemeVariant } = useAppStore();
   const isRTL = language === 'ar';
   const [showThemeMenu, setShowThemeMenu] = useState(false);
+  const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+
+  // Alt+T — global shortcut to open assign-agent dialog
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey && e.key === 't') {
+        e.preventDefault();
+        setTaskDialogOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const toggleLang = () => {
     const next = language === 'en' ? 'ar' : 'en';
@@ -144,7 +158,21 @@ export function TopToolbar() {
       </div>
 
       <div className="w-px h-5 bg-border mx-1" />
+
+      {/* A-6: Assign Agent button — Alt+T */}
+      <button
+        onClick={() => setTaskDialogOpen(true)}
+        title={isRTL ? 'تكليف وكيل (Alt+T)' : 'Assign Agent (Alt+T)'}
+        className="flex items-center gap-1 h-8 px-2.5 rounded-lg bg-accent text-on-accent hover:opacity-90 text-xs font-medium"
+      >
+        <Plus size={12} />
+        <span>{isRTL ? 'مهمة' : 'Task'}</span>
+      </button>
+
+      <div className="w-px h-5 bg-border mx-1" />
       <NotificationBell />
+
+      <AgentTaskDialog open={taskDialogOpen} onClose={() => setTaskDialogOpen(false)} />
     </div>
   );
 }
