@@ -260,6 +260,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       chainMentions?: string[];
       images?: Array<{ base64: string; mimeType: string }>;
       skipPlayMaker?: boolean;
+      projectId?: string;
     }>();
 
     // BUG A/C FIX: derive CHAT_V2 ONCE at handler entry so every branch (cache,
@@ -349,7 +350,8 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
         agentId: detectedAgent,
         participants: ['manager'],
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      };
+        ...(body.projectId ? { projectId: body.projectId } : {}),
+      } as ConvRecord & { projectId?: string };
       if (detectedAgent !== 'manager' && !conv.participants!.includes(detectedAgent)) {
         conv.participants!.push(detectedAgent);
       }
