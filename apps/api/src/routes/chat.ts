@@ -881,7 +881,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
           try {
             const { buildCompanionMemoryContext } = await import('./companion.js');
             const memCtx = buildCompanionMemoryContext(
-              (store as unknown as { companionMemory?: import('../store/types.js').CompanionMemoryEntry[] }).companionMemory ?? []
+              store.companionMemory ?? []
             );
             if (memCtx) activeSystemPrompt += '\n\n' + memCtx;
             // Live vault context — graceful
@@ -1535,9 +1535,9 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                   const remembered = parseCompanionMemoryActions(fullResponse, convId!);
                   if (remembered.length > 0) {
                     const storeNow = getStore();
-                    if (!storeNow.companionMemory) (storeNow as unknown as { companionMemory: import('../store/types.js').CompanionMemoryEntry[] }).companionMemory = [];
+                    if (!storeNow.companionMemory) storeNow.companionMemory = [];
                     for (const entry of remembered) {
-                      (storeNow as unknown as { companionMemory: import('../store/types.js').CompanionMemoryEntry[] }).companionMemory.push({
+                      storeNow.companionMemory.push({
                         id: crypto.randomUUID(),
                         ...entry,
                       });
