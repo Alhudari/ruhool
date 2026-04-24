@@ -6,7 +6,7 @@ import { MANAGER_SYSTEM_PROMPT } from '../../prompts/index.js';
 /**
  * AGT-05: structured tool-call delegation for الراعي (Manager).
  *
- * Replaces the text-marker pattern ("أحلتها لعبدان ✓") with an Anthropic
+ * Replaces the text-marker pattern ("أحلتها لالباحث ✓") with an Anthropic
  * `tool_use` block. The manager loop receives a `delegate_to_specialist` tool
  * whose `specialist` enum is derived at runtime from the agent modules loaded
  * by the ARC-04 module registry (enforcing "manager can only delegate to
@@ -29,21 +29,23 @@ const KNOWN_SPECIALIST_IDS = [
   'analyst',
   'munazzim',
   'mushakhkhis',
+  'research-companion',
 ];
 
 // Arabic display names → canonical IDs (for both tool enum and text-marker fallback).
 const ARABIC_TO_ID: Record<string, string> = {
-  عبدان: 'abdan',
-  شواشة: 'shwasha',
-  الصفرا: 'alsafra',
-  رمّانة: 'rammana',
-  الدبسا: 'aldabsa',
+  الباحث: 'abdan',
+  المُلخِّص: 'shwasha',
+  الناقد: 'alsafra',
+  المُقارِن: 'rammana',
+  السارد: 'aldabsa',
   المصمم: 'musammim',
-  الكرييتف: 'creative',
+  المبدع: 'creative',
   مهام: 'tasks-agent',
   المحلل: 'analyst',
   المنظّم: 'munazzim',
   المشخّص: 'mushakhkhis',
+  'الخوي': 'research-companion',
 };
 
 export interface DelegationRecord {
@@ -149,7 +151,7 @@ export function parseToolUseDelegations(content: Anthropic.ContentBlock[]): Dele
 }
 
 /**
- * Legacy fallback: extract "أحلتها لعبدان ✓" style markers from plain text.
+ * Legacy fallback: extract "أحلتها لالباحث ✓" style markers from plain text.
  */
 export function parseTextMarkerDelegations(text: string): DelegationRecord[] {
   const out: DelegationRecord[] = [];

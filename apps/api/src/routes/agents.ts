@@ -1,6 +1,81 @@
 import type { Hono } from 'hono';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { z } from 'zod';
 import type { ActivityRecord, CustomAgentRecord, StoreData } from '../store/types.js';
 import { BUILTIN_AGENTS } from '../state/builtin-agents.js';
+
+const agentOrgSchema = z.object({
+  version: z.number().int().positive().optional(),
+  ceo: z.string().min(1),
+  departments: z.array(z.object({
+    id: z.string().min(1),
+    label: z.object({ ar: z.string(), en: z.string() }).optional(),
+    icon: z.string().optional(),
+    color: z.string().optional(),
+    manager: z.string().min(1),
+    workers: z.array(z.string().min(1)),
+  })).max(20),
+});
+
+// ── Agent org (company model) ──────────────────────────────────────
+// Editable JSON at data/agent-org.json. Round 4: supports multiple
+// workspaces (PhD + Life). Each workspace has its own CEO and department
+// structure. Shared services cross workspaces.
+export interface AgentOrgDepartment {
+  id: string;
+  label: { ar: string; en: string };
+  icon?: string;
+  color?: string;
+  manager: string;
+  workers: string[];
+}
+export interface AgentOrgWorkspace {
+  id: string;
+  label: { ar: string; en: string };
+  icon?: string;
+  color?: string;
+  ceo: string;
+  departments: AgentOrgDepartment[];
+}
+export interface AgentOrg {
+  version: number;
+  updatedAt: string;
+  workspaces: AgentOrgWorkspace[];
+  sharedServices?: string[];
+  platformAdmins?: string[];
+}
+
+function agentOrgPath(dataRoot: string): string {
+  return path.join(dataRoot, 'agent-org.json');
+}
+
+// In-memory cache — invalidated by the file-watcher in index.ts.
+let _orgCache: { dataRoot: string; value: AgentOrg | null; mtimeMs: number } | null = null;
+export function invalidateAgentOrgCache(): void { _orgCache = null; }
+
+function readAgentOrg(dataRoot: string): AgentOrg | null {
+  const p = agentOrgPath(dataRoot);
+  try {
+    if (!fs.existsSync(p)) return null;
+    const stat = fs.statSync(p);
+    if (_orgCache && _orgCache.dataRoot === dataRoot && _orgCache.mtimeMs === stat.mtimeMs) {
+      return _orgCache.value;
+    }
+    const raw = fs.readFileSync(p, 'utf-8');
+    const value = JSON.parse(raw) as AgentOrg;
+    _orgCache = { dataRoot, value, mtimeMs: stat.mtimeMs };
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+function writeAgentOrg(dataRoot: string, org: AgentOrg): void {
+  const p = agentOrgPath(dataRoot);
+  fs.writeFileSync(p, JSON.stringify(org, null, 2), 'utf-8');
+}
+
 
 export type LogActivity = (
   type: ActivityRecord['type'],
@@ -14,6 +89,7 @@ export interface AgentRoutesDeps {
   saveStore: () => void;
   logActivity: LogActivity;
   builtinSystemPrompts: Record<string, string>;
+  dataRoot: string;
 }
 
 /**
@@ -21,6 +97,7 @@ export interface AgentRoutesDeps {
  *
  * GET    /api/agents
  * PUT    /api/agents/:id/prompt
+ * PUT    /api/agents/:id/name
  * GET    /api/custom-agents
  * POST   /api/custom-agents
  * GET    /api/custom-agents/:id
@@ -29,11 +106,18 @@ export interface AgentRoutesDeps {
  * PUT    /api/custom-agents/:id/archive
  */
 export function registerAgentRoutes(app: Hono, deps: AgentRoutesDeps): void {
-  const { getStore, saveStore, logActivity, builtinSystemPrompts } = deps;
+  const { getStore, saveStore, logActivity, builtinSystemPrompts, dataRoot } = deps;
 
   app.get('/api/agents', (c) => {
     const store = getStore();
     const includeArchived = c.req.query('archived') === 'true';
+    const overrides = store.agentNameOverrides || {};
+    // Apply name overrides without mutating BUILTIN_AGENTS — overrides are
+    // stored per-tenant/user in the store and resolved at read time.
+    const builtinsResolved = BUILTIN_AGENTS.map((agent) => {
+      const override = overrides[agent.id];
+      return override ? { ...agent, name: override } : agent;
+    });
     const customSrc = (store.customAgents || []).filter((a) => includeArchived || !a.archived);
     const customMapped = customSrc.map((a) => ({
       id: 'custom-' + a.id, moduleId: 'custom-' + a.id, name: a.name,
@@ -42,7 +126,7 @@ export function registerAgentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       featured: a.featured || false,
       archived: !!a.archived,
     }));
-    return c.json([...BUILTIN_AGENTS, ...customMapped]);
+    return c.json([...builtinsResolved, ...customMapped]);
   });
 
   app.put('/api/agents/:id/prompt', async (c) => {
@@ -59,6 +143,27 @@ export function registerAgentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     saveStore();
     logActivity('system', `Built-in agent prompt updated: ${agentId}`, body.prompt.slice(0, 100), { agentId });
     return c.json({ ok: true, agentId });
+  });
+
+  app.put('/api/agents/:id/name', async (c) => {
+    const store = getStore();
+    const agentId = c.req.param('id');
+    const body = await c.req.json<{ en: string; ar: string }>();
+    if (!body || typeof body.en !== 'string' || typeof body.ar !== 'string') {
+      return c.json({ error: 'en and ar are required strings' }, 400);
+    }
+    const en = body.en.trim();
+    const ar = body.ar.trim();
+    if (!en || !ar) return c.json({ error: 'en and ar must be non-empty' }, 400);
+
+    const known = BUILTIN_AGENTS.find((a) => a.id === agentId);
+    if (!known) return c.json({ error: 'Unknown builtin agent id' }, 404);
+
+    if (!store.agentNameOverrides) store.agentNameOverrides = {};
+    store.agentNameOverrides[agentId] = { en, ar };
+    saveStore();
+    logActivity('system', `Built-in agent name updated: ${agentId}`, `${en} / ${ar}`, { agentId });
+    return c.json({ ok: true, agentId, name: { en, ar } });
   });
 
   app.get('/api/custom-agents', (c) => {
@@ -129,5 +234,146 @@ export function registerAgentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     agent.updatedAt = new Date().toISOString();
     saveStore();
     return c.json({ ok: true });
+  });
+
+  // ── Agent org (departments + managers) ───────────────────────────
+  // The org is the source of truth for who manages whom. It's a flat
+  // JSON file so the user can also edit it directly in their vault-like
+  // flow. Missing/malformed file returns 404 so the UI can show the
+  // legacy flat view until one is created.
+  app.get('/api/agent-org', (c) => {
+    const org = readAgentOrg(dataRoot);
+    if (!org) return c.json({ error: 'Agent org not configured' }, 404);
+    const store = getStore();
+    const overrides = store.agentNameOverrides || {};
+    const customAgents = (store.customAgents || []).filter((a) => !a.archived);
+    const allAgents = [
+      ...BUILTIN_AGENTS.map((a) => ({ id: a.id, name: overrides[a.id] ?? a.name, builtIn: true })),
+      ...customAgents.map((a) => ({ id: 'custom-' + a.id, name: a.name, builtIn: false })),
+    ];
+    const nameMap = Object.fromEntries(allAgents.map((a) => [a.id, a.name]));
+
+    // Back-compat: if the file is still in v1 single-CEO shape, surface
+    // it as a single pseudo-workspace so older clients keep working.
+    const legacy = (org as unknown as { ceo?: string; departments?: AgentOrgDepartment[] });
+    const workspaces: AgentOrgWorkspace[] = Array.isArray(org.workspaces)
+      ? org.workspaces
+      : (legacy.ceo && legacy.departments
+        ? [{ id: 'phd', label: { ar: 'الدكتوراه', en: 'PhD' }, ceo: legacy.ceo, departments: legacy.departments }]
+        : []);
+
+    const resolvedWorkspaces = workspaces.map((ws) => ({
+      id: ws.id,
+      label: ws.label,
+      icon: ws.icon,
+      color: ws.color,
+      ceo: { id: ws.ceo, name: nameMap[ws.ceo] ?? null, known: ws.ceo in nameMap },
+      departments: ws.departments.map((d) => ({
+        ...d,
+        managerName: nameMap[d.manager] ?? null,
+        workerNames: d.workers.map((w) => ({ id: w, name: nameMap[w] ?? null, known: w in nameMap })),
+        managerKnown: d.manager in nameMap,
+      })),
+    }));
+
+    const assignedIds = new Set<string>([
+      ...workspaces.flatMap((ws) => [
+        ws.ceo,
+        ...ws.departments.flatMap((d) => [d.manager, ...d.workers]),
+      ]),
+      ...(org.sharedServices ?? []),
+      ...(org.platformAdmins ?? []),
+    ]);
+
+    return c.json({
+      org,
+      resolved: {
+        workspaces: resolvedWorkspaces,
+        sharedServices: (org.sharedServices ?? []).map((id) => ({ id, name: nameMap[id] ?? null, known: id in nameMap })),
+        platformAdmins: (org.platformAdmins ?? []).map((id) => ({ id, name: nameMap[id] ?? null, known: id in nameMap })),
+        unassigned: allAgents
+          .filter((a) => !assignedIds.has(a.id))
+          .map((a) => ({ id: a.id, name: a.name, builtIn: a.builtIn })),
+      },
+    });
+  });
+
+  app.put('/api/agent-org', async (c) => {
+    const raw = await c.req.json().catch(() => null);
+    // Accept either the v2 workspaces-shape OR the legacy v1 shape.
+    const v2 = raw && typeof raw === 'object' && Array.isArray((raw as { workspaces?: unknown }).workspaces);
+    let next: AgentOrg;
+    const store = getStore();
+    const knownIds = new Set<string>([
+      ...BUILTIN_AGENTS.map((a) => a.id),
+      ...(store.customAgents || []).map((a) => 'custom-' + a.id),
+    ]);
+
+    if (v2) {
+      const body = raw as AgentOrg;
+      next = {
+        version: 2,
+        updatedAt: new Date().toISOString(),
+        workspaces: body.workspaces.map((ws) => ({
+          id: ws.id,
+          label: ws.label ?? { ar: ws.id, en: ws.id },
+          icon: ws.icon,
+          color: ws.color,
+          ceo: ws.ceo,
+          departments: (ws.departments ?? []).map((d) => ({
+            id: d.id,
+            label: d.label ?? { ar: d.id, en: d.id },
+            icon: d.icon,
+            color: d.color,
+            manager: d.manager,
+            workers: d.workers ?? [],
+          })),
+        })),
+        sharedServices: body.sharedServices ?? [],
+        platformAdmins: body.platformAdmins ?? [],
+      };
+      const missing = new Set<string>();
+      for (const ws of next.workspaces) {
+        if (!knownIds.has(ws.ceo)) missing.add(ws.ceo);
+        for (const d of ws.departments) {
+          if (!knownIds.has(d.manager)) missing.add(d.manager);
+          for (const w of d.workers) if (!knownIds.has(w)) missing.add(w);
+        }
+      }
+      if (missing.size > 0) {
+        return c.json({ error: 'Unknown agent ids in org', missing: [...missing] }, 400);
+      }
+    } else {
+      const parsed = agentOrgSchema.safeParse(raw);
+      if (!parsed.success) {
+        return c.json({
+          error: 'Invalid agent-org payload',
+          messageAr: 'هيكل المؤسسة غير صالح',
+          issues: parsed.error.issues,
+        }, 400);
+      }
+      const body = parsed.data;
+      next = {
+        version: 2,
+        updatedAt: new Date().toISOString(),
+        workspaces: [{
+          id: 'phd',
+          label: { ar: 'الدكتوراه', en: 'PhD' },
+          ceo: body.ceo,
+          departments: body.departments.map((d) => ({
+            id: d.id,
+            label: d.label ?? { ar: d.id, en: d.id },
+            icon: d.icon,
+            color: d.color,
+            manager: d.manager,
+            workers: d.workers,
+          })),
+        }],
+      };
+    }
+    writeAgentOrg(dataRoot, next);
+    const deptCount = next.workspaces.reduce((n, ws) => n + ws.departments.length, 0);
+    logActivity('system', 'Agent org updated', `workspaces=${next.workspaces.length} depts=${deptCount}`, { metadata: { workspaces: next.workspaces.map((w) => w.id) } });
+    return c.json({ ok: true, updatedAt: next.updatedAt });
   });
 }
