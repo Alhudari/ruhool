@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Mail, Star, Trash2, CheckCheck, X } from 'lucide-react';
+import { Mail, Star, Trash2, CheckCheck, X, RefreshCw, Loader2 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { useAppStore } from '@/store/app';
 import { cn } from '@/lib/utils';
@@ -75,6 +75,7 @@ export function ReportsInboxPage() {
   const [offset, setOffset] = useState(0);
   const [openItem, setOpenItem] = useState<InboxFullItem | null>(null);
   const [loading, setLoading] = useState(true);
+  const [regenerating, setRegenerating] = useState(false);
   const LIMIT = 50;
 
   const load = useCallback(async () => {
@@ -123,6 +124,17 @@ export function ReportsInboxPage() {
       if (openItem?.id === id) setOpenItem(null);
     } catch {
       setItems(before);
+    }
+  };
+
+  const regenerateReport = async () => {
+    if (!openItem?.runId || regenerating) return;
+    setRegenerating(true);
+    try {
+      await apiFetch(`/api/reports/runs/${openItem.runId}/resend`, { method: 'POST' });
+      await load();
+    } catch { /* silent */ } finally {
+      setRegenerating(false);
     }
   };
 
@@ -229,9 +241,24 @@ export function ReportsInboxPage() {
                   <span>{formatDate(openItem.sentAt, isRTL)}</span>
                 </div>
               </div>
-              <button onClick={() => setOpenItem(null)} className="p-1.5 rounded text-on-surface-secondary hover:bg-surface-secondary">
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-1">
+                {openItem.runId && (
+                  <button
+                    onClick={regenerateReport}
+                    disabled={regenerating}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border text-on-surface-secondary hover:bg-surface-secondary disabled:opacity-50 transition-colors"
+                    title={isRTL ? 'إعادة توليد' : 'Regenerate'}
+                  >
+                    {regenerating
+                      ? <Loader2 size={12} className="animate-spin" />
+                      : <RefreshCw size={12} />}
+                    {isRTL ? 'إعادة توليد' : 'Regenerate'}
+                  </button>
+                )}
+                <button onClick={() => setOpenItem(null)} className="p-1.5 rounded text-on-surface-secondary hover:bg-surface-secondary">
+                  <X size={16} />
+                </button>
+              </div>
             </div>
             <iframe
               // Inject a <base href> into the HTML so relative URLs
