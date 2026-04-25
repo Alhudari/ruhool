@@ -1156,7 +1156,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
         }
 
         if (body.context) {
-          activeSystemPrompt += '\n\n[\u0633\u064A\u0627\u0642 \u0625\u0636\u0627\u0641\u064A \u0645\u0646 \u0627\u0644\u0648\u0627\u062C\u0647\u0629]\n' + body.context.replace(/<[^>]*>/g, '').replace(/[ --]/g, '').slice(0, 2000) + '\n';
+          activeSystemPrompt += '\n\n[\u0633\u064A\u0627\u0642 \u0625\u0636\u0627\u0641\u064A \u0645\u0646 \u0627\u0644\u0648\u0627\u062C\u0647\u0629]\n' + body.context.replace(/<[^>]*>/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').slice(0, 2000) + '\n';
         }
 
         try {

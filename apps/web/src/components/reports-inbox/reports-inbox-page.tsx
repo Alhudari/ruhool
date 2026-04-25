@@ -330,10 +330,11 @@ export function ReportsInboxPage() {
               </div>
             </div>
             <iframe
-              // Inject a <base href> into the HTML so relative URLs
-              // inside @font-face (and any other asset) resolve back
-              // to the web app's origin — without this, srcDoc
-              // creates an opaque origin where /fonts/* 404s.
+              // F-005: sandbox the iframe so report HTML cannot execute scripts,
+              // submit forms, or break out into the parent origin. allow-same-origin
+              // is intentionally NOT in the sandbox list — without it, the iframe
+              // is an opaque origin and inline scripts cannot read parent state.
+              sandbox=""
               srcDoc={injectBase(openItem.html)}
               title={openItem.subject}
               className="flex-1 w-full bg-white"

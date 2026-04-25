@@ -66,16 +66,7 @@ function decryptSensitive(data: StoreData): void {
   }
 }
 
-export function loadStore(): StoreData {
-  try {
-    if (fs.existsSync(STORE_FILE)) {
-      const data = JSON.parse(fs.readFileSync(STORE_FILE, 'utf-8')) as StoreData;
-      decryptSensitive(data);
-      return data;
-    }
-  } catch {
-    /* empty */
-  }
+function emptyStore(): StoreData {
   return {
     providers: [],
     conversations: [],
@@ -94,6 +85,55 @@ export function loadStore(): StoreData {
     taskLists: ['\u0639\u0627\u0645', '\u0627\u0644\u062f\u0643\u062a\u0648\u0631\u0627\u0647', '\u062c\u0645\u0639\u064a\u0629 \u0627\u0644\u0645\u0647\u0646\u062f\u0633\u064a\u0646', '\u0627\u0644\u0645\u062d\u062a\u0648\u0649', '\u0627\u0644\u0645\u0634\u0627\u0631\u064a\u0639'],
     keepNotes: [],
   };
+}
+
+export class StoreLoadError extends Error {
+  constructor(message: string, public readonly cause?: unknown) {
+    super(message);
+    this.name = 'StoreLoadError';
+  }
+}
+
+/**
+ * F-001: load store with fail-closed semantics.
+ * - Missing file \u2192 empty store (first boot)
+ * - Empty file \u2192 empty store (was created but never written)
+ * - Corrupt JSON \u2192 quarantine the file + throw StoreLoadError
+ * - Decrypt failure on a field is non-fatal (decryptSecret returns null/original)
+ */
+export function loadStore(): StoreData {
+  if (!fs.existsSync(STORE_FILE)) return emptyStore();
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(STORE_FILE, 'utf-8');
+  } catch (err) {
+    throw new StoreLoadError(`Failed to read store file: ${STORE_FILE}`, err);
+  }
+
+  // Empty file is treated as fresh boot
+  if (raw.trim().length === 0) return emptyStore();
+
+  let data: StoreData;
+  try {
+    data = JSON.parse(raw) as StoreData;
+  } catch (err) {
+    // Quarantine the corrupt file so a save doesn't overwrite it
+    try {
+      const quarantine = `${STORE_FILE}.corrupt.${Date.now()}`;
+      fs.copyFileSync(STORE_FILE, quarantine);
+      // eslint-disable-next-line no-console
+      console.error(`[store] CORRUPT JSON detected. Quarantined to ${quarantine}`);
+    } catch { /* best effort */ }
+    throw new StoreLoadError(`Store file has invalid JSON: ${STORE_FILE}`, err);
+  }
+
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    throw new StoreLoadError(`Store file is not a valid object: ${STORE_FILE}`);
+  }
+
+  decryptSensitive(data);
+  return data;
 }
 
 // ─── Singleton ───
@@ -152,6 +192,26 @@ export function saveStore(): Promise<void> {
         },
       } : {}),
     };
-    fs.writeFileSync(STORE_FILE, JSON.stringify(serializable, null, 2), 'utf-8');
+    // F-001: atomic write — temp file + fsync + rename
+    const json = JSON.stringify(serializable, null, 2);
+    const tmpFile = `${STORE_FILE}.tmp.${process.pid}`;
+    let fd: number | null = null;
+    try {
+      fd = fs.openSync(tmpFile, 'w');
+      fs.writeSync(fd, json, 0, 'utf-8');
+      try { fs.fsyncSync(fd); } catch { /* best effort on platforms that may not support fsync */ }
+      fs.closeSync(fd);
+      fd = null;
+      fs.renameSync(tmpFile, STORE_FILE);
+    } catch (err) {
+      if (fd !== null) { try { fs.closeSync(fd); } catch { /* ignore */ } }
+      try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+      throw err;
+    }
   });
+}
+
+/** Test-only: reset the singleton (for unit tests that mutate STORE_FILE). */
+export function _resetStoreForTests(): void {
+  _store = null;
 }

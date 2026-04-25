@@ -12,6 +12,17 @@ export interface WorkerDeps {
 // FIX-5: shared regex — ensures parse and strip stay in sync
 const NOTIFY_BLOCK_RE = /\[NOTIFY\]\s*(\{[\s\S]*?\})/g;
 
+// F-005: HTML-escape agent output before embedding in inbox HTML
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    c === '&' ? '&amp;' :
+    c === '<' ? '&lt;' :
+    c === '>' ? '&gt;' :
+    c === '"' ? '&quot;' :
+    '&#39;'
+  );
+}
+
 function processNotifications(store: StoreData, output: string, agentId: string): { processedRanges: Array<[number, number]> } {
   const ranges: Array<[number, number]> = [];
   for (const match of output.matchAll(NOTIFY_BLOCK_RE)) {
@@ -187,7 +198,7 @@ export function startAgentTaskWorker(deps: WorkerDeps): () => void {
             starred: false,
             tags: ['agent-task'],
             bodyMarkdown: cleanResult,
-            html: `<pre style="white-space:pre-wrap;font-family:inherit">${cleanResult.slice(0, 500)}${cleanResult.length > 500 ? '…' : ''}</pre>`,
+            html: `<pre style="white-space:pre-wrap;font-family:inherit">${escapeHtml(cleanResult.slice(0, 500))}${cleanResult.length > 500 ? '…' : ''}</pre>`,
           });
           store.reportInbox = inbox;
         }

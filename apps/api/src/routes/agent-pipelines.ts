@@ -5,6 +5,17 @@ import { parseNaturalTime } from '../services/natural-time.js';
 import { RuhoolError } from '../services/errors.js';
 import { flag } from '../services/flags.js';
 
+// F-005: HTML-escape pipeline output before embedding in inbox HTML
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    c === '&' ? '&amp;' :
+    c === '<' ? '&lt;' :
+    c === '>' ? '&gt;' :
+    c === '"' ? '&quot;' :
+    '&#39;'
+  );
+}
+
 export type AgentPipelinesDeps = {
   getStore: () => StoreData;
   saveStore: () => void;
@@ -144,7 +155,7 @@ export async function runPipeline(
         starred: false,
         tags: ['pipeline'],
         bodyMarkdown: lastOutput,
-        html: `<pre style="white-space:pre-wrap;font-family:inherit">${lastOutput.slice(0, 500)}…</pre>`,
+        html: `<pre style="white-space:pre-wrap;font-family:inherit">${escapeHtml(lastOutput.slice(0, 500))}…</pre>`,
       });
       freshStore.reportInbox = inbox;
     }
