@@ -904,10 +904,38 @@ export interface LibraryEntity {
   publisher?: string;
   journal?: string;
   abstract?: string;
+  /** Source of import (zotero | obsidian-vault | manual). Helps re-syncs avoid dupes. */
+  importSource?: string;
+  /** Citekey from BibTeX/Zotero — used to dedupe when reimporting */
+  citekey?: string;
+  /** Free-form fields tied to the matrix. Per-type columns live here so each
+   *  EntityType can have its own schema (paper aims, methodology vs. book chapters). */
+  customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
   archivedAt?: string;
   deletedAt?: string;
+}
+
+/** Per-type matrix column definition. The user can show/hide/reorder/edit at runtime.
+ *  Stored in StoreData.matrixSchemas keyed by EntityType. */
+export interface MatrixColumn {
+  key: string;              // property name within customFields (or top-level key like "year")
+  labelEn: string;
+  labelAr: string;
+  /** "string" | "text" | "number" | "tags" | "list" | "date" | "url" | "select" | "boolean" */
+  kind: 'string' | 'text' | 'number' | 'tags' | 'list' | 'date' | 'url' | 'select' | 'boolean';
+  options?: string[];       // for kind=select
+  visible: boolean;         // default visibility in matrix view
+  width?: number;           // pixel width hint
+  order: number;            // sort order
+  source?: 'top-level' | 'custom'; // top-level = LibraryEntity field; custom = customFields
+}
+
+export interface MatrixSchema {
+  type: EntityType;
+  columns: MatrixColumn[];
+  updatedAt: string;
 }
 
 export interface MilestoneRecord {
@@ -1126,6 +1154,8 @@ export interface StoreData {
   grs2Records?: Grs2Record[];
   milestones?: MilestoneRecord[];
   libraryEntities?: LibraryEntity[];
+  /** Per-EntityType matrix column schemas — show/hide/order/labels for the matrix view. */
+  matrixSchemas?: MatrixSchema[];
   inboxItems?: InboxItemRecord[];
   tags?: TagRecord[];
   tagAssignments?: TagAssignment[];

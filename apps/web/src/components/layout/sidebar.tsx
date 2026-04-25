@@ -147,6 +147,7 @@ const NAV_ITEMS_MAP: Record<string, NavItem> = {
   canvas: { id: 'canvas', icon: Network, label: { en: 'Canvas', ar: 'الكانفس' }, href: '/canvas' },
   'audit-log': { id: 'audit-log', icon: Eye, label: { en: 'Activity Log', ar: 'سجل النشاط' }, href: '/audit-log' },
   'agent-tasks': { id: 'agent-tasks', icon: ListTodo, label: { en: 'Agent Tasks', ar: 'مهام الوكلاء' }, href: '/agent-tasks' },
+  'library-matrix': { id: 'library-matrix', icon: Library, label: { en: 'Lit Matrix', ar: 'مصفوفة المراجع' }, href: '/library/matrix' },
   setup: { id: 'setup', icon: Settings, label: { en: 'Setup / Reset', ar: 'الإعداد / التصفير' }, href: '/setup' },
   ambient: { id: 'ambient', icon: HelpCircle, label: { en: 'Ambient (TV)', ar: 'شاشة العرض' }, href: '/ambient' },
 };
@@ -180,7 +181,7 @@ const WORKSPACES: Workspace[] = [
       {
         title: { en: 'PhD', ar: 'الدكتوراه' },
         // MASTER_PROMPT_V2 Part 2: new navigation structure
-        items: ['phd', 'meetings', 'shwasha', 'library', 'zotero', 'research', 'tasks', 'inbox'],
+        items: ['phd', 'meetings', 'shwasha', 'library', 'library-matrix', 'zotero', 'research', 'tasks', 'inbox'],
       },
       {
         title: { en: 'Platform', ar: 'المنصة' },
