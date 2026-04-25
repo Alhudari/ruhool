@@ -68,6 +68,9 @@ const RETRY_BACKOFF_MS = [30_000, 120_000, 300_000]; // 30s → 2m → 5m
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_TIMEOUT_MS = 300_000; // 5 minutes
 const STALE_RUNNING_MS = 10 * 60_000; // 10 minutes
+// F-017: compaction interval (1h)
+const COMPACTION_INTERVAL_MS = 60 * 60_000;
+let _lastCompactionAt = 0;
 
 // B-7: reconcile tasks stuck at 'running' from a previous server process
 function reconcileStuckTasks(deps: WorkerDeps): void {
@@ -137,8 +140,25 @@ export function startAgentTaskWorker(deps: WorkerDeps): () => void {
   // B-7: reconcile stuck tasks before starting
   reconcileStuckTasks(deps);
 
+  // F-023: prevent overlapping ticks
+  let ticking = false;
+
   const tick = async () => {
+    if (ticking) return;
+    ticking = true;
+    try {
     const store = getStore();
+
+    // F-017: periodic compaction — drop oldest records when caps exceeded
+    if (Date.now() - _lastCompactionAt > COMPACTION_INTERVAL_MS) {
+      _lastCompactionAt = Date.now();
+      try {
+        const { compactStore } = await import('../store/retention.js');
+        const stats = compactStore(store);
+        const total = Object.values(stats).reduce((s, n) => s + n, 0);
+        if (total > 0) saveStore();
+      } catch { /* non-critical */ }
+    }
 
     // Scheduled pipelines (A-5)
     const duePipelines = (store.agentPipelines ?? []).filter(
@@ -232,10 +252,21 @@ export function startAgentTaskWorker(deps: WorkerDeps): () => void {
       task.updatedAt = new Date().toISOString();
       saveStore();
     }
+    } finally {
+      ticking = false;
+    }
   };
 
-  const interval = setInterval(() => { void tick(); }, POLL_INTERVAL_MS);
-  void tick();
+  // F-023: catch unhandled rejections from tick()
+  const safeTick = () => {
+    tick().catch(err => {
+      // eslint-disable-next-line no-console
+      console.warn('[agent-task-worker] tick failed:', err instanceof Error ? err.message : err);
+    });
+  };
+
+  const interval = setInterval(safeTick, POLL_INTERVAL_MS);
+  safeTick();
 
   return () => clearInterval(interval);
 }

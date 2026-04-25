@@ -411,11 +411,20 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
     }
   }, [convId, agentDisplay, language, isRTL]);
 
+  // F-015: image upload limits (must mirror server-side limits)
+  const MAX_IMAGES = 8;
+  const MAX_IMAGE_BYTES = 6 * 1024 * 1024; // 6 MB per image
+  const ALLOWED_IMAGE_MIME = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
   // Handle files from attach/camera → read as base64, add to pendingImages
   const handleImageFiles = useCallback(async (files: FileList | File[]) => {
     const arr: Array<{ id: string; base64: string; mimeType: string; previewUrl: string; name: string }> = [];
-    for (const f of Array.from(files)) {
-      if (!f.type.startsWith('image/')) continue;
+    const fileList = Array.from(files);
+    let skipped = 0;
+    for (const f of fileList) {
+      if (pendingImages.length + arr.length >= MAX_IMAGES) { skipped++; continue; }
+      if (!ALLOWED_IMAGE_MIME.includes(f.type)) { skipped++; continue; }
+      if (f.size > MAX_IMAGE_BYTES) { skipped++; continue; }
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const r = new FileReader();
         r.onload = () => resolve(r.result as string);
@@ -425,8 +434,12 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
       const base64 = dataUrl.replace(/^data:[^;]+;base64,/, '');
       arr.push({ id: crypto.randomUUID(), base64, mimeType: f.type, previewUrl: dataUrl, name: f.name });
     }
+    if (skipped > 0 && typeof window !== 'undefined') {
+      // Show a brief alert; user can see the message in-place
+      console.warn(`Skipped ${skipped} image(s): exceeded limits or unsupported type`);
+    }
     if (arr.length) setPendingImages((prev) => [...prev, ...arr]);
-  }, []);
+  }, [pendingImages.length]);
 
   // Insert @mention into input
   const insertMention = useCallback((mentionAgentId: string) => {

@@ -13,6 +13,7 @@ import crypto from 'node:crypto';
 import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { Logger } from 'pino';
+import { z } from 'zod';
 import { parseNaturalTime } from '../services/natural-time.js';
 import { sanitizeUserInput } from '../services/security/sanitize-input.js';
 import { flag } from '../services/flags.js';
@@ -254,6 +255,30 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
 
   const chatLimit = rateLimit({ capacity: 20, refillPerSec: 2 });
 
+  // F-014 + F-015: runtime schema validation for /api/chat body
+  const MAX_MESSAGE_LEN = 16_000;
+  const MAX_CONTEXT_LEN = 8_000;
+  const MAX_IMAGES = 8;
+  const MAX_IMAGE_BASE64_LEN = 8_000_000; // ~6 MB decoded
+  const ALLOWED_IMAGE_MIME = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+  const chatBodySchema = z.object({
+    conversationId: z.string().uuid().optional(),
+    message: z.string().max(MAX_MESSAGE_LEN),
+    model: z.string().max(100).optional(),
+    agentId: z.string().max(100).optional(),
+    context: z.string().max(MAX_CONTEXT_LEN).optional(),
+    replyToMessageId: z.string().max(200).optional(),
+    chainDepth: z.number().int().min(0).max(20).optional(),
+    chainMentions: z.array(z.string().max(100)).max(20).optional(),
+    images: z.array(z.object({
+      base64: z.string().max(MAX_IMAGE_BASE64_LEN),
+      mimeType: z.string().refine(m => ALLOWED_IMAGE_MIME.includes(m), 'unsupported image MIME'),
+    })).max(MAX_IMAGES).optional(),
+    skipPlayMaker: z.boolean().optional(),
+    projectId: z.string().max(200).optional(),
+  });
+
   // F-007: idempotency cache — dedupe retried POSTs that already entered the handler.
   // Maps idempotency key → timestamp. Entries TTL 5 minutes.
   const idempotencyCache = new Map<string, number>();
@@ -275,7 +300,20 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
     }
 
     const store = getStore();
-    const body = await c.req.json<{
+    const rawBody = await c.req.json().catch(() => null);
+    if (rawBody === null) {
+      return c.json({ error: 'Invalid JSON body', code: 'E_INVALID_JSON' }, 400);
+    }
+    // F-014: runtime validation of request shape and limits
+    const parsed = chatBodySchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return c.json({
+        error: 'Invalid request body',
+        code: 'E_VALIDATION',
+        issues: parsed.error.issues.slice(0, 5).map(i => ({ path: i.path.join('.'), message: i.message })),
+      }, 400);
+    }
+    const body = parsed.data as {
       conversationId?: string;
       message: string;
       model?: string;
@@ -283,14 +321,11 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       context?: string;
       replyToMessageId?: string;
       chainDepth?: number;
-      /** R12 — original @mention sequence replayed on follow-up turns
-       *  so multi-agent chains longer than 2 hops keep the full list
-       *  of targets across every server turn. */
       chainMentions?: string[];
       images?: Array<{ base64: string; mimeType: string }>;
       skipPlayMaker?: boolean;
       projectId?: string;
-    }>();
+    };
 
     // BUG A/C FIX: derive CHAT_V2 ONCE at handler entry so every branch (cache,
     // multi-mention, main loop, fallbacks) uses the same gate. When v2 is on,
