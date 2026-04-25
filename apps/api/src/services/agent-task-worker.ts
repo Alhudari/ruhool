@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { StoreData, AgentTaskRecord } from '../store/types.js';
+import type { StoreData, AgentTaskRecord, NotificationRecord } from '../store/types.js';
 import { RuhoolError } from './errors.js';
 import { flag } from './flags.js';
 
@@ -7,6 +7,36 @@ export interface WorkerDeps {
   getStore: () => StoreData;
   saveStore: () => void;
   runTask: (task: AgentTaskRecord) => Promise<string>;
+}
+
+// Parse [NOTIFY] markers from agent output and save to store.notificationRecords
+function processNotifications(store: StoreData, output: string, agentId: string): void {
+  const matches = output.matchAll(/\[NOTIFY\]\s*(\{[\s\S]*?\})/g);
+  for (const match of matches) {
+    try {
+      const data = JSON.parse(match[1]);
+      if (!data.title) continue;
+      if (!store.notificationRecords) store.notificationRecords = [];
+      const rec: NotificationRecord = {
+        id: crypto.randomUUID(),
+        agentId,
+        title: String(data.title),
+        message: String(data.message || ''),
+        type: (data.type as NotificationRecord['type']) || 'info',
+        link: data.link,
+        linkLabel: data.linkLabel,
+        read: false,
+        priority: (data.priority as NotificationRecord['priority']) || 'normal',
+        createdAt: new Date().toISOString(),
+      };
+      store.notificationRecords.push(rec);
+    } catch { /* skip malformed */ }
+  }
+}
+
+// Strip [NOTIFY] blocks from result before saving to inbox/result
+function stripNotifyBlocks(text: string): string {
+  return text.replace(/\[NOTIFY\]\s*\{[\s\S]*?\}/g, '').trim();
 }
 
 const POLL_INTERVAL_MS = 30_000;
@@ -123,8 +153,12 @@ export function startAgentTaskWorker(deps: WorkerDeps): () => void {
           ? await runWithTimeout(task, runTask)
           : await runTask(task);
 
+        // Process [NOTIFY] markers before saving result
+        processNotifications(store, result, task.agentId);
+        const cleanResult = stripNotifyBlocks(result) || result;
+
         task.status = 'done';
-        task.result = result;
+        task.result = cleanResult;
         task.completedAt = new Date().toISOString();
 
         if (task.reportOnComplete) {
@@ -139,8 +173,8 @@ export function startAgentTaskWorker(deps: WorkerDeps): () => void {
             read: false,
             starred: false,
             tags: ['agent-task'],
-            bodyMarkdown: result,
-            html: `<pre style="white-space:pre-wrap;font-family:inherit">${result.slice(0, 500)}…</pre>`,
+            bodyMarkdown: cleanResult,
+            html: `<pre style="white-space:pre-wrap;font-family:inherit">${cleanResult.slice(0, 500)}${cleanResult.length > 500 ? '…' : ''}</pre>`,
           });
           store.reportInbox = inbox;
         }
