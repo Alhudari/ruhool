@@ -11,14 +11,20 @@ export type AgentPipelinesDeps = {
   runTask: (task: AgentTaskRecord) => Promise<string>;
 };
 
-/** Interpolate step template: {{input}}, {{step_N_output}}, {{documents}} */
+/** Interpolate step template: {{input}}, {{step_N_output}}, {{documents}}.
+ * FIX-16: escape literal braces in inserted values so step output containing
+ * "{{step_2_output}}" doesn't trigger nested substitution. */
+function escapeBraces(s: string): string {
+  return s.replace(/\{\{/g, '{ {').replace(/\}\}/g, '} }');
+}
+
 function buildPrompt(template: string, input: string, stepOutputs: Record<number, string>, documents: string[]): string {
   let prompt = template
-    .replace(/\{\{input\}\}/g, input)
-    .replace(/\{\{documents\}\}/g, documents.join('\n\n'));
+    .replace(/\{\{input\}\}/g, escapeBraces(input))
+    .replace(/\{\{documents\}\}/g, escapeBraces(documents.join('\n\n')));
 
   const stepRe = /\{\{step_(\d+)_output\}\}/g;
-  prompt = prompt.replace(stepRe, (_, n) => stepOutputs[parseInt(n, 10)] ?? '');
+  prompt = prompt.replace(stepRe, (_, n) => escapeBraces(stepOutputs[parseInt(n, 10)] ?? ''));
   return prompt;
 }
 

@@ -24,14 +24,19 @@ export function AwaitingUserNotifier() {
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
+  // FIX-19: pause polling while user is composing a response (selected != null)
   const fetchAwaiting = useCallback(async () => {
+    if (submitting) return;
     try {
       const data = await apiFetch<{ pipelines: AwaitingPipeline[] }>('/api/agent-pipelines/awaiting');
-      setPipelines(data.pipelines);
+      // Only update list if dialog isn't open — don't overwrite while user types
+      setPipelines(prev => {
+        if (selected) return prev;
+        return data.pipelines;
+      });
     } catch { /* ignore */ }
-  }, []);
+  }, [submitting, selected]);
 
-  // Poll every 15s
   useEffect(() => {
     void fetchAwaiting();
     const id = setInterval(fetchAwaiting, 15_000);

@@ -163,15 +163,26 @@ export function NotificationBell() {
   }
 
   // Calculate panel position relative to viewport when opening
+  // FIX-15: recompute on scroll/resize so panel stays attached to button
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
-    const rect = btnRef.current.getBoundingClientRect();
-    const viewW = window.innerWidth;
-    if (isRTL) {
-      setPanelPos({ top: rect.bottom + 8, left: rect.left });
-    } else {
-      setPanelPos({ top: rect.bottom + 8, right: viewW - rect.right });
-    }
+    const recompute = () => {
+      if (!btnRef.current) return;
+      const rect = btnRef.current.getBoundingClientRect();
+      const viewW = window.innerWidth;
+      if (isRTL) {
+        setPanelPos({ top: rect.bottom + 8, left: rect.left });
+      } else {
+        setPanelPos({ top: rect.bottom + 8, right: viewW - rect.right });
+      }
+    };
+    recompute();
+    window.addEventListener('scroll', recompute, true);
+    window.addEventListener('resize', recompute);
+    return () => {
+      window.removeEventListener('scroll', recompute, true);
+      window.removeEventListener('resize', recompute);
+    };
   }, [open, isRTL]);
 
   return (

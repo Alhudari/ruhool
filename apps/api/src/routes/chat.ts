@@ -20,6 +20,11 @@ import { shouldInjectReportActions, buildReportsContextBlock, REPORT_ACTIONS_PRO
 import { wrapToolResult } from '../services/security/trust-wrap.js';
 import { trimToTokenBudget, getContextWindow } from '../services/context/window.js';
 
+// FIX-23: cache capability checks for mushakhkhis (5 minutes)
+type CapResult = { field: string; caps: Record<string, { ok: boolean; message?: string }> | null };
+let _capCheckCache: { at: number; results: CapResult[] } | null = null;
+const CAP_CHECK_TTL_MS = 5 * 60_000;
+
 import {
   parseAndExecuteActions,
   memoryList,
@@ -570,7 +575,10 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
             const conv = store.conversations.find(cv => cv.id === convId);
             if (conv) { conv.rollingContext = summary; conv.rollingContextAt = new Date().toISOString(); saveStore(); }
           }
-        } catch { /* non-critical */ }
+        } catch (err) {
+          // FIX-6: log warnings instead of silent fail
+          bootLogger.warn({ err: err instanceof Error ? err.message : err, convId }, 'rolling-context-summary failed');
+        }
       })();
     }
 
@@ -825,14 +833,21 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
             lines.push('');
             const apiKeys = ((store as unknown as { apiKeys?: Record<string, string> }).apiKeys || {}) as Record<string, string>;
             const subs = (((store as unknown as { subscriptions?: SubscriptionRecord[] }).subscriptions || []) as SubscriptionRecord[]).filter((s) => s.linkedApiField);
-            const checks = await Promise.all(
-              Object.entries(CAPABILITY_CHECKERS).map(async ([field, checker]) => {
-                const key = apiKeys[field];
-                if (!key) return { field, caps: null };
-                try { return { field, caps: await checker(key) }; }
-                catch (e) { return { field, caps: { error: { ok: false, message: String(e).slice(0, 100) } } }; }
-              })
-            );
+            // FIX-23: cache capability checks for 5 minutes — avoids hammering external APIs
+            let checks: CapResult[];
+            if (_capCheckCache && Date.now() - _capCheckCache.at < CAP_CHECK_TTL_MS) {
+              checks = _capCheckCache.results;
+            } else {
+              checks = await Promise.all(
+                Object.entries(CAPABILITY_CHECKERS).map(async ([field, checker]) => {
+                  const key = apiKeys[field];
+                  if (!key) return { field, caps: null };
+                  try { return { field, caps: await checker(key) }; }
+                  catch (e) { return { field, caps: { error: { ok: false, message: String(e).slice(0, 100) } } }; }
+                })
+              );
+              _capCheckCache = { at: Date.now(), results: checks };
+            }
             for (const { field, caps } of checks) {
               if (!caps) { lines.push(`- \u26AA ${field}: \u063A\u064A\u0631 \u0645\u0636\u0627\u0641`); continue; }
               const ok = Object.values(caps).some((c) => c.ok);
@@ -1896,9 +1911,19 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                           });
                         }
                       }
+                      // FIX-2: LRU eviction — cap entity memory at 500 entries
+                      const ENTITY_MEMORY_CAP = 500;
+                      if (s.entityMemory.length > ENTITY_MEMORY_CAP) {
+                        s.entityMemory.sort((a, b) =>
+                          new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime()
+                        );
+                        s.entityMemory = s.entityMemory.slice(0, ENTITY_MEMORY_CAP);
+                      }
                       saveStore();
                     }
-                  } catch { /* ignore */ }
+                  } catch (err) {
+                    bootLogger.warn({ err: err instanceof Error ? err.message : err }, 'entity-extraction failed');
+                  }
                 })();
               }
             }

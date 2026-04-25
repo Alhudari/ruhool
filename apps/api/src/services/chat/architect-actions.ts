@@ -64,7 +64,8 @@ export function createArchitectActions(deps: ArchitectActionsDeps): ArchitectAct
     const updateMatches = response.matchAll(/\[ACTION:UPDATE_AGENT:([^\]]+)\]\s*```(?:json)?\s*([\s\S]*?)```/g);
     for (const match of updateMatches) {
       try {
-        const targetId = match[1];
+        const targetId = match[1].trim();
+        if (!/^[a-zA-Z0-9_-]+$/.test(targetId) || targetId.length > 100) continue;
         const payload = JSON.parse(match[2]);
         approvals.push({
           id: crypto.randomUUID(),
@@ -79,9 +80,16 @@ export function createArchitectActions(deps: ArchitectActionsDeps): ArchitectAct
       } catch { /* skip malformed */ }
     }
 
+    // FIX-1: validate targetId — reject path traversal / special chars
+    const isValidAgentId = (id: string): boolean => /^[a-zA-Z0-9_-]+$/.test(id) && id.length > 0 && id.length <= 100;
+
     const deleteMatches = response.matchAll(/\[ACTION:DELETE_AGENT:([^\]]+)\]/g);
     for (const match of deleteMatches) {
-      const targetId = match[1];
+      const targetId = match[1].trim();
+      if (!isValidAgentId(targetId)) continue;
+      // Verify the agent exists (built-in or custom)
+      const exists = (store.customAgents ?? []).some(a => a.id === targetId);
+      if (!exists) continue;
       approvals.push({
         id: crypto.randomUUID(),
         type: 'delete_agent',
@@ -96,7 +104,8 @@ export function createArchitectActions(deps: ArchitectActionsDeps): ArchitectAct
 
     const memMatches = response.matchAll(/\[ACTION:UPDATE_MEMORY:([^\]]+)\]\s*```(?:[\w]*)?\s*([\s\S]*?)```/g);
     for (const match of memMatches) {
-      const targetId = match[1];
+      const targetId = match[1].trim();
+      if (!isValidAgentId(targetId)) continue;
       const content = match[2].trim();
       approvals.push({
         id: crypto.randomUUID(),

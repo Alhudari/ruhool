@@ -9,10 +9,13 @@ export interface WorkerDeps {
   runTask: (task: AgentTaskRecord) => Promise<string>;
 }
 
-// Parse [NOTIFY] markers from agent output and save to store.notificationRecords
-function processNotifications(store: StoreData, output: string, agentId: string): void {
-  const matches = output.matchAll(/\[NOTIFY\]\s*(\{[\s\S]*?\})/g);
-  for (const match of matches) {
+// FIX-5: shared regex — ensures parse and strip stay in sync
+const NOTIFY_BLOCK_RE = /\[NOTIFY\]\s*(\{[\s\S]*?\})/g;
+
+function processNotifications(store: StoreData, output: string, agentId: string): { processedRanges: Array<[number, number]> } {
+  const ranges: Array<[number, number]> = [];
+  for (const match of output.matchAll(NOTIFY_BLOCK_RE)) {
+    if (match.index === undefined) continue;
     try {
       const data = JSON.parse(match[1]);
       if (!data.title) continue;
@@ -30,13 +33,23 @@ function processNotifications(store: StoreData, output: string, agentId: string)
         createdAt: new Date().toISOString(),
       };
       store.notificationRecords.push(rec);
+      ranges.push([match.index, match.index + match[0].length]);
     } catch { /* skip malformed */ }
   }
+  return { processedRanges: ranges };
 }
 
-// Strip [NOTIFY] blocks from result before saving to inbox/result
-function stripNotifyBlocks(text: string): string {
-  return text.replace(/\[NOTIFY\]\s*\{[\s\S]*?\}/g, '').trim();
+// Strip ONLY the ranges we successfully parsed — keeps malformed [NOTIFY] visible to user
+function stripProcessedRanges(text: string, ranges: Array<[number, number]>): string {
+  if (ranges.length === 0) return text;
+  let out = '';
+  let lastEnd = 0;
+  for (const [start, end] of ranges.sort((a, b) => a[0] - b[0])) {
+    out += text.slice(lastEnd, start);
+    lastEnd = end;
+  }
+  out += text.slice(lastEnd);
+  return out.trim();
 }
 
 const POLL_INTERVAL_MS = 30_000;
@@ -154,8 +167,8 @@ export function startAgentTaskWorker(deps: WorkerDeps): () => void {
           : await runTask(task);
 
         // Process [NOTIFY] markers before saving result
-        processNotifications(store, result, task.agentId);
-        const cleanResult = stripNotifyBlocks(result) || result;
+        const { processedRanges } = processNotifications(store, result, task.agentId);
+        const cleanResult = stripProcessedRanges(result, processedRanges) || result;
 
         task.status = 'done';
         task.result = cleanResult;

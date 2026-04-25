@@ -1,11 +1,22 @@
 // C-5: Token-Based Context Window Management
-// Replaces message-count based trimming with token-aware trimming
-// ~4 chars per token for Arabic/English mixed text
-
-export const CHARS_PER_TOKEN = 4;
+// FIX-8: 3 chars per token (was 4) — Arabic + JSON tend to be denser than English prose.
+// Conservative estimate prevents context overflow.
+export const CHARS_PER_TOKEN = 3;
 
 export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / CHARS_PER_TOKEN);
+  // Heavier weight for Arabic characters (2.5 chars/token) vs Latin (4 chars/token)
+  let arabicCount = 0;
+  let otherCount = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    // Arabic block: U+0600..U+06FF + presentation forms
+    if ((code >= 0x0600 && code <= 0x06FF) || (code >= 0xFB50 && code <= 0xFDFF) || (code >= 0xFE70 && code <= 0xFEFF)) {
+      arabicCount++;
+    } else {
+      otherCount++;
+    }
+  }
+  return Math.ceil(arabicCount / 2.5 + otherCount / 4);
 }
 
 export function estimateMessageTokens(msg: { content: string | unknown }): number {
