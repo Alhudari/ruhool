@@ -2,13 +2,13 @@
  * Tests for the specialists dispatcher (REL-01 stage 2b).
  *
  * The LLM provider is mocked so we can assert:
- *   1. Passing `'عبدان'` pulls in `RESEARCH_SYSTEM_PROMPT` (the prompt exported
+ *   1. Passing `'الباحث'` pulls in `RESEARCH_SYSTEM_PROMPT` (the prompt exported
  *      from `prompts/specialists/abdan.ts`).
  *   2. The dispatcher actually calls the injected `provider.chat(...)` and
  *      returns the aggregated output / usage.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { dispatch, getSpecialistPrompt, resolveSpecialistId } from './specialists.js';
+import { dispatch, getSpecialistPrompt, resolveSpecialistId, buildAliasMap } from './specialists.js';
 import { RESEARCH_SYSTEM_PROMPT } from '../../prompts/specialists/abdan.js';
 import type { UnifiedProvider } from '../llm/index.js';
 
@@ -35,14 +35,14 @@ function makeMockProvider() {
 }
 
 describe('specialists dispatcher', () => {
-  it("resolves الباحث to the RESEARCH system prompt", () => {
-    expect(getSpecialistPrompt("الباحث")).toBe(RESEARCH_SYSTEM_PROMPT);
+  it('resolves الباحث to the abdan (RESEARCH) system prompt', () => {
+    expect(getSpecialistPrompt('الباحث')).toBe(RESEARCH_SYSTEM_PROMPT);
   });
 
   it('runs the task through the mocked LLM using the abdan prompt', async () => {
     const { mock, capture } = makeMockProvider();
     const result = await dispatch({
-      specialist: 'عبدان',
+      specialist: 'الباحث',
       task: 'ابحث في موضوع BIM',
       deps: { provider: mock, model: 'claude-sonnet-4-6' },
     });
@@ -76,14 +76,14 @@ describe('specialists dispatcher', () => {
   it('prepends a Prior Rounds transcript when priorMessages is non-empty', async () => {
     const { mock, capture } = makeMockProvider();
     await dispatch({
-      specialist: 'شواشة',
-      task: 'لخّص ما قاله عبدان',
+      specialist: 'المُلخِّص',
+      task: 'لخّص ما قاله الباحث',
       priorMessages: [
-        { role: 'assistant', content: 'عبدان قال: السلام عليكم', agent: 'abdan', agentDisplay: 'عبدان' },
+        { role: 'assistant', content: 'الباحث قال: السلام عليكم', agent: 'abdan', agentDisplay: 'الباحث' },
       ],
       deps: { provider: mock, model: 'claude-sonnet-4-6' },
     });
-    expect(capture.lastSystemPrompt).toContain('عبدان قال');
+    expect(capture.lastSystemPrompt).toContain('الباحث قال');
     expect(capture.lastSystemPrompt).toContain('Prior Rounds');
     expect(capture.lastSystemPrompt).toContain('المُلخِّص');
   });
@@ -91,7 +91,7 @@ describe('specialists dispatcher', () => {
   it('is a no-op when priorMessages is an empty array (identical to old behavior)', async () => {
     const { mock, capture } = makeMockProvider();
     await dispatch({
-      specialist: 'عبدان',
+      specialist: 'الباحث',
       task: 'ابحث',
       priorMessages: [],
       deps: { provider: mock, model: 'claude-sonnet-4-6' },
@@ -105,34 +105,37 @@ describe('specialists dispatcher', () => {
     expect(capture.lastSystemPrompt).not.toContain('سجل الجولات السابقة');
   });
 
-  it('prepends the identity directive when priorMessages is non-empty', async () => {
+  it('places identity directive LAST in system prompt (B-1 Identity Lock)', async () => {
     const { mock, capture } = makeMockProvider();
     await dispatch({
-      specialist: 'شواشة',
+      specialist: 'المُلخِّص',
       task: 't',
       priorMessages: [
-        { role: 'assistant', content: 'x', agent: 'abdan', agentDisplay: 'عبدان' },
+        { role: 'assistant', content: 'x', agent: 'abdan', agentDisplay: 'الباحث' },
       ],
       deps: { provider: mock, model: 'claude-sonnet-4-6' },
     });
     const sys = capture.lastSystemPrompt || '';
-    // BUG-2 FIX: directive now opens with a bilingual banner. Check for the
-    // banner and the Arabic identity line within the first block instead of
-    // a literal prefix match.
-    expect(sys.startsWith('=== هوية الوكيل / AGENT IDENTITY')).toBe(true);
+    // B-1: identity must be LAST so user messages cannot override it
+    expect(sys).toContain('=== هوية الوكيل / AGENT IDENTITY');
     expect(sys).toContain('أنت المُلخِّص');
     expect(sys).toContain('STRICTLY FORBIDDEN');
     expect(sys).toContain('تقمّص');
-    expect(sys).toContain('المُلخِّص');
+    // Identity directive must come AFTER the base prompt content
+    const baseIdx = sys.indexOf('المُلخِّص'); // first occurrence in base prompt
+    const identityIdx = sys.lastIndexOf('=== هوية الوكيل / AGENT IDENTITY');
+    expect(identityIdx).toBeGreaterThan(baseIdx);
+    // Must end with the identity card closing marker
+    expect(sys.trimEnd()).toMatch(/=== نهاية بطاقة الهوية \/ END IDENTITY CARD ===\s*$/);
   });
 
   it('includes a closing reinforcement after the transcript', async () => {
     const { mock, capture } = makeMockProvider();
     await dispatch({
-      specialist: 'شواشة',
+      specialist: 'المُلخِّص',
       task: 't',
       priorMessages: [
-        { role: 'assistant', content: 'x', agent: 'abdan', agentDisplay: 'عبدان' },
+        { role: 'assistant', content: 'x', agent: 'abdan', agentDisplay: 'الباحث' },
       ],
       deps: { provider: mock, model: 'claude-sonnet-4-6' },
     });
@@ -148,10 +151,10 @@ describe('specialists dispatcher', () => {
   it('wraps each prior message content in guillemet quotes («…»)', async () => {
     const { mock, capture } = makeMockProvider();
     await dispatch({
-      specialist: 'شواشة',
+      specialist: 'المُلخِّص',
       task: 't',
       priorMessages: [
-        { role: 'assistant', content: 'هلا والله', agent: 'abdan', agentDisplay: 'عبدان' },
+        { role: 'assistant', content: 'هلا والله', agent: 'abdan', agentDisplay: 'الباحث' },
       ],
       deps: { provider: mock, model: 'claude-sonnet-4-6' },
     });
@@ -163,8 +166,8 @@ describe('specialists dispatcher', () => {
     expect(resolveSpecialistId('abdan')).toBe('research');
   });
 
-  it('resolveSpecialistId maps the Arabic name "عبدان" → "research"', () => {
-    expect(resolveSpecialistId('عبدان')).toBe('research');
+  it('resolveSpecialistId maps the Arabic name "الباحث" → "research"', () => {
+    expect(resolveSpecialistId('الباحث')).toBe('research');
   });
 
   it('resolveSpecialistId passes canonical "research" through untouched', () => {
@@ -189,10 +192,10 @@ describe('specialists dispatcher', () => {
     const { mock, capture } = makeMockProvider();
     const longContent = 'ء'.repeat(10_000);
     await dispatch({
-      specialist: 'شواشة',
+      specialist: 'المُلخِّص',
       task: 't',
       priorMessages: [
-        { role: 'assistant', content: longContent, agent: 'abdan', agentDisplay: 'عبدان' },
+        { role: 'assistant', content: longContent, agent: 'abdan', agentDisplay: 'الباحث' },
       ],
       deps: { provider: mock, model: 'claude-sonnet-4-6' },
     });
@@ -201,36 +204,40 @@ describe('specialists dispatcher', () => {
     const occurrences = (sys.match(/ء/g) || []).length;
     expect(occurrences).toBeLessThanOrEqual(700);
     expect(occurrences).toBeGreaterThan(400);
-    expect(sys.length).toBeLessThan(RESEARCH_SYSTEM_PROMPT.length + 2_000);
+    expect(sys.length).toBeLessThan(RESEARCH_SYSTEM_PROMPT.length + 4_000); // +4k for security + identity blocks
   });
 
   // ─── BUG-2 regression tests ───────────────────────────────────────────────
-  it('BUG-2: identity directive is prepended even when priorMessages is undefined', async () => {
+  it('B-1: identity directive is always present and placed last (even without priorMessages)', async () => {
     const { mock, capture } = makeMockProvider();
     await dispatch({
-      specialist: 'عبدان',
+      specialist: 'الباحث',
       task: 'ابحث',
       deps: { provider: mock, model: 'claude-sonnet-4-6' },
     });
     const sys = capture.lastSystemPrompt || '';
-    expect(sys.startsWith('=== هوية الوكيل / AGENT IDENTITY')).toBe(true);
+    expect(sys).toContain('=== هوية الوكيل / AGENT IDENTITY');
     expect(sys).toContain('أنت الباحث');
     expect(sys).toContain('STRICTLY FORBIDDEN');
+    // Identity is LAST — base prompt precedes it
+    const baseStart = sys.indexOf('الباحث');
+    const identityStart = sys.lastIndexOf('=== هوية الوكيل');
+    expect(identityStart).toBeGreaterThan(baseStart);
   });
 
-  it('BUG-2: identity directive names عبدان when dispatched via English alias "abdan"', async () => {
+  it('BUG-2: identity directive names الباحث when dispatched via English alias "abdan"', async () => {
     const { mock, capture } = makeMockProvider();
     await dispatch({
       specialist: 'abdan',
       task: 't',
       priorMessages: [
-        { role: 'assistant', content: 'شواشة قالت: قرأتُ الورقة', agent: 'shwasha', agentDisplay: 'شواشة' },
+        { role: 'assistant', content: 'المُلخِّص قالت: قرأتُ الورقة', agent: 'shwasha', agentDisplay: 'المُلخِّص' },
       ],
       deps: { provider: mock, model: 'claude-sonnet-4-6' },
     });
     const sys = capture.lastSystemPrompt || '';
-    // Directive must say "أنت عبدان", NOT "أنت شواشة", even when priorMessages
-    // contains شواشة's output. This is the core Bug-2 guarantee: the tool_use
+    // Directive must say "أنت الباحث", NOT "أنت المُلخِّص", even when priorMessages
+    // contains المُلخِّص's output. This is the core Bug-2 guarantee: the tool_use
     // delegated path cannot bleed another agent's persona.
     expect(sys).toContain('أنت الباحث');
     expect(sys).not.toContain('أنت المُلخِّص');
@@ -240,10 +247,10 @@ describe('specialists dispatcher', () => {
   it('BUG-2: identity directive explicitly forbids impersonation in both languages', async () => {
     const { mock, capture } = makeMockProvider();
     await dispatch({
-      specialist: 'الصفرا',
+      specialist: 'الناقد',
       task: 't',
       priorMessages: [
-        { role: 'assistant', content: 'x', agent: 'abdan', agentDisplay: 'عبدان' },
+        { role: 'assistant', content: 'x', agent: 'abdan', agentDisplay: 'الباحث' },
       ],
       deps: { provider: mock, model: 'claude-sonnet-4-6' },
     });
@@ -253,5 +260,33 @@ describe('specialists dispatcher', () => {
     expect(sys).toContain('Al-Naqid');
     expect(sys).toContain('الناقد');
     expect(sys).toContain('THE RULE');
+  });
+});
+
+describe('buildAliasMap — conflict detection (R14-#7)', () => {
+  it('does not throw on the current default maps', () => {
+    expect(() => buildAliasMap()).not.toThrow();
+  });
+
+  it('throws when canonical and legacy disagree on the same key', () => {
+    expect(() => buildAliasMap(
+      { 'الاسم': 'research' },
+      { 'الاسم': 'comparator' },  // same key → different id
+      {},
+    )).toThrow(/alias "الاسم" conflicts/);
+  });
+
+  it('allows the same key in multiple maps when the target id matches', () => {
+    // Idempotent redundancy is fine — only divergent targets throw.
+    expect(() => buildAliasMap(
+      { 'الاسم': 'research' },
+      { 'الاسم': 'research' },
+      { 'al-ism': 'research' },
+    )).not.toThrow();
+  });
+
+  it('freezes the result so callers cannot mutate it by accident', () => {
+    const m = buildAliasMap({ a: 'x' }, {}, {});
+    expect(Object.isFrozen(m)).toBe(true);
   });
 });

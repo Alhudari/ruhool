@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useGuardedRouter } from '@/lib/navigation/guarded-router';
 import {
   ArrowLeft,
   Bot,
@@ -98,9 +98,9 @@ const MODELS = [
   { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
 ];
 
-export function AgentDetailPage({ agentId }: { agentId: string }) {
+export function AgentDetailPage({ agentId, initialTab }: { agentId: string; initialTab?: 'prompt' | 'model' | 'memories' | 'permissions' }) {
   const { language } = useAppStore();
-  const router = useRouter();
+  const router = useGuardedRouter();
   const isRTL = language === 'ar';
 
   const [agent, setAgent] = useState<Agent | null>(null);
@@ -108,8 +108,12 @@ export function AgentDetailPage({ agentId }: { agentId: string }) {
   const [promptData, setPromptData] = useState<PromptData | null>(null);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'transparency' | 'memories' | 'permissions'>('transparency');
-  const [transparencyTab, setTransparencyTab] = useState<'prompt' | 'model'>('prompt');
+  const [activeTab, setActiveTab] = useState<'transparency' | 'memories' | 'permissions'>(
+    initialTab === 'memories' || initialTab === 'permissions' ? initialTab : 'transparency'
+  );
+  const [transparencyTab, setTransparencyTab] = useState<'prompt' | 'model'>(
+    initialTab === 'model' ? 'model' : 'prompt'
+  );
 
   // Editable states for custom agents
   const [editPrompt, setEditPrompt] = useState('');

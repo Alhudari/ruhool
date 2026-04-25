@@ -11,6 +11,7 @@
 import crypto from 'node:crypto';
 import type { Hono } from 'hono';
 import type { StoreData } from '../store/types.js';
+import { buildTranscript, summarizeEvents } from '../services/events/event-bus.js';
 import { recomputeTaskStatuses, readyTasks, type StoreLike as AgentOSStore } from '../agent-os.js';
 import { runAgentLoop, type RunnerStoreLike } from '../agent-runner.js';
 
@@ -116,6 +117,26 @@ export function registerRunsRoutes(app: Hono, deps: RunsRoutesDeps): void {
     const run = (store.agentRuns || []).find((r) => r.id === id);
     if (!run) return c.json({ error: 'not found' }, 404);
     return c.json(run);
+  });
+
+  // C-1: Transcript endpoint — Claude Managed Agents parity
+  app.get('/api/runs/:id/transcript', (c) => {
+    const store = getStore();
+    const run = (store.agentRuns || []).find((r) => r.id === c.req.param('id'));
+    if (!run) return c.json({ error: 'not found' }, 404);
+
+    const events = run.events ?? [];
+    const text = events.length > 0 ? buildTranscript(events) : '[no events recorded]';
+    const summary = events.length > 0 ? summarizeEvents(events) : null;
+
+    // Also include conversation messages for full picture
+    const messages = store.messages
+      .filter((m) => m.conversationId === run.conversationId)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      .map((m) => ({ role: m.role, agentId: m.agentId, content: m.content.slice(0, 2000), createdAt: m.createdAt }));
+
+    c.header('Cache-Control', 'private, no-cache');
+    return c.json({ runId: run.id, status: run.status, transcript: text, events, messages, summary });
   });
 
   app.get('/api/runs', (c) => {

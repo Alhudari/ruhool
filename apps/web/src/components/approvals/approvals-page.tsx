@@ -54,7 +54,6 @@ const TYPE_COLORS: Record<string, string> = {
 
 const AGENT_NAMES: Record<string, { en: string; ar: string }> = {
   manager: { en: "Al-Ra'i", ar: 'الراعي' },
-  doctor: { en: 'Al-Duktor', ar: 'الدكتور' },
   architect: { en: 'Al-Musammim', ar: 'المصمم' },
   research: { en: 'Al-Bahith', ar: 'الباحث' },
   'reading-helper': { en: 'Al-Mulakhkhis', ar: 'المُلخِّص' },

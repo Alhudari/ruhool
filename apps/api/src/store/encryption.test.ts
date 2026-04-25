@@ -34,3 +34,29 @@ describe('encryption round-trip', () => {
     expect(mod.decryptSecret('plain-value')).toBe('plain-value');
   });
 });
+
+// R15-#12 round-trip: verify every sensitive field defined in
+// `loadStore`/`saveStore` survives encrypt-on-write → decrypt-on-read
+// unchanged. This catches regressions where a new field is added to
+// one side but not the other.
+describe('store secret round-trip', () => {
+  it('encrypts and restores all 7 sensitive field categories', async () => {
+    const enc = await import('./encryption.js');
+    const fields: Record<string, string> = {
+      'providers[0].apiKey':           'sk-ant-test-provider',
+      'resend.apiKey':                 're_test_resend',
+      'googleTasks.clientSecret':      'goog-client-secret',
+      'googleTasks.refreshToken':      'goog-refresh-token',
+      'googleTasks.accessToken':       'goog-access-token',
+      'apiKeys.openai':                'sk-openai-test',
+      'notifications.smtpPass':        'smtp-pw-test',
+      'notifications.slackWebhookUrl': 'https://hooks.slack.com/test',
+    };
+    for (const [label, plain] of Object.entries(fields)) {
+      const ct = enc.encryptSecret(plain);
+      expect(ct, label).toMatch(/^enc:v1:/);
+      expect(ct, label).not.toContain(plain);
+      expect(enc.decryptSecret(ct), label).toBe(plain);
+    }
+  });
+});

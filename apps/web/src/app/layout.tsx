@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { headers } from 'next/headers';
 import '../styles/globals.css';
 import { ClippyGate } from '@/components/help/clippy-gate';
+import { ClientRoot } from '@/components/shared/ClientRoot';
 
 export const metadata: Metadata = {
   title: 'Ruhool (رحول) — Multi-Agent Platform',
@@ -22,6 +23,7 @@ export const viewport: Viewport = {
   themeColor: '#7c5aed',
   width: 'device-width',
   initialScale: 1,
+  viewportFit: 'cover', // iOS notch / Dynamic Island — content extends edge-to-edge
   // UX-01 (AUDIT.md): do not lock zoom — WCAG 1.4.4.
 };
 
@@ -38,6 +40,11 @@ export default function RootLayout({
   return (
     <html lang={lang} dir={dir} data-theme="claude-clean" suppressHydrationWarning>
       <head>
+        {/* Preload the two Thmanyah Sans weights used by ~90% of the
+            UI (Regular + Medium) so first paint doesn't flash system
+            fallback. Other weights lazy-load on demand via @font-face. */}
+        <link rel="preload" href="/fonts/thmanyah/sans/thmanyahsans-Regular.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
+        <link rel="preload" href="/fonts/thmanyah/sans/thmanyahsans-Medium.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
         {/* Set theme/lang before React hydrates to prevent flash */}
         <script
           dangerouslySetInnerHTML={{
@@ -76,8 +83,10 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-screen">
-        {children}
-        <ClippyGate />
+        <ClientRoot>
+          {children}
+          <ClippyGate />
+        </ClientRoot>
       </body>
     </html>
   );

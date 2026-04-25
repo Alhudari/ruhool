@@ -7,8 +7,27 @@ import { rateLimit } from '../middleware/rate-limit.js';
 import type { StoreData } from '../store/types.js';
 import type { OrgResolved } from '../prompts/hierarchy.js';
 import { BUILTIN_AGENTS } from '../state/builtin-agents.js';
+import { shouldInjectReportActions, REPORT_ACTIONS_PROMPT, buildReportsContextBlock } from '../services/chat/report-actions.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+
+/**
+ * Wrap a DispatcherLLM so that every `callSystemMessage` call has the
+ * REPORT_ACTIONS_PROMPT appended to its system prompt when the store has
+ * active reports — the same injection that chat.ts applies via the Proxy
+ * on `builtinSystemPrompts`. Keeps the dispatcher itself store-agnostic.
+ */
+function wrapLLMWithReportActions(llm: DispatcherLLM, getStore: () => StoreData): DispatcherLLM {
+  return {
+    callSystemMessage(system, userMessage, opts) {
+      const store = getStore();
+      const enrichedSystem = shouldInjectReportActions(store)
+        ? system + REPORT_ACTIONS_PROMPT + buildReportsContextBlock(store)
+        : system;
+      return llm.callSystemMessage(enrichedSystem, userMessage, opts);
+    },
+  };
+}
 
 export interface DispatchRoutesDeps {
   getStore: () => StoreData;
@@ -163,7 +182,7 @@ export function registerDispatchRoutes(app: Hono, deps: DispatchRoutesDeps): voi
         conversationId,
       },
       {
-        llm,
+        llm: wrapLLMWithReportActions(llm, deps.getStore),
         loadOrg: () => loadOrgResolved(deps.dataRoot, deps.getStore()),
         getLimits: () => {
           const limits = (deps.getStore() as unknown as { limits?: { hierarchicalDispatchUsd?: number; dispatchMaxFanout?: number } }).limits ?? {};
@@ -249,7 +268,7 @@ export function registerDispatchRoutes(app: Hono, deps: DispatchRoutesDeps): voi
         const result = await dispatchHierarchical(
           { dispatchId, userMessage: message, language },
           {
-            llm,
+            llm: wrapLLMWithReportActions(llm, deps.getStore),
             loadOrg: () => loadOrgResolved(deps.dataRoot, deps.getStore()),
             getLimits: () => {
               const limits = (deps.getStore() as unknown as { limits?: { hierarchicalDispatchUsd?: number; dispatchMaxFanout?: number } }).limits ?? {};

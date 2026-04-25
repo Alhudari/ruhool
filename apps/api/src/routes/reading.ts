@@ -19,7 +19,9 @@
  */
 import type { Hono } from 'hono';
 import crypto from 'node:crypto';
-import type { StoreData, NoteRecord, ReadingSession, ReadingSessionPage } from '../store/types.js';
+import type { StoreData, NoteRecord, ReadingSession, LibraryEntity, EntityType } from '../store/types.js';
+import { parseLocation } from '../services/citation/location-parser.js';
+import { formatInText, formatReference, type CitationStyle, type CitationMeta } from '../services/citation/citation-formatter.js';
 
 export interface ReadingRoutesDeps {
   getStore: () => StoreData;
@@ -30,7 +32,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   const { getStore, saveStore } = deps;
 
   function ensure(store: StoreData) {
-    if (!store.readingSessions) store.readingSessions = [];
+    if (!store.readingNoteSessions) store.readingNoteSessions = [];
     if (!store.notes) store.notes = [];
   }
 
@@ -38,7 +40,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   app.get('/api/reading/sessions', (c) => {
     const store = getStore();
     ensure(store);
-    const sessions = (store.readingSessions || [])
+    const sessions = (store.readingNoteSessions || [])
       .filter(s => !s.archived)
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
     return c.json(sessions);
@@ -48,7 +50,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   app.get('/api/reading/sessions/:id', (c) => {
     const store = getStore();
     ensure(store);
-    const s = store.readingSessions!.find(x => x.id === c.req.param('id'));
+    const s = store.readingNoteSessions!.find(x => x.id === c.req.param('id'));
     if (!s) return c.json({ error: 'not found' }, 404);
 
     // Attach notes to their pages
@@ -68,7 +70,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   app.post('/api/reading/sessions', async (c) => {
     const store = getStore();
     ensure(store);
-    const body = await c.req.json<Partial<ReadingSession> & { title: string }>().catch(() => ({ title: '' }));
+    const body = await c.req.json<Partial<ReadingSession> & { title: string }>().catch(() => ({ title: '' }) as Partial<ReadingSession> & { title: string });
     if (!body.title?.trim()) return c.json({ error: 'title required' }, 400);
 
     const session: ReadingSession = {
@@ -83,7 +85,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
       updatedAt: new Date().toISOString(),
     };
 
-    store.readingSessions!.push(session);
+    store.readingNoteSessions!.push(session);
     saveStore();
     return c.json(session, 201);
   });
@@ -92,7 +94,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   app.put('/api/reading/sessions/:id', async (c) => {
     const store = getStore();
     ensure(store);
-    const s = store.readingSessions!.find(x => x.id === c.req.param('id'));
+    const s = store.readingNoteSessions!.find(x => x.id === c.req.param('id'));
     if (!s) return c.json({ error: 'not found' }, 404);
     const body = await c.req.json<Partial<ReadingSession>>().catch(() => ({}));
     Object.assign(s, body, { id: s.id, createdAt: s.createdAt, updatedAt: new Date().toISOString() });
@@ -104,7 +106,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   app.delete('/api/reading/sessions/:id', (c) => {
     const store = getStore();
     ensure(store);
-    const s = store.readingSessions!.find(x => x.id === c.req.param('id'));
+    const s = store.readingNoteSessions!.find(x => x.id === c.req.param('id'));
     if (!s) return c.json({ error: 'not found' }, 404);
     s.archived = true; s.updatedAt = new Date().toISOString();
     saveStore();
@@ -115,7 +117,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   app.post('/api/reading/sessions/:id/notes', async (c) => {
     const store = getStore();
     ensure(store);
-    const s = store.readingSessions!.find(x => x.id === c.req.param('id'));
+    const s = store.readingNoteSessions!.find(x => x.id === c.req.param('id'));
     if (!s) return c.json({ error: 'session not found' }, 404);
 
     const body = await c.req.json<{
@@ -126,8 +128,10 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
         content: string;
         themes?: string[];
         source?: NoteRecord['source'];
+        location?: string;
       }>;
       forceOverwrite?: boolean;
+      location?: string;
     }>().catch(() => null);
 
     if (!body?.pageRange || !Array.isArray(body.notes)) {
@@ -154,6 +158,9 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
     // ── Determine source type ──────────────────────────────────────────
     const defaultSource: NoteRecord['source'] = body.inputMethod === 'manual' ? 'manual' : 'ai-draft';
 
+    // ── Parse session-level location (applies to all notes if no per-note location) ──
+    const sessionLocation = body.location ? parseLocation(body.location) : undefined;
+
     // ── Create note records ────────────────────────────────────────────
     const created: NoteRecord[] = body.notes
       .filter(n => n.content?.trim())
@@ -169,6 +176,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
         sessionId: s.id,
         bookTitle: s.title,
         zoteroKey: s.zoteroKey,
+        location: n.location ? parseLocation(n.location) : sessionLocation,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       } as NoteRecord));
@@ -213,7 +221,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   app.put('/api/reading/sessions/:id/adopt-range', async (c) => {
     const store = getStore();
     ensure(store);
-    const body = await c.req.json<{ pageRange?: string }>().catch(() => ({}));
+    const body = await c.req.json<{ pageRange?: string }>().catch(() => ({}) as { pageRange?: string });
     const sid = c.req.param('id');
 
     const drafts = (store.notes || []).filter(
@@ -240,13 +248,14 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
     );
     if (!note) return c.json({ error: 'not found' }, 404);
 
-    const body = await c.req.json<{ content?: string; type?: NoteRecord['type']; themes?: string[]; source?: NoteRecord['source'] }>().catch(() => ({}));
+    const body = await c.req.json<{ content?: string; type?: NoteRecord['type']; themes?: string[]; source?: NoteRecord['source']; location?: string }>().catch(() => ({}) as { content?: string; type?: NoteRecord['type']; themes?: string[]; source?: NoteRecord['source']; location?: string });
 
     // Editing is always allowed — user explicitly chose to edit
     if (body.content !== undefined) note.content = body.content;
     if (body.type !== undefined) note.type = body.type;
     if (body.themes !== undefined) note.themes = body.themes;
     if (body.source !== undefined) note.source = body.source;
+    if (body.location !== undefined) note.location = parseLocation(body.location);
     note.updatedAt = new Date().toISOString();
 
     saveStore();
@@ -272,7 +281,7 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
   app.get('/api/reading/sessions/:id/progress', (c) => {
     const store = getStore();
     ensure(store);
-    const s = store.readingSessions!.find(x => x.id === c.req.param('id'));
+    const s = store.readingNoteSessions!.find(x => x.id === c.req.param('id'));
     if (!s) return c.json({ error: 'not found' }, 404);
 
     const notesByPage = new Map<string, { count: number; adopted: number; draft: number; manual: number }>();
@@ -299,5 +308,145 @@ export function registerReadingRoutes(app: Hono, deps: ReadingRoutesDeps): void 
         manual: Array.from(notesByPage.values()).reduce((sum, v) => sum + v.manual, 0),
       },
     });
+  });
+
+  // ── Citation: generate cite for a note ──────────────────────────────
+  app.get('/api/reading/sessions/:id/notes/:noteId/cite', (c) => {
+    const store = getStore();
+    ensure(store);
+    const note = (store.notes || []).find(
+      (n: NoteRecord) => n.id === c.req.param('noteId') && n.sessionId === c.req.param('id')
+    );
+    if (!note) return c.json({ error: 'not found' }, 404);
+
+    const session = store.readingNoteSessions!.find(x => x.id === c.req.param('id'));
+    const styleParam = c.req.query('style') ?? 'harvard';
+    const style: CitationStyle =
+      styleParam === 'apa' || styleParam === 'birmingham' || styleParam === 'harvard'
+        ? (styleParam as CitationStyle)
+        : 'harvard';
+
+    // Build CitationMeta from session.citationMeta + session title as title fallback
+    const sm = session?.citationMeta ?? {};
+    const meta: CitationMeta = {
+      authors: sm.authors,
+      year: sm.year,
+      title: session?.title,
+      publisher: sm.publisher,
+      edition: sm.edition,
+      city: sm.city,
+      doi: sm.doi,
+      journal: sm.journal,
+      volume: sm.volume,
+      issue: sm.issue,
+      isKindleEdition: sm.isKindleEdition,
+    };
+
+    const inText = formatInText(meta, note.location, style);
+    const reference = formatReference(meta, style);
+
+    return c.json({ inText, reference });
+  });
+
+  // ── Impression: per-page ─────────────────────────────────────────────
+  app.put('/api/reading/sessions/:id/pages/:pageRange/impression', async (c) => {
+    const store = getStore();
+    ensure(store);
+    const s = store.readingNoteSessions!.find(x => x.id === c.req.param('id'));
+    if (!s) return c.json({ error: 'not found' }, 404);
+
+    const body = await c.req.json<{ impression?: string; impressionEn?: string }>().catch(() => ({} as { impression?: string; impressionEn?: string }));
+    const pageRange = c.req.param('pageRange');
+
+    let page = s.pages.find(p => p.pageRange === pageRange);
+    if (!page) {
+      page = { pageRange, inputMethod: 'manual', noteIds: [], processedAt: new Date().toISOString() };
+      s.pages.push(page);
+    }
+    if (body.impression !== undefined) page.impression = body.impression;
+    if (body.impressionEn !== undefined) page.impressionEn = body.impressionEn;
+    s.updatedAt = new Date().toISOString();
+
+    saveStore();
+    return c.json({ ok: true, pageRange, impression: page.impression, impressionEn: page.impressionEn });
+  });
+
+  // ── Impression: session-level ────────────────────────────────────────
+  app.put('/api/reading/sessions/:id/impression', async (c) => {
+    const store = getStore();
+    ensure(store);
+    const s = store.readingNoteSessions!.find(x => x.id === c.req.param('id'));
+    if (!s) return c.json({ error: 'not found' }, 404);
+
+    const body = await c.req.json<{ impression?: string; impressionEn?: string }>().catch(() => ({} as { impression?: string; impressionEn?: string }));
+    if (body.impression !== undefined) s.impression = body.impression;
+    if (body.impressionEn !== undefined) s.impressionEn = body.impressionEn;
+    s.updatedAt = new Date().toISOString();
+
+    saveStore();
+    return c.json({ ok: true, impression: s.impression, impressionEn: s.impressionEn });
+  });
+
+  // ── Citation: save/update session citationMeta ───────────────────────
+  // ── Snowballing: create Library entities from extracted references ─────
+  app.post('/api/reading/sessions/:id/snowball', async (c) => {
+    const store = getStore();
+    const id = c.req.param('id');
+    const session = store.readingNoteSessions?.find(s => s.id === id);
+    if (!session) return c.json({ error: 'session not found' }, 404);
+
+    const body = await c.req.json<{
+      references: Array<{ title: string; authors?: string; year?: number; doi?: string; url?: string }>;
+    }>();
+
+    if (!store.libraryEntities) store.libraryEntities = [];
+    const results: { entity: LibraryEntity; created: boolean }[] = [];
+    const now = new Date().toISOString();
+
+    for (const ref of (body.references ?? [])) {
+      if (!ref.title?.trim()) continue;
+      // Check if already exists by DOI or title
+      const existing = store.libraryEntities.find(e =>
+        (ref.doi && e.doi === ref.doi) ||
+        e.title.toLowerCase() === ref.title.toLowerCase()
+      );
+      if (existing) {
+        results.push({ entity: existing, created: false });
+        continue;
+      }
+      const entity: LibraryEntity = {
+        id: crypto.randomUUID(),
+        type: 'paper' as EntityType,
+        title: ref.title,
+        notes: '',
+        subNotes: [],
+        links: [],
+        tags: ['snowball'],
+        authors: ref.authors,
+        year: ref.year,
+        doi: ref.doi,
+        url: ref.url,
+        readingStatus: 'to-read',
+        createdAt: now,
+        updatedAt: now,
+      };
+      store.libraryEntities.push(entity);
+      results.push({ entity, created: true });
+    }
+    if (results.some(r => r.created)) saveStore();
+    return c.json({ ok: true, results, total: results.length, created: results.filter(r => r.created).length });
+  });
+
+  app.post('/api/reading/sessions/:id/citationMeta', async (c) => {
+    const store = getStore();
+    ensure(store);
+    const s = store.readingNoteSessions!.find(x => x.id === c.req.param('id'));
+    if (!s) return c.json({ error: 'not found' }, 404);
+
+    const body = await c.req.json<ReadingSession['citationMeta']>().catch(() => ({}));
+    s.citationMeta = { ...(s.citationMeta ?? {}), ...body };
+    s.updatedAt = new Date().toISOString();
+    saveStore();
+    return c.json({ ok: true, citationMeta: s.citationMeta });
   });
 }

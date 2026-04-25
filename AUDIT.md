@@ -1,8 +1,17 @@
 # Ruhool (رحول) — End-to-End Audit
 
-**Date:** 2026-04-15  
-**Auditor:** Automated read-only audit (Claude Opus 4.6)  
+**Date:** 2026-04-15 (original), **2026-04-20** (status addendum)
+**Auditor:** Automated read-only audit (Claude Opus 4.6)
 **Scope:** `C:/Users/alhud/platform/` — monorepo, excluding `node_modules/` and `.next/`.
+
+> **2026-04-20 Status Addendum** — Many Week-1 and Week-2 remediations have shipped since the original audit:
+> - **TEST-01 resolved** — `apps/api` now has a vitest suite: **108/108 tests passing** (20 files). Playwright E2E in `apps/web/e2e/` (3 tests, gated on `CHAT_V2_E2E_LIVE`).
+> - **CI resolved** — `.github/workflows/ci.yml` runs `pnpm -r test` on push/PR.
+> - **DB migrations applied** — 4 Drizzle migrations clean (latest `0003_chat_group_messages`); dual-mode Postgres/JSON store per ADR 0001.
+> - **Index.ts broken down** — ~5,500 LOC extracted via REL-01 stage 2 (see `apps/api/STAGE_2D_LOG.md`); routes split into ~50 registrars.
+> - **Temporal wired** — end-to-end DAG workflow with cancel/pause/resume signals.
+>
+> Sections 1, 8, 9, 10 below still reflect the original snapshot; treat counts and "zero tests / no CI" language as out-of-date. Test/CI counts above are the current reality.
 
 ---
 
@@ -186,7 +195,7 @@ Medium/Low/Nit findings appear inline below.
 
 ## 8. Testing & Quality
 
-- [High] **TEST-01** Zero test files found in source tree (excluding node_modules). `turbo.json` declares a `test` pipeline but no package has a `test` script.
+- [~~High~~ **RESOLVED 2026-04-20**] **TEST-01** ~~Zero test files found~~ — now **108/108 tests passing** in `apps/api` (vitest, 20 files) plus Playwright E2E in `apps/web/e2e/` (3 scenarios, gated on `CHAT_V2_E2E_LIVE`). `packages/core` vitest suite present. CI runs `pnpm -r test` on every push/PR via `.github/workflows/ci.yml`.
 - [Medium] **Q-01** `any` usage: 10 occurrences in source (8 in `apps/api/src/index.ts`, 1 in `code-fixer.ts`, 1 in `lib/api.ts`). Acceptable volume but each deserves a comment.
 - [Medium] **Q-02** `: any` plus `as unknown as X` casts — e.g., `apps/api/src/index.ts:10188` `store as unknown as Phase2StoreLike`. Evidence that the store type has diverged from Phase2's assumed shape. Unify.
 - [Medium] **Q-03** `console.log` literal count in app source: ~15 across `apps/api/src/**` + `apps/api/src/db-setup.ts` (18) + `daily-backup.ts` (5). Not excessive, but migrate to `pino`.

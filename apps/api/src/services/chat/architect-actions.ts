@@ -126,7 +126,10 @@ export function createArchitectActions(deps: ArchitectActionsDeps): ArchitectAct
           const name = (approval.payload as { name?: string }).name;
           if (!name) return { ok: false, error: 'name required' };
           if (!store.taskCategories) store.taskCategories = [];
-          if (!store.taskCategories.includes(name)) store.taskCategories.push(name);
+          const cats = store.taskCategories as unknown as { id: string; en: string; ar: string }[];
+          if (!cats.find(c => c.id === name || c.en === name)) {
+            cats.push({ id: name.toLowerCase().replace(/\s+/g, '-'), en: name, ar: name });
+          }
           saveStore();
           return { ok: true };
         }
@@ -135,7 +138,8 @@ export function createArchitectActions(deps: ArchitectActionsDeps): ArchitectAct
           if (!p.oldName || !p.newName) return { ok: false, error: 'oldName + newName required' };
           for (const t of (store.tasks || [])) { if (t.list === p.oldName) t.list = p.newName; }
           if (Array.isArray(store.taskCategories)) {
-            store.taskCategories = store.taskCategories.map((c) => c === p.oldName ? p.newName! : c);
+            store.taskCategories = (store.taskCategories as unknown as { id: string; en: string; ar: string }[])
+              .map((c) => c.id === p.oldName ? { ...c, id: p.newName!, en: p.newName! } : c);
           }
           saveStore();
           return { ok: true };
@@ -219,7 +223,8 @@ export function createArchitectActions(deps: ArchitectActionsDeps): ArchitectAct
           if (!name) return { ok: false, error: 'name required' };
           for (const t of (store.tasks || [])) { if (t.list === name) t.list = 'عام'; }
           if (Array.isArray(store.taskCategories)) {
-            store.taskCategories = store.taskCategories.filter((c) => c !== name);
+            store.taskCategories = (store.taskCategories as unknown as { id: string; en: string; ar: string }[])
+              .filter((c) => c.id !== name && c.en !== name);
           }
           saveStore();
           return { ok: true };

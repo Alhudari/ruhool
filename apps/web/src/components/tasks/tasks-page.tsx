@@ -5,11 +5,13 @@ import { useRouter } from 'next/navigation';
 import {
   CheckSquare, Plus, Search, List, LayoutGrid, Pin, PinOff,
   Trash2, Loader2, Calendar, Clock, Tag, ChevronDown, ChevronRight,
-  X, Check, Circle, Square, Flag, MessageSquare,
+  X, Check, Circle, Square, Flag, MessageSquare, StickyNote, Flame,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
+import { useToast } from '@/components/shared/Toast';
+import { HabitStatsRing } from './HabitStatsRing';
 
 interface ChecklistItem {
   id: string;
@@ -26,6 +28,9 @@ interface TaskItem {
   priority: 'high' | 'medium' | 'low' | 'none';
   dueDate: string | null;
   dueTime: string | null;
+  startTime?: string | null;
+  endTime?: string | null;
+  allDay?: boolean;
   list: string;
   tags: string[];
   color: string;
@@ -36,6 +41,29 @@ interface TaskItem {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  /** Round 4: workspace this task belongs to ('phd' | 'life' | …). Legacy
+   *  rows default to 'phd' via migration 003. */
+  workspaceId?: string;
+  /** Round 6: habit / today / cross-workspace flags. */
+  isHabit?: boolean;
+  habitFrequency?: 'daily' | 'skip-weekends' | 'weekly' | 'custom';
+  habitDays?: number[];
+  habitTemplateId?: string;
+  durationMinutes?: number;
+  habitStartDate?: string | null;
+  habitEndDate?: string | null;
+  scheduledFor?: string | null;
+  isToday?: boolean;
+  crossWorkspace?: boolean;
+  /** J-6: Quick Note */
+  isQuickNote?: boolean;
+  noteColor?: string;
+  categoryEn?: string;
+  categoryAr?: string;
+  meetingSourceId?: string;
+  meetingSourceNo?: number;
+  /** J-7: soft delete */
+  deletedAt?: string;
 }
 
 const PRIORITY_CONFIG: Record<string, { label: { en: string; ar: string }; color: string; dot: string }> = {
@@ -107,6 +135,7 @@ function isOverdue(task: TaskItem): boolean {
 export function TasksPage() {
   const { language } = useAppStore();
   const isRTL = language === 'ar';
+  const { showToast } = useToast();
   const router = useRouter();
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [lists, setLists] = useState<string[]>([]);
@@ -115,7 +144,47 @@ export function TasksPage() {
   const [activeList, setActiveList] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showCompleted, setShowCompleted] = useState(false);
+  // Round 4: workspace filter. 'all' = unscoped; otherwise show only
+  // tasks tagged with that workspace. Persists to localStorage.
+  const [workspaceFilter, setWorkspaceFilter] = useState<'all' | 'phd' | 'life'>('all');
+  // Round 6: top-level view filter — 'all' is flat task list, 'today'
+  // is today's focus, 'habits' is habit templates only.
+  const [todayView, setTodayView] = useState<'all' | 'today' | 'habits' | 'notes'>('all');
+  const [quickNotes, setQuickNotes] = useState<TaskItem[]>([]);
+  const [categories, setCategories] = useState<{ id: string; en: string; ar: string }[]>([]);
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem('ruhool.tasks.workspace-filter');
+      if (v === 'all' || v === 'phd' || v === 'life') setWorkspaceFilter(v);
+    } catch { /* noop */ }
+  }, []);
+  useEffect(() => {
+    try { window.localStorage.setItem('ruhool.tasks.workspace-filter', workspaceFilter); } catch { /* noop */ }
+  }, [workspaceFilter]);
   const [editingTask, setEditingTask] = useState<TaskItem | null>(null);
+
+  const openNewHabit = () => {
+    const now = new Date().toISOString();
+    setEditingTask({
+      id: '', title: '', notes: '', completed: false,
+      priority: 'none', dueDate: null, dueTime: null,
+      list: 'عام', tags: [], color: 'none', pinned: false,
+      checklist: [], reminder: null, createdAt: now, updatedAt: now,
+      completedAt: null, isHabit: true, habitFrequency: 'daily', habitDays: [],
+    });
+  };
+  const openNewNote = () => {
+    const now = new Date().toISOString();
+    setEditingTask({
+      id: '', title: '', notes: '', completed: false,
+      priority: 'none', dueDate: null, dueTime: null,
+      list: 'عام', tags: [], color: 'yellow', pinned: false,
+      checklist: [], reminder: null, createdAt: now, updatedAt: now,
+      completedAt: null, isQuickNote: true, noteColor: '#fef08a',
+    });
+  };
+
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [quickAddText, setQuickAddText] = useState('');
   const [newListName, setNewListName] = useState('');
   const [showNewList, setShowNewList] = useState(false);
@@ -123,9 +192,20 @@ export function TasksPage() {
 
   const load = useCallback(async () => {
     try {
+      // R17 — fetch categories for the ACTIVE workspace. When filter is
+      // 'all', union both phd + life categories so the user can still
+      // pick any category when creating a cross-workspace task.
+      const listsEndpoint = workspaceFilter === 'all'
+        ? null
+        : `/api/tasks/lists?workspaceId=${workspaceFilter}`;
       const [t, l] = await Promise.all([
         apiFetch<TaskItem[]>('/api/tasks'),
-        apiFetch<string[]>('/api/tasks/lists'),
+        listsEndpoint
+          ? apiFetch<string[]>(listsEndpoint)
+          : Promise.all([
+              apiFetch<string[]>('/api/tasks/lists?workspaceId=phd').catch(() => []),
+              apiFetch<string[]>('/api/tasks/lists?workspaceId=life').catch(() => []),
+            ]).then(([a, b]) => Array.from(new Set([...a, ...b]))),
       ]);
       // Respect persisted order if present
       t.sort((a, b) => {
@@ -134,10 +214,19 @@ export function TasksPage() {
         if (ao !== bo) return ao - bo;
         return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
       });
+      const cats = await apiFetch<{ id: string; en: string; ar: string }[]>('/api/tasks/categories').catch(() => []);
       setTasks(t);
       setLists(l);
-    } catch {} finally { setLoading(false); }
-  }, []);
+      setCategories(cats);
+    } catch (e) { setLoadError(e instanceof Error ? e.message : 'Failed to load tasks'); }
+    finally { setLoading(false); }
+  }, [workspaceFilter]);
+
+  const getCategoryLabel = (listId: string): string => {
+    const cat = categories.find(c => c.id === listId || c.en === listId || c.ar === listId);
+    if (cat) return isRTL ? cat.ar : cat.en;
+    return listId;
+  };
 
   useEffect(() => { load(); }, [load]);
 
@@ -151,10 +240,74 @@ export function TasksPage() {
       .catch(() => { /* ignore */ });
   }, []);
 
+  // ── Google Tasks fast-sync: 30s poll when tab is visible, plus
+  //    immediate pull on tab focus / visibility return. When the tab
+  //    is hidden we back off — the backend scheduler picks up the
+  //    slack every 5 min.
+  useEffect(() => {
+    let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const tick = async () => {
+      if (cancelled || document.hidden) return;
+      try {
+        const r = await apiFetch<{ ok?: boolean; skipped?: boolean }>(
+          '/api/google-tasks/sync/tick',
+          { method: 'POST' },
+        );
+        if (r?.ok && !cancelled) await load();
+      } catch { /* silent — sync errors surface on the settings page */ }
+    };
+
+    const startLoop = () => {
+      if (intervalId) return;
+      void tick();  // immediate pull on (re)gain focus
+      intervalId = setInterval(tick, 30_000);
+    };
+    const stopLoop = () => {
+      if (intervalId) { clearInterval(intervalId); intervalId = null; }
+    };
+
+    const onVisibility = () => {
+      if (document.hidden) stopLoop();
+      else startLoop();
+    };
+    const onFocus = () => { if (!document.hidden) void tick(); };
+
+    if (!document.hidden) startLoop();
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      stopLoop();
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [load]);
+
   // Filter tasks
+  const todayIso = new Date().toISOString().slice(0, 10);
+
   const filtered = tasks.filter(t => {
+    // Round 6 view: Habits = templates only; Today = today's focus.
+    if (todayView === 'habits') {
+      if (!t.isHabit) return false;
+    } else if (todayView === 'today') {
+      if (t.isHabit) return false;
+      const inToday = t.isToday || t.scheduledFor === todayIso || t.dueDate === todayIso;
+      if (!inToday) return false;
+    } else {
+      // 'all' — hide habit templates (they're in Habits tab) and
+      // habit-instance clutter unless they're scheduled today.
+      if (t.isHabit) return false;
+    }
     if (activeList && t.list !== activeList) return false;
     if (!showCompleted && t.completed) return false;
+    if (workspaceFilter !== 'all') {
+      const wsId = t.workspaceId ?? 'phd';
+      // Cross-workspace tasks show in every filter.
+      if (!t.crossWorkspace && wsId !== workspaceFilter) return false;
+    }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       return t.title.toLowerCase().includes(q) || t.notes.toLowerCase().includes(q) || t.tags.some(tag => tag.includes(q));
@@ -186,21 +339,41 @@ export function TasksPage() {
     } catch {}
   };
 
-  const deleteTask = async (id: string) => {
+  const deleteTask = async (id: string, title?: string) => {
+    // Optimistic: hide immediately
+    setTasks(prev => prev.filter(t => t.id !== id));
+    if (editingTask?.id === id) setEditingTask(null);
     try {
       await apiFetch(`/api/tasks/${id}`, { method: 'DELETE' });
-      setTasks(prev => prev.filter(t => t.id !== id));
-      if (editingTask?.id === id) setEditingTask(null);
-    } catch {}
+      showToast({
+        message: isRTL ? `"${title ?? ''}" نُقلت للمحذوفات` : `"${title ?? ''}" moved to trash`,
+        type: 'info',
+        undo: async () => {
+          await apiFetch(`/api/tasks/${id}/restore`, { method: 'POST' });
+          await load();
+        },
+      });
+    } catch {
+      await load(); // revert on failure
+    }
   };
 
   const saveTask = async (task: TaskItem) => {
     try {
-      const updated = await apiFetch<TaskItem>(`/api/tasks/${task.id}`, {
-        method: 'PUT',
-        body: JSON.stringify(task),
-      });
-      setTasks(prev => prev.map(t => t.id === task.id ? updated : t));
+      if (!task.id) {
+        // Create new task
+        const created = await apiFetch<TaskItem>('/api/tasks', {
+          method: 'POST',
+          body: JSON.stringify(task),
+        });
+        setTasks(prev => [created, ...prev]);
+      } else {
+        const updated = await apiFetch<TaskItem>(`/api/tasks/${task.id}`, {
+          method: 'PUT',
+          body: JSON.stringify(task),
+        });
+        setTasks(prev => prev.map(t => t.id === task.id ? updated : t));
+      }
       setEditingTask(null);
     } catch {}
   };
@@ -248,6 +421,7 @@ export function TasksPage() {
           dueTime,
           priority,
           list: activeList || '\u0639\u0627\u0645',
+          workspaceId: workspaceFilter !== 'all' ? workspaceFilter : ((typeof window !== 'undefined' && window.localStorage.getItem('ruhool.active-workspace')) || 'phd'),
         }),
       });
       setTasks(prev => [created, ...prev]);
@@ -257,10 +431,17 @@ export function TasksPage() {
 
   const createList = async () => {
     if (!newListName.trim()) return;
+    // R17 — new category belongs to the currently-active workspace.
+    // When the filter is 'all', use the user's active workspace from
+    // localStorage (defaults to 'phd') — we can't create a "universal"
+    // category since it conflates phd + life.
+    const activeWs = workspaceFilter !== 'all'
+      ? workspaceFilter
+      : ((typeof window !== 'undefined' && window.localStorage.getItem('ruhool.active-workspace')) || 'phd');
     try {
       const result = await apiFetch<{ lists: string[] }>('/api/tasks/lists', {
         method: 'POST',
-        body: JSON.stringify({ name: newListName.trim() }),
+        body: JSON.stringify({ name: newListName.trim(), workspaceId: activeWs }),
       });
       setLists(result.lists);
       setNewListName('');
@@ -333,8 +514,13 @@ export function TasksPage() {
   };
 
   const deleteList = async (name: string) => {
+    // R17 — pass the active workspace so the server deletes the
+    // category from the right bucket (phd/life/...).
+    const activeWs = workspaceFilter !== 'all'
+      ? workspaceFilter
+      : ((typeof window !== 'undefined' && window.localStorage.getItem('ruhool.active-workspace')) || 'phd');
     try {
-      const result = await apiFetch<{ lists: string[] }>(`/api/tasks/lists/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      const result = await apiFetch<{ lists: string[] }>(`/api/tasks/lists/${encodeURIComponent(name)}?workspaceId=${activeWs}`, { method: 'DELETE' });
       setLists(result.lists);
       if (activeList === name) setActiveList(null);
       await load();
@@ -508,8 +694,13 @@ export function TasksPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="animate-spin text-on-surface-tertiary" size={24} />
+      <div className="max-w-5xl mx-auto px-4 md:px-6 py-6">
+        <div className="h-8 w-48 bg-surface-secondary rounded animate-pulse mb-6" />
+        <div className="space-y-3">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="h-14 rounded-xl bg-surface-secondary animate-pulse" style={{ opacity: 1 - i * 0.12 }} />
+          ))}
+        </div>
       </div>
     );
   }
@@ -519,15 +710,20 @@ export function TasksPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-            <CheckSquare size={18} className="text-emerald-500" />
+          <div className="w-11 h-11 rounded-[var(--radius-lg)] bg-accent/10 text-accent flex items-center justify-center shrink-0">
+            <CheckSquare size={22} />
           </div>
-          <h1 className="text-xl font-semibold text-on-surface">
-            {isRTL ? '\u0645\u0647\u0627\u0645' : 'Tasks'}
-          </h1>
-          <span className="text-sm text-on-surface-tertiary">
-            ({tasks.filter(t => !t.completed).length})
-          </span>
+          <div>
+            <h1 className="text-xl font-bold text-on-surface">
+              {isRTL ? '\u0627\u0644\u0645\u0647\u0627\u0645' : 'Tasks'}
+              <span className="text-sm font-normal text-on-surface-tertiary ms-2">
+                ({tasks.filter(t => !t.completed).length})
+              </span>
+            </h1>
+            <p className="text-xs text-on-surface-tertiary">
+              {isRTL ? '\u0645\u0647\u0627\u0645 \u0627\u0644\u062f\u0643\u062a\u0648\u0631\u0627\u0647 \u0648\u0627\u0644\u062d\u064a\u0627\u0629' : 'PhD & life task management'}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -553,6 +749,14 @@ export function TasksPage() {
         </div>
       </div>
 
+      {/* Load error */}
+      {loadError && (
+        <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400 flex items-center justify-between">
+          <span>{loadError}</span>
+          <button onClick={() => { setLoadError(null); load(); }} className="text-xs underline">{isRTL ? 'إعادة المحاولة' : 'Retry'}</button>
+        </div>
+      )}
+
       {/* Search bar */}
       <div className="relative mb-4">
         <Search size={16} className="absolute start-3 top-1/2 -translate-y-1/2 text-on-surface-tertiary" />
@@ -564,6 +768,69 @@ export function TasksPage() {
           className="w-full bg-input border border-border rounded-lg ps-9 pe-3 py-2 text-sm text-on-surface placeholder:text-on-surface-tertiary focus:outline-none focus:ring-2 focus:ring-ring"
           dir={isRTL ? 'rtl' : 'ltr'}
         />
+      </div>
+
+      {/* Today filter — Round 6 */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <span className="text-[11px] text-on-surface-tertiary shrink-0">
+          {isRTL ? 'العرض:' : 'View:'}
+        </span>
+        {([
+          { id: 'all' as const, labelAr: 'الكل', labelEn: 'All' },
+          { id: 'today' as const, labelAr: 'اليوم', labelEn: 'Today' },
+          { id: 'notes' as const, labelAr: 'ملاحظات', labelEn: 'Notes' },
+          { id: 'habits' as const, labelAr: 'العادات', labelEn: 'Habits' },
+        ]).map((v) => (
+          <button
+            key={v.id}
+            onClick={() => setTodayView(v.id)}
+            className={cn(
+              'px-2.5 py-1 rounded-full text-xs whitespace-nowrap transition-colors border',
+              todayView === v.id
+                ? 'bg-accent/10 text-accent border-accent/30'
+                : 'bg-surface border-border text-on-surface-tertiary hover:bg-surface-secondary',
+            )}
+          >
+            {isRTL ? v.labelAr : v.labelEn}
+          </button>
+        ))}
+        {todayView === 'habits' && (
+          <button onClick={openNewHabit}
+            className="ms-auto flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-accent text-on-accent border border-accent hover:opacity-90 transition-opacity">
+            <Plus size={12} /> {isRTL ? 'عادة جديدة' : 'New Habit'}
+          </button>
+        )}
+        {todayView === 'notes' && (
+          <button onClick={openNewNote}
+            className="ms-auto flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-500 text-white border border-amber-500 hover:opacity-90 transition-opacity">
+            <Plus size={12} /> {isRTL ? 'ملاحظة جديدة' : 'New Note'}
+          </button>
+        )}
+      </div>
+
+      {/* Workspace filter — Round 4 */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-[11px] text-on-surface-tertiary shrink-0">
+          {isRTL ? 'الغرفة:' : 'Workspace:'}
+        </span>
+        {([
+          { id: 'all' as const, labelAr: 'الكل', labelEn: 'All' },
+          { id: 'phd' as const, labelAr: 'الدكتوراه', labelEn: 'PhD' },
+          { id: 'life' as const, labelAr: 'الحياة', labelEn: 'Life' },
+        ]).map((ws) => (
+          <button
+            key={ws.id}
+            onClick={() => setWorkspaceFilter(ws.id)}
+            className={cn(
+              'px-2.5 py-1 rounded-full text-xs whitespace-nowrap transition-colors border',
+              workspaceFilter === ws.id
+                ? 'bg-accent/10 text-accent border-accent/30'
+                : 'bg-surface border-border text-on-surface-tertiary hover:bg-surface-secondary',
+            )}
+          >
+            {isRTL ? ws.labelAr : ws.labelEn}
+          </button>
+        ))}
       </div>
 
       {/* List tabs */}
@@ -588,7 +855,7 @@ export function TasksPage() {
               activeList === list ? 'bg-accent text-white border-accent' : 'bg-surface border-border text-on-surface-secondary hover:bg-surface-secondary'
             )}
           >
-            {list}
+            {getCategoryLabel(list)}
             {activeList === list && lists.length > 1 && (
               <button
                 onClick={(e) => { e.stopPropagation(); deleteList(list); }}
@@ -624,8 +891,74 @@ export function TasksPage() {
         )}
       </div>
 
+      {/* ── Quick Notes Grid — Notes view ───────────────────────────── */}
+      {todayView === 'notes' && (
+        <div>
+          {tasks.filter(t => t.isQuickNote && !t.deletedAt).length === 0 ? (
+            <div className="flex flex-col items-center py-16 text-on-surface-tertiary">
+              <StickyNote size={40} className="opacity-30 mb-3" />
+              <p className="text-sm">{isRTL ? 'لا ملاحظات بعد' : 'No notes yet'}</p>
+              <button onClick={openNewNote}
+                className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-amber-500 text-white text-sm hover:opacity-90">
+                <Plus size={14} /> {isRTL ? 'أضف ملاحظة' : 'Add note'}
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {tasks.filter(t => t.isQuickNote && !t.deletedAt).map(note => (
+                <button
+                  key={note.id}
+                  onClick={() => setEditingTask({ ...note })}
+                  style={{ backgroundColor: note.noteColor ?? '#fef08a' }}
+                  className="rounded-xl p-4 min-h-[110px] text-start shadow-sm hover:shadow-md transition-shadow group relative"
+                >
+                  {note.title && (
+                    <p className="text-sm font-semibold text-gray-800 mb-1 leading-snug">{note.title}</p>
+                  )}
+                  {note.notes && (
+                    <p className="text-xs text-gray-600 leading-relaxed line-clamp-4">{note.notes}</p>
+                  )}
+                  {note.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {note.tags.slice(0, 2).map(t => (
+                        <span key={t} className="text-[10px] px-1.5 py-0 rounded-full bg-black/10 text-gray-700">#{t}</span>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-gray-500 mt-2 absolute bottom-2 end-3">
+                    {new Date(note.updatedAt).toLocaleDateString()}
+                  </p>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Content */}
-      {view === 'list' ? (
+      {/* ── Habits Grid — dedicated view with streak + heatmap ─────── */}
+      {todayView === 'habits' && (
+        <HabitsGrid
+          habits={tasks.filter(t => t.isHabit && !t.deletedAt)}
+          allTasks={tasks}
+          isRTL={isRTL}
+          onEdit={(t) => setEditingTask({ ...t })}
+          onComplete={async (habitId) => {
+            // Spawn today's instance then toggle it
+            await apiFetch('/api/tasks/habits/spawn-due', { method: 'POST' }).catch(() => {});
+            await load();
+            const today = new Date().toISOString().slice(0, 10);
+            const instance = tasks.find(t => t.habitTemplateId === habitId && t.scheduledFor === today);
+            if (instance) {
+              await apiFetch(`/api/tasks/${instance.id}/toggle`, { method: 'PUT' }).catch(() => {});
+              await load();
+            }
+          }}
+          onOpenNew={openNewHabit}
+        />
+      )}
+
+      {todayView !== 'notes' && todayView !== 'habits' && view === 'list' ? (
         <div>
           <TaskGroup label={isRTL ? '\u0645\u062b\u0628\u062a\u0629' : 'Pinned'} items={pinned} />
           <TaskGroup label={isRTL ? '\u0645\u062a\u0623\u062e\u0631\u0629' : 'Overdue'} items={overdue} />
@@ -700,10 +1033,24 @@ export function TasksPage() {
         </div>
       )}
 
+      {/* Trash section — soft-deleted tasks */}
+      {tasks.some(t => (t as { deletedAt?: string }).deletedAt) && (
+        <div className="mt-6 border-t border-border pt-4">
+          <button
+            onClick={() => {/* toggle trash visibility handled by todayView filter */}}
+            className="text-xs text-on-surface-tertiary hover:text-error transition-colors flex items-center gap-1"
+          >
+            <Trash2 size={12} />
+            {isRTL ? 'المحذوفات' : 'Trash'}
+            {' '}({tasks.filter(t => (t as { deletedAt?: string }).deletedAt).length})
+          </button>
+        </div>
+      )}
+
       {/* Quick Add (bottom floating) */}
       <div className="fixed bottom-4 md:bottom-6 start-1/2 -translate-x-1/2 rtl:translate-x-1/2 w-full max-w-xl px-4">
-        <div className="flex items-center gap-2 bg-surface border border-border rounded-xl shadow-lg px-4 py-2.5">
-          <Plus size={18} className="text-on-surface-tertiary flex-shrink-0" />
+        <div className="flex items-center gap-2 bg-surface border border-amber-500/30 rounded-xl shadow-lg px-4 py-2.5">
+          <Plus size={18} className="text-amber-500 flex-shrink-0" />
           <input
             ref={quickAddRef}
             type="text"
@@ -715,7 +1062,7 @@ export function TasksPage() {
             dir={isRTL ? 'rtl' : 'ltr'}
           />
           {quickAddText && (
-            <button onClick={quickAdd} className="p-1.5 rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors">
+            <button onClick={quickAdd} className="p-1.5 rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors">
               <Plus size={16} />
             </button>
           )}
@@ -745,7 +1092,7 @@ function TaskEditor({
   lists: string[];
   isRTL: boolean;
   onSave: (task: TaskItem) => void;
-  onDelete: (id: string) => void;
+  onDelete: (id: string, title?: string) => void;
   onTogglePin: (id: string) => void;
   onClose: () => void;
 }) {
@@ -954,8 +1301,8 @@ function TaskEditor({
             </div>
           </div>
 
-          {/* Due date & time */}
-          <div className="flex items-center gap-3">
+          {/* Due date + time window (R19) */}
+          <div className="space-y-2">
             <div className="flex-1">
               <label className="text-xs text-on-surface-secondary mb-1 block">{isRTL ? '\u0627\u0644\u062a\u0627\u0631\u064a\u062e' : 'Due date'}</label>
               <input
@@ -974,6 +1321,7 @@ function TaskEditor({
                 className="w-full bg-input border border-border rounded-lg px-3 py-1.5 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
+            <AllDayAndWindow form={form} update={update} isRTL={isRTL} />
           </div>
 
           {/* Priority */}
@@ -1013,6 +1361,9 @@ function TaskEditor({
               ))}
             </div>
           </div>
+
+          {/* Habit / Today / Cross-workspace — Round 6 */}
+          <HabitSection form={form} update={update} isRTL={isRTL} />
 
           {/* Tags */}
           <div>
@@ -1069,7 +1420,7 @@ function TaskEditor({
               {form.pinned ? <PinOff size={16} /> : <Pin size={16} />}
             </button>
             <button
-              onClick={() => { if (confirm(isRTL ? '\u062d\u0630\u0641 \u0647\u0630\u0647 \u0627\u0644\u0645\u0647\u0645\u0629\u061f' : 'Delete this task?')) onDelete(form.id); }}
+              onClick={() => { if (confirm(isRTL ? '\u0646\u0642\u0644 \u0644\u0644\u0645\u062d\u0630\u0648\u0641\u0627\u062a\u061f' : 'Move to trash?')) onDelete(form.id, form.title); }}
               className="p-2 rounded-lg text-on-surface-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
             >
               <Trash2 size={16} />
@@ -1091,6 +1442,326 @@ function TaskEditor({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Round 6 — Habit editor section ────────────────────────────────
+function HabitSection({
+  form, update, isRTL,
+}: {
+  form: TaskItem;
+  update: (fields: Partial<TaskItem>) => void;
+  isRTL: boolean;
+}) {
+  const dayNames = isRTL
+    ? ['أحد', 'إثن', 'ثلا', 'أرب', 'خمس', 'جمع', 'سبت']
+    : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const freq = form.habitFrequency ?? 'daily';
+  const days = form.habitDays ?? [];
+
+  const toggleDay = (d: number) => {
+    const next = days.includes(d) ? days.filter((x) => x !== d) : [...days, d].sort();
+    update({ habitDays: next });
+  };
+
+  return (
+    <div className="space-y-3">
+      <label className="flex items-center gap-2 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          role="switch"
+          aria-checked={!!form.isHabit}
+          checked={!!form.isHabit}
+          onChange={(e) => update({ isHabit: e.target.checked })}
+          className="accent-accent h-4 w-4"
+        />
+        <span className="text-sm text-on-surface font-medium">
+          {isRTL ? 'عادة متكررة' : 'Recurring habit'}
+        </span>
+      </label>
+
+      {form.isHabit && (
+        <div className="rounded-[var(--radius-lg)] border border-accent/20 bg-accent/5 p-3 space-y-3">
+          <div>
+            <label className="text-[11px] text-on-surface-tertiary uppercase tracking-wider mb-1 block">
+              {isRTL ? 'التكرار' : 'Frequency'}
+            </label>
+            <div className="flex gap-1 flex-wrap">
+              {([
+                { id: 'daily' as const, labelAr: 'يومياً', labelEn: 'Daily' },
+                { id: 'skip-weekends' as const, labelAr: 'بدون عطلة', labelEn: 'Skip weekends' },
+                { id: 'weekly' as const, labelAr: 'أسبوعي', labelEn: 'Weekly' },
+                { id: 'custom' as const, labelAr: 'مخصّص', labelEn: 'Custom' },
+              ]).map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => update({ habitFrequency: f.id })}
+                  className={cn(
+                    'px-2.5 py-1 rounded-full text-xs border transition-colors',
+                    freq === f.id
+                      ? 'bg-accent text-on-accent border-accent'
+                      : 'bg-surface border-border text-on-surface-secondary hover:bg-surface-secondary',
+                  )}
+                >
+                  {isRTL ? f.labelAr : f.labelEn}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {(freq === 'weekly' || freq === 'custom') && (
+            <div>
+              <label className="text-[11px] text-on-surface-tertiary uppercase tracking-wider mb-1 block">
+                {isRTL ? 'أيام الأسبوع' : 'Days of week'}
+              </label>
+              <div className="flex gap-1 flex-wrap">
+                {dayNames.map((name, i) => (
+                  <button
+                    key={i}
+                    onClick={() => toggleDay(i)}
+                    className={cn(
+                      'w-9 h-9 rounded-full text-[10px] font-semibold transition-colors border',
+                      days.includes(i)
+                        ? 'bg-accent text-on-accent border-accent'
+                        : 'bg-surface border-border text-on-surface-secondary hover:bg-surface-secondary',
+                    )}
+                    aria-pressed={days.includes(i)}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="text-[11px] text-on-surface-tertiary uppercase tracking-wider mb-1 block">
+              {isRTL ? `المدة المستهدفة: ${form.durationMinutes ?? 0} دقيقة` : `Target duration: ${form.durationMinutes ?? 0} min`}
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={180}
+              step={5}
+              value={form.durationMinutes ?? 0}
+              onChange={(e) => update({ durationMinutes: Number(e.target.value) || undefined })}
+              className="w-full accent-accent"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[11px] text-on-surface-tertiary uppercase tracking-wider mb-1 block">
+                {isRTL ? 'يبدأ' : 'Starts'}
+              </label>
+              <input
+                type="date"
+                value={form.habitStartDate ?? ''}
+                onChange={(e) => update({ habitStartDate: e.target.value || null })}
+                className="w-full h-8 bg-surface border border-border rounded px-2 text-xs"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-on-surface-tertiary uppercase tracking-wider mb-1 block">
+                {isRTL ? 'ينتهي' : 'Ends'}
+              </label>
+              <input
+                type="date"
+                value={form.habitEndDate ?? ''}
+                onChange={(e) => update({ habitEndDate: e.target.value || null })}
+                className="w-full h-8 bg-surface border border-border rounded px-2 text-xs"
+              />
+            </div>
+          </div>
+
+          {form.id && (
+            <div className="pt-2 border-t border-accent/20">
+              <HabitStatsRing habitId={form.id} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Quick flags */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <label className="flex items-center gap-2 cursor-pointer select-none text-sm">
+          <input
+            type="checkbox"
+            role="switch"
+            aria-checked={!!form.isToday}
+            checked={!!form.isToday}
+            onChange={(e) => update({ isToday: e.target.checked })}
+            className="accent-accent h-4 w-4"
+          />
+          <span className="text-on-surface">{isRTL ? 'اليوم' : 'Today'}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer select-none text-sm">
+          <input
+            type="checkbox"
+            role="switch"
+            aria-checked={!!form.crossWorkspace}
+            checked={!!form.crossWorkspace}
+            onChange={(e) => update({ crossWorkspace: e.target.checked })}
+            className="accent-accent h-4 w-4"
+          />
+          <span className="text-on-surface">{isRTL ? 'عابرة للغرف' : 'Cross-workspace'}</span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+// ── R19 — All-day + start/end time window ─────────────────────────
+function AllDayAndWindow({
+  form, update, isRTL,
+}: {
+  form: TaskItem;
+  update: (fields: Partial<TaskItem>) => void;
+  isRTL: boolean;
+}) {
+  return (
+    <div className="col-span-2 w-full space-y-2 mt-1">
+      <label className="flex items-center gap-2 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          role="switch"
+          aria-checked={!!form.allDay}
+          checked={!!form.allDay}
+          onChange={(e) => update({
+            allDay: e.target.checked,
+            startTime: e.target.checked ? null : form.startTime,
+            endTime: e.target.checked ? null : form.endTime,
+            dueTime: e.target.checked ? null : form.dueTime,
+          })}
+          className="accent-accent h-4 w-4"
+        />
+        <span className="text-sm text-on-surface">{isRTL ? 'يوم كامل' : 'All day'}</span>
+      </label>
+      {!form.allDay && (
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <label className="text-xs text-on-surface-secondary mb-1 block">
+              {isRTL ? 'بداية' : 'Start'}
+            </label>
+            <input
+              type="time"
+              value={form.startTime || ''}
+              onChange={(e) => update({
+                startTime: e.target.value || null,
+                dueTime: e.target.value || form.dueTime,
+              })}
+              className="w-full bg-input border border-border rounded-lg px-3 py-1.5 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="text-xs text-on-surface-secondary mb-1 block">
+              {isRTL ? 'نهاية' : 'End'}
+            </label>
+            <input
+              type="time"
+              value={form.endTime || ''}
+              onChange={(e) => update({ endTime: e.target.value || null })}
+              className="w-full bg-input border border-border rounded-lg px-3 py-1.5 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── HabitsGrid — dedicated J-9 habits view ───────────────────────────────
+function HabitsGrid({
+  habits, allTasks, isRTL, onEdit, onComplete, onOpenNew,
+}: {
+  habits: TaskItem[];
+  allTasks: TaskItem[];
+  isRTL: boolean;
+  onEdit: (t: TaskItem) => void;
+  onComplete: (habitId: string) => Promise<void>;
+  onOpenNew: () => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [completing, setCompleting] = useState<string | null>(null);
+
+  const isDoneToday = (habitId: string) => {
+    return allTasks.some(t =>
+      t.habitTemplateId === habitId &&
+      t.scheduledFor === today &&
+      t.completed
+    );
+  };
+
+  if (habits.length === 0) {
+    return (
+      <div className="flex flex-col items-center py-16 text-on-surface-tertiary">
+        <Flame size={40} className="opacity-30 mb-3" />
+        <p className="text-sm">{isRTL ? 'لا عادات بعد' : 'No habits yet'}</p>
+        <button onClick={onOpenNew}
+          className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent text-on-accent text-sm hover:opacity-90">
+          <Plus size={14} /> {isRTL ? 'أضف عادة' : 'Add habit'}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {habits.map(habit => {
+        const done = isDoneToday(habit.id);
+        return (
+          <div key={habit.id}
+            className={cn(
+              'rounded-xl border bg-surface-secondary p-4 space-y-3 transition-all',
+              done ? 'border-success/40' : 'border-border'
+            )}>
+            {/* Header */}
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-on-surface">{habit.title}</p>
+                {habit.habitFrequency && (
+                  <p className="text-[11px] text-on-surface-tertiary mt-0.5 capitalize">
+                    {habit.habitFrequency === 'daily' ? (isRTL ? 'يومياً' : 'Daily') :
+                     habit.habitFrequency === 'skip-weekends' ? (isRTL ? 'بدون عطلة' : 'Skip weekends') :
+                     habit.habitFrequency === 'weekly' ? (isRTL ? 'أسبوعي' : 'Weekly') :
+                     (isRTL ? 'مخصّص' : 'Custom')}
+                  </p>
+                )}
+              </div>
+              <button onClick={() => onEdit(habit)}
+                className="text-[11px] text-on-surface-tertiary hover:text-accent px-2 py-1 rounded border border-border hover:border-accent/30">
+                {isRTL ? 'تعديل' : 'Edit'}
+              </button>
+            </div>
+
+            {/* Stats ring + heatmap from existing HabitStatsRing */}
+            {habit.id && <HabitStatsRing habitId={habit.id} />}
+
+            {/* Complete today */}
+            <button
+              disabled={completing === habit.id}
+              onClick={async () => {
+                setCompleting(habit.id);
+                try { await onComplete(habit.id); } finally { setCompleting(null); }
+              }}
+              className={cn(
+                'w-full py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2',
+                done
+                  ? 'bg-success/15 text-success cursor-default'
+                  : 'bg-surface-tertiary hover:bg-success/10 hover:text-success text-on-surface-secondary'
+              )}
+            >
+              {completing === habit.id
+                ? <Loader2 size={14} className="animate-spin" />
+                : done
+                  ? <><span>✓</span> {isRTL ? 'منجز اليوم' : 'Done today'} 🎉</>
+                  : <>{isRTL ? 'أكمل اليوم' : 'Complete today'} <Flame size={14} /></>
+              }
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

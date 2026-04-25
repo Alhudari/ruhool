@@ -1070,7 +1070,7 @@ export function StudioPage() {
                   <p className="text-sm max-w-md mb-4">
                     {isRTL
                       ? 'ناقش فكرة فيديو مع المبدع. سيساعدك في تطوير الفكرة وبناء ستوري بورد.'
-                      : 'Discuss a video idea with The Creative. It will help develop the idea and build a storyboard.'}
+                      : "Discuss a video idea with Al-Mubdi'. It will help develop the idea and build a storyboard."}
                   </p>
                   <button
                     type="button"
@@ -1448,7 +1448,7 @@ export function StudioPage() {
                             }}
                             className="text-[10px] px-2 py-1 rounded text-rose-600 hover:bg-rose-500/10"
                           >
-                            💬 {isRTL ? 'تحدث مع المبدع' : 'Chat with Al-Mubdi'}
+                            💬 {isRTL ? 'تحدث مع المبدع' : "Chat with Al-Mubdi'"}
                           </button>
                         </div>
                         <div className="space-y-1">
@@ -1502,7 +1502,7 @@ export function StudioPage() {
                           ))}
                         </div>
                         <p className="text-[10px] text-on-surface-tertiary text-center">
-                          {isRTL ? 'بعد إرسال التعديل، المبدع يعيد كتابة الكود — ثم اضغط "إعادة التصدير"' : 'After edit, Al-Mubdi rewrites the code — then hit "Render Again"'}
+                          {isRTL ? 'بعد إرسال التعديل، المبدع يعيد كتابة الكود — ثم اضغط "إعادة التصدير"' : "After edit, Al-Mubdi' rewrites the code — then hit \"Render Again\""}
                         </p>
                       </div>
                     )}

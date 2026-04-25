@@ -1,45 +1,64 @@
 /**
- * Mention map: nickname (AR/EN) -> built-in agent id.
- * Extracted from index.ts (REL-01 stage 2d). Pure leaf constant.
+ * Mention map: nickname (AR/EN/legacy) → built-in agent id.
  *
- * Canonical Week-1 rename:
- *   - Manager agent  = الراعي (Al-Ra'i)   → id `manager`
- *   - Architect agent = المصمم (Al-Musammim) → id `architect`
- *   - الرحول / Ruhool is the PLATFORM NAME only — kept as a legacy alias
- *     for the manager so old mentions keep routing correctly.
+ * Used by `services/chat/mention.ts` to resolve `@name` at the top of
+ * the chat pipeline — before anything routes to the specialist
+ * dispatcher. If a name isn't here, the user's `@mention` falls
+ * through and the chat replies with the default CEO instead of the
+ * intended agent. Keep this list exhaustive.
+ *
+ * Source-of-truth for specialist routing is
+ * `services/agents/specialists.ts::SPECIALIST_ALIAS_MAP`. This file
+ * intentionally duplicates + extends it because mention detection
+ * also needs to cover CEOs (manager/doctor) and non-specialist
+ * agents (clippy/playmaker) that never reach the dispatcher.
  */
 export const MENTION_MAP: Record<string, string> = {
-  // ── Canonical R12 Arabic names (primary aliases) ──────────────────
+  // ─── CEOs ────────────────────────────────────────────────────────
   'الراعي': 'manager', "al-ra'i": 'manager', 'alrai': 'manager', 'al-rai': 'manager',
-  'الدكتور': 'doctor', 'al-duktor': 'doctor', 'doctor': 'doctor',
-  'الباحث': 'research', 'al-bahith': 'research',
-  'المُلخِّص': 'reading-helper', 'الملخص': 'reading-helper', 'al-mulakhkhis': 'reading-helper',
-  'الناقد': 'writing-critic', 'al-naqid': 'writing-critic',
-  'المُقارِن': 'comparator', 'المقارن': 'comparator', 'al-muqarin': 'comparator',
+  'الدكتور': 'doctor', 'al-duktor': 'doctor', 'alduktor': 'doctor', 'doctor': 'doctor',
+  // Legacy: "الرحول" was the manager's label before Week-1 rename.
+  'الرحول': 'manager', 'ruhool': 'manager',
+
+  // ─── Research department ────────────────────────────────────────
+  'الباحث': 'research', 'al-bahith': 'research', 'albahith': 'research',
+  'عبدان': 'research', 'abdan': 'research',                       // legacy
+  'المُلخِّص': 'reading-helper', 'الملخص': 'reading-helper',
+  'al-mulakhkhis': 'reading-helper', 'almulakhkhis': 'reading-helper',
+  'شواشة': 'reading-helper', 'shwasha': 'reading-helper',          // legacy
+  'المُقارِن': 'comparator', 'المقارن': 'comparator',
+  'al-muqarin': 'comparator', 'almuqarin': 'comparator',
+  'رمّانة': 'comparator', 'رمانة': 'comparator', 'rammana': 'comparator',  // legacy
+  'الناقد': 'writing-critic', 'al-naqid': 'writing-critic', 'alnaqid': 'writing-critic',
+  'الصفرا': 'writing-critic', 'al-safra': 'writing-critic', 'alsafra': 'writing-critic',  // legacy
+
+  // ─── Writing / content ──────────────────────────────────────────
+  'السارد': 'content-creator', 'al-sarid': 'content-creator', 'alsarid': 'content-creator',
+  'الدبسا': 'content-creator', 'al-dabsa': 'content-creator', 'aldabsa': 'content-creator',  // legacy
+  'المبدع': 'creative', 'al-mubdi': 'creative', "al-mubdi'": 'creative', 'almubdi': 'creative',
+  'الكرييتف': 'creative', 'alkreetif': 'creative', 'creative': 'creative',  // legacy
+  'الكاتب': 'sayyaq', 'al-katib': 'sayyaq', 'alkatib': 'sayyaq', 'sayyaq': 'sayyaq',
+  'السياق': 'sayyaq',                                               // legacy
+  'المُدوِّن': 'mudawwin', 'المُدوّن': 'mudawwin', 'المدون': 'mudawwin',
+  'al-mudawwin': 'mudawwin', 'almudawwin': 'mudawwin', 'mudawwin': 'mudawwin',
+
+  // ─── PhD daily companion ────────────────────────────────────────
+  'الخوي': 'research-companion', 'al-khuwy': 'research-companion', 'alkhuwy': 'research-companion',
+  'companion': 'research-companion', 'research-companion': 'research-companion',
+  'رمّان': 'research-companion', 'رمان': 'research-companion',     // legacy
+  'ramman': 'research-companion', 'rumman': 'research-companion',
+
+  // ─── Architecture / ops ─────────────────────────────────────────
   'المصمم': 'architect', 'al-musammim': 'architect', 'almusammim': 'architect',
-  'السارد': 'content-creator', 'al-sarid': 'content-creator',
-  'المبدع': 'creative', "al-mubdi'": 'creative', 'al-mubdi': 'creative',
   'مهام': 'tasks-agent', 'maham': 'tasks-agent', 'tasks': 'tasks-agent',
-  'المحلل': 'analyst', 'al-muhallil': 'analyst',
-  'المنظّم': 'munazzim', 'المنظم': 'munazzim', 'al-munazzim': 'munazzim',
-  'المشخّص': 'mushakhkhis', 'المشخص': 'mushakhkhis', 'al-mushakhkhis': 'mushakhkhis',
-  'الخوي': 'research-companion', 'al-khuwy': 'research-companion', 'khuwy': 'research-companion',
-  'الفطين': 'fatin', 'fatin': 'fatin', 'al-fatin': 'fatin',
+  'المحلل': 'analyst', 'al-muhallil': 'analyst', 'almuhallil': 'analyst', 'muhallil': 'analyst',
+  'المنظّم': 'munazzim', 'المنظم': 'munazzim',
+  'al-munazzim': 'munazzim', 'almunazzim': 'munazzim', 'munazzim': 'munazzim',
+  'المشخّص': 'mushakhkhis', 'المشخص': 'mushakhkhis',
+  'al-mushakhkhis': 'mushakhkhis', 'almushakhkhis': 'mushakhkhis', 'mushakhkhis': 'mushakhkhis',
+
+  // ─── Platform utilities ─────────────────────────────────────────
+  'الفطين': 'fatin', 'fatin': 'fatin', 'alfatin': 'fatin', 'fateen': 'fatin', 'al-fatin': 'fatin',
   'المُمرر': 'playmaker', 'الممرر': 'playmaker', 'playmaker': 'playmaker', 'al-mumarrir': 'playmaker',
-  'المُدوّن': 'mudawwin', 'المدون': 'mudawwin', 'mudawwin': 'mudawwin', 'al-mudawwin': 'mudawwin',
-  'الكاتب': 'sayyaq', 'sayyaq': 'sayyaq', 'al-katib': 'sayyaq',
   'clippy': 'clippy',
-
-  // ── Legacy camel-herd names — kept for backward compat ────────────
-  'عبدان': 'research', 'abdan': 'research',
-  'شواشة': 'reading-helper', 'shwasha': 'reading-helper',
-  'الصفرا': 'writing-critic', 'al-safra': 'writing-critic', 'alsafra': 'writing-critic',
-  'رمّانة': 'comparator', 'رمانة': 'comparator', 'rammana': 'comparator',
-  'الدبسا': 'content-creator', 'al-dabsa': 'content-creator', 'aldabsa': 'content-creator',
-  'الكرييتف': 'creative', 'alkreetif': 'creative',
-  'رمّان': 'research-companion', 'ramman': 'research-companion',
-
-  // ── Platform name alias ────────────────────────────────────────────
-  'الرحول': 'manager',
-  'ruhool': 'manager',
 };

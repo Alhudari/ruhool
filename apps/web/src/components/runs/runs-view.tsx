@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
 import { ClippyHelp } from '@/components/help/clippy-help';
+import { TranscriptDrawer } from './TranscriptDrawer';
 
 const RUNS_HELP = [
   { illustration: '🎯', title: { ar: 'ما هو التشغيل؟', en: 'What is a Run?' },
@@ -52,6 +53,7 @@ export function RunsView() {
   const { language } = useAppStore();
   const isRTL = language === 'ar';
   const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [transcriptRunId, setTranscriptRunId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [goal, setGoal] = useState('');
   const [rootAgent, setRootAgent] = useState('manager');
@@ -155,6 +157,13 @@ export function RunsView() {
                     {r.id.slice(0, 8)} · {r.stepCount}/{r.maxSteps} steps · {r.tokensUsed.toLocaleString()} tokens · {r.status}
                   </div>
                 </div>
+                {/* D-5: Transcript button */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setTranscriptRunId(r.id); }}
+                  className="shrink-0 text-[10px] px-2 py-1 rounded border border-border text-on-surface-tertiary hover:text-accent hover:border-accent"
+                >
+                  {isRTL ? 'سجل' : 'Transcript'}
+                </button>
               </button>
               {expanded && r.trace && (
                 <div className="px-4 pb-3 space-y-1 border-t border-border">
@@ -174,6 +183,11 @@ export function RunsView() {
           );
         })}
       </div>
+
+      {/* D-5: Transcript Drawer */}
+      {transcriptRunId && (
+        <TranscriptDrawer runId={transcriptRunId} onClose={() => setTranscriptRunId(null)} />
+      )}
     </div>
   );
 }

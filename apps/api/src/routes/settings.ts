@@ -186,4 +186,41 @@ export function registerSettingsRoutes(app: Hono, deps: SettingsRoutesDeps): voi
     saveStore();
     return c.json({ level: store.approvalLevel });
   });
+
+  // Voice Profile — long-form description of the user's writing voice.
+  // Used by every writing agent (Shwasha, meetings, summaries) to mimic the
+  // user's actual register, including spelling/grammar quirks. Stored as one
+  // free-form markdown blob plus an updatedAt timestamp.
+  app.get('/api/settings/voice-profile', (c) => {
+    const store = getStore();
+    return c.json(store.userVoiceProfile || { content: '', updatedAt: '' });
+  });
+
+  app.put('/api/settings/voice-profile', async (c) => {
+    const store = getStore();
+    const body = await c.req.json<{ content: string }>();
+    if (typeof body.content !== 'string') {
+      return c.json({ error: 'content must be a string' }, 400);
+    }
+    store.userVoiceProfile = { content: body.content, updatedAt: new Date().toISOString() };
+    saveStore();
+    return c.json(store.userVoiceProfile);
+  });
+
+  // Response length preference
+  app.get('/api/settings/response-length', (c) => {
+    const store = getStore();
+    return c.json({ responseLength: store.responseLength ?? 'medium' });
+  });
+
+  app.put('/api/settings/response-length', async (c) => {
+    const store = getStore();
+    const body = await c.req.json<{ responseLength: 'short' | 'medium' | 'long' }>();
+    if (!['short', 'medium', 'long'].includes(body.responseLength)) {
+      return c.json({ error: 'invalid value' }, 400);
+    }
+    store.responseLength = body.responseLength;
+    saveStore();
+    return c.json({ responseLength: store.responseLength });
+  });
 }
