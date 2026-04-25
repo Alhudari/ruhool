@@ -1381,6 +1381,15 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                       } : {}),
                     },
                   });
+                  // Parse [NOTIFY] markers from specialist output — agents can send notifications
+                  if (result.output) {
+                    const specNotifs = parseNotifyActions(result.output, inp.specialist);
+                    if (specNotifs.length > 0) {
+                      saveStore();
+                      await stream.writeSSE({ event: 'notifications', data: JSON.stringify({ notifications: specNotifs }) });
+                    }
+                  }
+
                   // Record this round's output so the NEXT specialist can see it.
                   turnPriorMessages.push({
                     role: 'assistant',
@@ -1596,7 +1605,8 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
               if (detectedAgent === 'architect') {
                 const actions = parseArchitectActions(fullResponse, detectedAgent);
                 if (actions.length > 0) {
-                  await stream.writeSSE({ event: 'approvals', data: JSON.stringify({ approvals: actions }) });
+                  // FIX: use 'approval_request' — matches what chat-view.tsx listens for
+                  await stream.writeSSE({ event: 'approval_request', data: JSON.stringify({ approvals: actions }) });
                 }
               }
               // B-8: when TOOL_USE_ONLY_DELEGATION flag is on, skip text marker fallback entirely
@@ -1912,7 +1922,8 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
             if (detectedAgent === 'architect') {
               const actions = parseArchitectActions(fullResponse, detectedAgent);
               if (actions.length > 0) {
-                await stream.writeSSE({ event: 'approvals', data: JSON.stringify({ approvals: actions }) });
+                // FIX: use 'approval_request' — matches chat-view.tsx listener
+                await stream.writeSSE({ event: 'approval_request', data: JSON.stringify({ approvals: actions }) });
               }
             }
             // B-8: gate text marker fallback behind flag
