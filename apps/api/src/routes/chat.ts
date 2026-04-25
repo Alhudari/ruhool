@@ -536,6 +536,42 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       bootLogger.info({ droppedCount, contextWindow }, 'C-5: context trimmed to token budget');
       chatMsgs.length = 0;
       chatMsgs.push(...trimmed);
+
+      // D-3: inject existing rolling context summary at top, then generate new one in background
+      const existingConv = store.conversations.find(cv => cv.id === convId);
+      if (existingConv?.rollingContext) {
+        chatMsgs.unshift({
+          role: 'user',
+          content: `[ملخص المحادثة السابقة / Prior context summary: ${existingConv.rollingContext}]`,
+        });
+        // ensure first msg stays user
+        while (chatMsgs.length > 1 && chatMsgs[0].role !== 'user') chatMsgs.shift();
+      }
+
+      // Generate new rolling summary in background (non-blocking)
+      void (async () => {
+        try {
+          const haikuProvider = pickProviderForModel('claude-haiku-4-5-20251001');
+          if (!haikuProvider || !convId) return;
+          const droppedText = trimmed.slice(0, droppedCount)
+            .map(m => `${m.role}: ${(typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).slice(0, 300)}`)
+            .join('\n');
+          let summary = '';
+          for await (const chunk of haikuProvider.chat({
+            model: 'claude-haiku-4-5-20251001',
+            systemPrompt: 'Summarize this conversation exchange in 2-3 sentences. Be concise and factual.',
+            messages: [{ role: 'user', content: droppedText }],
+          })) {
+            if ((chunk as { type: string; content?: string }).type === 'text') {
+              summary += (chunk as { content: string }).content;
+            }
+          }
+          if (summary) {
+            const conv = store.conversations.find(cv => cv.id === convId);
+            if (conv) { conv.rollingContext = summary; conv.rollingContextAt = new Date().toISOString(); saveStore(); }
+          }
+        } catch { /* non-critical */ }
+      })();
     }
 
     if (hasImages && chatMsgs.length > 0) {
@@ -1212,6 +1248,20 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
             && (detectedAgent === 'manager' || detectedAgent === 'architect' || detectedAgent === 'doctor')
             && shouldInjectReportActions(store)) {
           activeSystemPrompt += '\n\n' + REPORT_ACTIONS_PROMPT + buildReportsContextBlock(store);
+        }
+
+        // D-1: inject top entities from entity memory into system prompt
+        if (flag('ENTITY_MEMORY') && store.entityMemory && store.entityMemory.length > 0) {
+          const topEntities = store.entityMemory
+            .filter(e => !e.conversationId || e.conversationId === convId || e.importance > 0.7)
+            .sort((a, b) => b.importance - a.importance || new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime())
+            .slice(0, 8);
+          if (topEntities.length > 0) {
+            const block = topEntities
+              .map(e => `- [${e.entityType}] ${e.name}: ${e.context.slice(0, 80)}`)
+              .join('\n');
+            activeSystemPrompt += `\n\n## كيانات من سياقاتك السابقة (تذكير تلقائي)\n${block}`;
+          }
         }
 
         // C-6: pin prompt version hash at first message

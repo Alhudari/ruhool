@@ -320,4 +320,55 @@ export function registerAgentPipelinesRoutes(app: Hono, deps: AgentPipelinesDeps
 
     return c.json({ ok: true, resumeFromStep, pipelineId: pipeline.id });
   });
+
+  // D-2: POST /api/agent-pipelines/:id/respond — Human-in-the-Loop response
+  app.post('/api/agent-pipelines/:id/respond', async (c) => {
+    const store = getStore();
+    const pipeline = (store.agentPipelines ?? []).find(
+      (p) => p.id === c.req.param('id') && !p.deletedAt
+    );
+    if (!pipeline) return c.json({ error: 'Not found' }, 404);
+    if (pipeline.status !== 'awaiting_user') {
+      return c.json({ error: `Pipeline is not awaiting user input (status: ${pipeline.status})` }, 409);
+    }
+
+    const body = await c.req.json<{ stepIndex: number; response: string }>();
+    const step = pipeline.steps.find(s => s.stepIndex === body.stepIndex);
+    if (!step) return c.json({ error: `Step ${body.stepIndex} not found` }, 404);
+
+    // Apply user's response as step output
+    step.status = 'done';
+    step.result = body.response;
+    pipeline.stepOutputs[body.stepIndex] = body.response;
+
+    // Resume from next step
+    pipeline.resumeFromStep = body.stepIndex + 1;
+    pipeline.updatedAt = new Date().toISOString();
+    saveStore();
+
+    // Fire pipeline continuation
+    void runPipeline(pipeline, { getStore, saveStore, runTask });
+
+    return c.json({ ok: true, resumedFromStep: body.stepIndex + 1 });
+  });
+
+  // D-2: GET /api/agent-pipelines/awaiting — list pipelines awaiting user input
+  app.get('/api/agent-pipelines/awaiting', (c) => {
+    const store = getStore();
+    const awaiting = (store.agentPipelines ?? [])
+      .filter(p => p.status === 'awaiting_user' && !p.deletedAt)
+      .map(p => {
+        const step = p.steps.find(s => s.stepIndex === p.currentStepIndex);
+        return {
+          id: p.id,
+          name: p.name,
+          currentStepIndex: p.currentStepIndex,
+          stepLabel: step?.label ?? `خطوة ${p.currentStepIndex + 1}`,
+          stepError: step?.error,
+          updatedAt: p.updatedAt,
+        };
+      });
+    c.header('Cache-Control', 'private, max-age=10');
+    return c.json({ pipelines: awaiting, count: awaiting.length });
+  });
 }

@@ -295,6 +295,31 @@ function buildContext(store: StoreData, report: ReportDefinition): string {
     lines.push(budgetLine);
   }
 
+  // D-6: Source 5 — Entity memory (top entities from recent conversations)
+  const topEntities = (store.entityMemory ?? [])
+    .sort((a, b) => b.importance - a.importance)
+    .slice(0, 6);
+  if (topEntities.length > 0) {
+    lines.push('');
+    lines.push('## أبرز الكيانات من المحادثات الأخيرة / Key Entities from Recent Conversations');
+    for (const e of topEntities) {
+      lines.push(`- [${e.entityType}] ${e.name}`);
+    }
+  }
+
+  // D-6: Source 6 — Recent agent tasks summary
+  const recentDoneTasks = (store.agentTasks ?? [])
+    .filter(t => t.status === 'done' && t.completedAt)
+    .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))
+    .slice(0, 5);
+  if (recentDoneTasks.length > 0) {
+    lines.push('');
+    lines.push('## مهام الوكلاء المكتملة مؤخراً / Recently Completed Agent Tasks');
+    for (const t of recentDoneTasks) {
+      lines.push(`- ${t.label ?? t.prompt.slice(0, 60)} (${t.agentId})`);
+    }
+  }
+
   return lines.join('\n');
 }
 
