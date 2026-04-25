@@ -376,6 +376,8 @@ export interface DispatchDeps {
   generationTools?: Omit<GenerationToolContext, 'specialist'>;
   /** C-2: Nested Streaming — called for each token as it's generated */
   onToken?: (token: string, agentId: string) => void;
+  /** FIX-11: abort signal — when the client disconnects, stop the LLM call */
+  abortSignal?: AbortSignal;
 }
 
 export interface DispatchArtifact {
@@ -573,6 +575,8 @@ export async function dispatch(params: {
       temperature: deps.temperature,
       ...(hasTools ? { tools } : {}),
     } as Parameters<UnifiedProvider['chat']>[0])) {
+      // FIX-11: stop early if client aborted
+      if (deps.abortSignal?.aborted) break;
       if (chunk.type === 'text') {
         roundText += chunk.content;
         // C-2: Nested Streaming — emit token immediately to caller

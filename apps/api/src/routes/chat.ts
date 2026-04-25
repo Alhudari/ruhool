@@ -1156,7 +1156,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
         }
 
         if (body.context) {
-          activeSystemPrompt += '\n\n[\u0633\u064A\u0627\u0642 \u0625\u0636\u0627\u0641\u064A \u0645\u0646 \u0627\u0644\u0648\u0627\u062C\u0647\u0629]\n' + body.context.replace(new RegExp('</?(?:system|prompt|instruction)[^>]*>', 'gi'), '').slice(0, 2000) + '\n';
+          activeSystemPrompt += '\n\n[\u0633\u064A\u0627\u0642 \u0625\u0636\u0627\u0641\u064A \u0645\u0646 \u0627\u0644\u0648\u0627\u062C\u0647\u0629]\n' + body.context.replace(/<[^>]*>/g, '').replace(/[ --]/g, '').slice(0, 2000) + '\n';
         }
 
         try {
@@ -1385,6 +1385,8 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                         logActivity('chat', `${AGENT_DISPLAY_NAMES[from] || from} \u2192 ${AGENT_DISPLAY_NAMES[to] || to}`, task.slice(0, 200), { agentId: to, metadata: { from, to, task: task.slice(0, 500), via: 'tool_use' } });
                       },
                       from: 'manager',
+                      // FIX-11: forward abort signal so specialist stops on disconnect
+                      abortSignal: abortController.signal,
                       // C-2: Nested Streaming \u2014 pipe specialist tokens directly to SSE
                       ...(CHAT_V2 && specialistMessageId ? {
                         onToken: (token: string) => {
@@ -1396,12 +1398,17 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                       } : {}),
                     },
                   });
-                  // Parse [NOTIFY] markers from specialist output — agents can send notifications
+                  // FIX-7: Parse [NOTIFY] BEFORE storing message — wrap in try/catch
+                  // so SSE emission is guaranteed even if subsequent code throws.
                   if (result.output) {
-                    const specNotifs = parseNotifyActions(result.output, inp.specialist);
-                    if (specNotifs.length > 0) {
-                      saveStore();
-                      await stream.writeSSE({ event: 'notifications', data: JSON.stringify({ notifications: specNotifs }) });
+                    try {
+                      const specNotifs = parseNotifyActions(result.output, inp.specialist);
+                      if (specNotifs.length > 0) {
+                        saveStore();
+                        await stream.writeSSE({ event: 'notifications', data: JSON.stringify({ notifications: specNotifs }) });
+                      }
+                    } catch (err) {
+                      bootLogger.warn({ err, specialist: inp.specialist }, 'specialist-notify-emit failed');
                     }
                   }
 
