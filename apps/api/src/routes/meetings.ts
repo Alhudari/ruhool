@@ -78,7 +78,8 @@ export function registerMeetingsRoutes(app: Hono, deps: MeetingsRoutesDeps): voi
     const sessions = getMeetingSessions(getStore())
       .filter((s) => !s.deletedAt)
       .map(({ chatHistory: _ch, ...s }) => s);
-    c.header('Cache-Control', 'private, max-age=60');
+    // FIX: no-cache so deletes/edits show immediately (was max-age=60 stale UI)
+    c.header('Cache-Control', 'private, no-cache, max-age=0');
     return c.json(sessions);
   });
 
@@ -345,9 +346,11 @@ export function registerMeetingsRoutes(app: Hono, deps: MeetingsRoutesDeps): voi
 
     const r = session.record;
 
-    // Auto-number: find highest existing meeting number
+    // FIX: trust the user-supplied meeting number from r.No first.
+    // Only fallback to vault count if no number was set at all.
+    // This prevents off-by-one (10 → 11) when Obsidian vault and store disagree.
     let meetingNo = r.No;
-    if (!meetingNo) {
+    if (!meetingNo || meetingNo < 1) {
       try {
         const paths = await listNotes({ subPath: '01 PhD/04 Supervision/Supervision Interaction Points' });
         const nums = paths.map((p) => {
@@ -481,12 +484,20 @@ export function registerMeetingsRoutes(app: Hono, deps: MeetingsRoutesDeps): voi
   });
 
   // ── Delete session ──────────────────────────────────────────────────
+  // FIX: soft delete — sets deletedAt instead of splice, matches list filter.
+  // Use ?permanent=true for hard delete.
   app.delete('/api/meetings/sessions/:id', (c) => {
     const store = getStore();
     const sessions = getMeetingSessions(store);
     const idx = sessions.findIndex((s) => s.id === c.req.param('id'));
     if (idx === -1) return c.json({ error: 'Not found' }, 404);
-    sessions.splice(idx, 1);
+    const permanent = c.req.query('permanent') === 'true';
+    if (permanent) {
+      sessions.splice(idx, 1);
+    } else {
+      sessions[idx].deletedAt = new Date().toISOString();
+      sessions[idx].updatedAt = new Date().toISOString();
+    }
     saveStore();
     return c.json({ ok: true });
   });

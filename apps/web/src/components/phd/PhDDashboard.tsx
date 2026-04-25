@@ -392,8 +392,10 @@ export function PhDDashboard() {
       );
 
       const cutoff = Date.now() - 7 * 86400000;
+      // FIX: defensive — zotRes.items may be null/non-array if Zotero is unconfigured
+      const zoteroItems = Array.isArray(zotRes?.items) ? zotRes.items : [];
       setRecentZotero(
-        (zotRes.items ?? []).filter(item => item.dateAdded && new Date(item.dateAdded).getTime() >= cutoff)
+        zoteroItems.filter(item => item.dateAdded && new Date(item.dateAdded).getTime() >= cutoff)
       );
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed to load'); }
     finally { setLoading(false); }

@@ -180,7 +180,7 @@ const WORKSPACES: Workspace[] = [
       {
         title: { en: 'PhD', ar: 'الدكتوراه' },
         // MASTER_PROMPT_V2 Part 2: new navigation structure
-        items: ['phd', 'meetings', 'library', 'zotero', 'tasks', 'inbox'],
+        items: ['phd', 'meetings', 'shwasha', 'library', 'zotero', 'research', 'tasks', 'inbox'],
       },
       {
         title: { en: 'Platform', ar: 'المنصة' },
