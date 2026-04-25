@@ -1,2 +1,17 @@
-import { redirect } from 'next/navigation';
-export default function ShwashaRoute() { redirect('/library?type=reading-session'); }
+'use client';
+import { useSearchParams } from 'next/navigation';
+import { AppShell } from '@/components/layout/app-shell';
+import { ReadingPage } from '@/components/reading/ReadingPage';
+import { SessionsList } from '@/components/reading/SessionsList';
+
+export default function ShwashaRoute() {
+  const params = useSearchParams();
+  const sessionId = params.get('session');
+  return (
+    <AppShell>
+      {sessionId
+        ? <ReadingPage sessionId={sessionId} />
+        : <SessionsList />}
+    </AppShell>
+  );
+}

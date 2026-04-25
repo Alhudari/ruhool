@@ -63,12 +63,17 @@ export function ZoteroPage() {
     setError('');
     try {
       const [cols, its] = await Promise.all([
-        apiFetch<ZoteroCollection[]>('/api/zotero/collections').catch(() => []),
-        apiFetch<ZoteroItem[]>(`/api/zotero/items?limit=200${selectedCollection ? `&collection=${selectedCollection}` : ''}`).catch(() => []),
+        apiFetch<unknown>('/api/zotero/collections').catch(() => []),
+        apiFetch<unknown>(`/api/zotero/items?limit=200${selectedCollection ? `&collection=${selectedCollection}` : ''}`).catch(() => []),
       ]);
-      setCollections(cols || []);
-      setItems(its || []);
-      setImported(new Set((its || []).filter(i => i.imported).map(i => i.itemKey)));
+      // FIX: defensive — API may return non-array (e.g., {items: [...]} or {error: ...})
+      const colsArr: ZoteroCollection[] = Array.isArray(cols) ? cols as ZoteroCollection[]
+        : (cols as { collections?: ZoteroCollection[] })?.collections ?? [];
+      const itsArr: ZoteroItem[] = Array.isArray(its) ? its as ZoteroItem[]
+        : (its as { items?: ZoteroItem[] })?.items ?? [];
+      setCollections(colsArr);
+      setItems(itsArr);
+      setImported(new Set(itsArr.filter(i => i.imported).map(i => i.itemKey)));
     } catch (e) {
       setError(String(e));
     } finally {
