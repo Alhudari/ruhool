@@ -32,18 +32,32 @@ export function apiStream(
   let doneCalled = false;
   let retries = 0;
   const MAX_RETRIES = 3;
+  // F-007: idempotency key — same key sent on every retry so server can dedupe
+  const turnId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   async function attemptStream(attempt: number): Promise<void> {
     try {
       const res = await fetch(`${API_BASE}${path}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Idempotency-Key': turnId,
+          ...authHeaders(),
+        },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
+        // F-007: 409 = duplicate request. Don't retry, but don't show as error either.
+        if (res.status === 409 && err.code === 'E_DUPLICATE_TURN') {
+          // Server already processing this turn — silently end
+          if (!doneCalled) { doneCalled = true; onDone?.(); }
+          return;
+        }
         onError?.(err.error || `API error: ${res.status}`);
         return;
       }

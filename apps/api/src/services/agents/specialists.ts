@@ -574,6 +574,8 @@ export async function dispatch(params: {
       maxTokens: deps.maxTokens,
       temperature: deps.temperature,
       ...(hasTools ? { tools } : {}),
+      // F-008: forward abort signal to provider so the upstream HTTP request cancels
+      ...(deps.abortSignal ? { signal: deps.abortSignal } : {}),
     } as Parameters<UnifiedProvider['chat']>[0])) {
       // FIX-11: stop early if client aborted
       if (deps.abortSignal?.aborted) break;

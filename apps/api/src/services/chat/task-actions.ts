@@ -66,9 +66,9 @@ export function parseTaskActions(response: string): TaskAction[] {
   const completeMatches = response.matchAll(/\[TASK:COMPLETE:([^\]]+)\]/g);
   for (const match of completeMatches) actions.push({ type: 'complete', id: match[1] });
 
-  if (/\[TASK:COMPLETE_ALL\]/.test(response)) actions.push({ type: 'complete_all' });
-  if (/\[TASK:DELETE_ALL\]/.test(response)) actions.push({ type: 'delete_all' });
-  if (/\[TASK:ARCHIVE_ALL\]/.test(response)) actions.push({ type: 'archive_all' });
+  // F-006: bulk destructive actions (COMPLETE_ALL/DELETE_ALL/ARCHIVE_ALL) are
+  // intentionally NOT parsed here. They must go through the approval system.
+  // If you want bulk actions, use the architect agent which goes through approvals.
 
   const subtaskMatches = response.matchAll(/\[TASK:SUBTASK:([^\]]+)\]\s*(\{[\s\S]*?\})/g);
   for (const match of subtaskMatches) {
@@ -156,34 +156,10 @@ export function createTaskActions(deps: TaskActionsDeps): TaskActionsApi {
           task.updatedAt = new Date().toISOString();
           logActivity('task', `Task archived: ${task.title}`, '', { agentId: 'tasks-agent', metadata: { taskId: task.id } });
         }
-      } else if (action.type === 'complete_all') {
-        const now = new Date().toISOString();
-        let count = 0;
-        for (const task of store.tasks) {
-          if (!task.completed && !(task as TaskItem & { archived?: boolean }).archived) {
-            task.completed = true;
-            task.completedAt = now;
-            task.updatedAt = now;
-            count++;
-          }
-        }
-        logActivity('task', `${count} tasks completed`, '', { agentId: 'tasks-agent' });
-      } else if (action.type === 'delete_all') {
-        const before = store.tasks.length;
-        store.tasks = store.tasks.filter(t => !t.completed);
-        logActivity('task', `${before - store.tasks.length} completed tasks deleted`, '', { agentId: 'tasks-agent' });
-      } else if (action.type === 'archive_all') {
-        const now = new Date().toISOString();
-        let count = 0;
-        for (const task of store.tasks) {
-          const t = task as TaskItem & { archived?: boolean };
-          if (task.completed && !t.archived) {
-            t.archived = true;
-            task.updatedAt = now;
-            count++;
-          }
-        }
-        logActivity('task', `${count} tasks archived`, '', { agentId: 'tasks-agent' });
+      } else if (action.type === 'complete_all' || action.type === 'delete_all' || action.type === 'archive_all') {
+        // F-006: bulk destructive actions are blocked at execute time. They should
+        // never reach here because parser no longer emits them, but guard anyway.
+        logActivity('task', `BLOCKED: bulk action ${action.type} requires explicit approval`, '', { agentId: 'tasks-agent', metadata: { blocked: true } });
       } else if (action.type === 'subtask') {
         const task = store.tasks.find(t => t.id === action.id);
         if (task) {

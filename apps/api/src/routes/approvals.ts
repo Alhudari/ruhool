@@ -41,17 +41,34 @@ export function registerApprovalsRoutes(app: Hono, deps: ApprovalsRoutesDeps): v
     const id = c.req.param('id');
     const approval = store.approvals.find((a) => a.id === id);
     if (!approval) return c.json({ error: 'Approval not found' }, 404);
+
+    // F-009: atomic transition — claim the approval BEFORE executing.
+    // Two concurrent approve requests now have a clear winner.
     if (approval.status !== 'pending') return c.json({ error: 'Already resolved' }, 400);
+    // Use a sentinel state so concurrent reads see it's no longer claimable.
+    (approval as unknown as { status: string }).status = 'approving';
+    await saveStore();
 
-    const result = executeApproval(approval);
-    if (!result.ok) return c.json({ error: result.error }, 500);
+    try {
+      const result = executeApproval(approval);
+      if (!result.ok) {
+        // Roll back to pending so user can retry
+        approval.status = 'pending';
+        await saveStore();
+        return c.json({ error: result.error }, 500);
+      }
 
-    approval.status = 'approved';
-    approval.resolvedAt = new Date().toISOString();
-    approval.resolvedBy = 'user';
-    logActivity('approval', `Approval approved: ${approval.title.en}`, `Type: ${approval.type}`, { metadata: { approvalId: approval.id, type: approval.type } });
-    saveStore();
-    return c.json(approval);
+      approval.status = 'approved';
+      approval.resolvedAt = new Date().toISOString();
+      approval.resolvedBy = 'user';
+      logActivity('approval', `Approval approved: ${approval.title.en}`, `Type: ${approval.type}`, { metadata: { approvalId: approval.id, type: approval.type } });
+      await saveStore();
+      return c.json(approval);
+    } catch (err) {
+      approval.status = 'pending';
+      await saveStore();
+      throw err;
+    }
   });
 
   app.post('/api/approvals/:id/reject', async (c) => {

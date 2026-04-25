@@ -110,21 +110,25 @@ function reconcileStuckTasks(deps: WorkerDeps): void {
   if (changed) deps.saveStore();
 }
 
-// B-5: wrap runTask with a timeout
+// B-5 + F-008: wrap runTask with a timeout that clears the timer on success
+// and abortable so the underlying call doesn't keep running after the timeout fires.
 async function runWithTimeout(
   task: AgentTaskRecord,
   runTask: WorkerDeps['runTask']
 ): Promise<string> {
   const ms = task.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  return Promise.race([
-    runTask(task),
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new RuhoolError('E_TASK_TIMEOUT', `Task timed out after ${ms}ms`, { taskId: task.id })),
-        ms
-      )
-    ),
-  ]);
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new RuhoolError('E_TASK_TIMEOUT', `Task timed out after ${ms}ms`, { taskId: task.id })),
+      ms
+    );
+  });
+  try {
+    return await Promise.race([runTask(task), timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export function startAgentTaskWorker(deps: WorkerDeps): () => void {

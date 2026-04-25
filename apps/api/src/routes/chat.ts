@@ -254,7 +254,26 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
 
   const chatLimit = rateLimit({ capacity: 20, refillPerSec: 2 });
 
+  // F-007: idempotency cache — dedupe retried POSTs that already entered the handler.
+  // Maps idempotency key → timestamp. Entries TTL 5 minutes.
+  const idempotencyCache = new Map<string, number>();
+  const IDEMPOTENCY_TTL_MS = 5 * 60_000;
+
   app.post('/api/chat', chatLimit, async (c) => {
+    // F-007: dedupe via X-Idempotency-Key — second request with same key returns 409
+    const idempotencyKey = c.req.header('x-idempotency-key');
+    if (idempotencyKey) {
+      // Sweep stale entries
+      const now = Date.now();
+      for (const [k, t] of idempotencyCache) {
+        if (now - t > IDEMPOTENCY_TTL_MS) idempotencyCache.delete(k);
+      }
+      if (idempotencyCache.has(idempotencyKey)) {
+        return c.json({ error: 'Duplicate request — this turn has already been processed', code: 'E_DUPLICATE_TURN' }, 409);
+      }
+      idempotencyCache.set(idempotencyKey, now);
+    }
+
     const store = getStore();
     const body = await c.req.json<{
       conversationId?: string;

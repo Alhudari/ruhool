@@ -56,6 +56,7 @@ export class AnthropicProvider {
     temperature?: number;
     maxTokens?: number;
     tools?: AnthropicTool[];
+    signal?: AbortSignal;
   }): AsyncGenerator<ChatChunk, void, unknown> {
     const systemPrompt = params.systemPrompt;
     const msgs = params.messages
@@ -63,14 +64,18 @@ export class AnthropicProvider {
       .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content as string | Array<{ type: string; [k: string]: unknown }> }));
 
     try {
-      const stream = this.client.messages.stream({
-        model: params.model,
-        max_tokens: params.maxTokens || 4096,
-        temperature: params.temperature ?? 0.7,
-        ...(systemPrompt ? { system: systemPrompt } : {}),
-        ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
-        messages: msgs as unknown as Anthropic.MessageParam[],
-      });
+      const stream = this.client.messages.stream(
+        {
+          model: params.model,
+          max_tokens: params.maxTokens || 4096,
+          temperature: params.temperature ?? 0.7,
+          ...(systemPrompt ? { system: systemPrompt } : {}),
+          ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
+          messages: msgs as unknown as Anthropic.MessageParam[],
+        },
+        // F-008: forward abort signal so client disconnect cancels the upstream call
+        params.signal ? { signal: params.signal } : undefined
+      );
 
       for await (const event of stream) {
         if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
