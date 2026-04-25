@@ -78,7 +78,7 @@ import { startZoteroVaultSyncScheduler, seedSyncStatus, type SyncStats } from '.
 import { startGoogleTasksSyncScheduler } from './workers/google-tasks-sync.js';
 import { registerGoogleTasksTrigger } from './services/google-tasks-trigger.js';
 import { spawnHabitsForToday } from './services/habit-spawner.js';
-import { parseReportActions, executeReportActions, buildReportsContextBlock, shouldInjectReportActions, REPORT_ACTIONS_PROMPT } from './services/chat/report-actions.js';
+import { parseReportActions, executeReportActions } from './services/chat/report-actions.js';
 import { sendReport as _sendReport } from './services/reports/send.js';
 import { auditLog as auditLogFn } from './services/audit-log.js';
 import type { DispatcherLLM } from './services/dispatch/index.js';
@@ -683,22 +683,10 @@ registerAllRoutes(app, {
   chatDeps: {
     getStore: () => store, saveStore, logger: bootLogger, anthropicCache: _anthropicCache,
     pickProviderForModel,
-    // Proxy the prompts record so architect/manager/doctor dynamically
-    // pick up the REPORT actions schema + a live list of existing
-    // reports — but ONLY when reports exist or the user has recently
-    // discussed them. Saves ~800 tokens per turn on unrelated chats.
-    builtinSystemPrompts: new Proxy(BUILTIN_SYSTEM_PROMPTS, {
-      get(target, prop: string) {
-        const base = target[prop];
-        if (typeof base !== 'string') return base;
-        if (prop === 'architect' || prop === 'manager' || prop === 'doctor') {
-          if (shouldInjectReportActions(store)) {
-            return base + REPORT_ACTIONS_PROMPT + buildReportsContextBlock(store);
-          }
-        }
-        return base;
-      },
-    }),
+    // B-4 STABLE PROMPT: use BUILTIN_SYSTEM_PROMPTS directly — no Proxy.
+    // Report actions are injected explicitly in chat.ts where they are needed,
+    // keeping system prompts deterministic and hash-stable per agent.
+    builtinSystemPrompts: BUILTIN_SYSTEM_PROMPTS,
     managerSystemPrompt: MANAGER_SYSTEM_PROMPT, agentHeaders: AGENT_HEADERS,
     agentDisplayNames: AGENT_DISPLAY_NAMES, capabilityCheckers: CAPABILITY_CHECKERS,
     parseArchitectActions, parseTaskActions, executeTaskActions, parseNotifyActions,

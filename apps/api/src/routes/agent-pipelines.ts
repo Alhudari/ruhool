@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
 import type { Hono } from 'hono';
-import type { StoreData, AgentPipelineRecord, AgentPipelineStep, AgentTaskRecord } from '../store/types.js';
+import type { StoreData, AgentPipelineRecord, AgentPipelineStep, AgentTaskRecord, PipelineFailPolicy } from '../store/types.js';
 import { parseNaturalTime } from '../services/natural-time.js';
+import { RuhoolError } from '../services/errors.js';
+import { flag } from '../services/flags.js';
 
 export type AgentPipelinesDeps = {
   getStore: () => StoreData;
@@ -34,9 +36,26 @@ export async function runPipeline(
   const input = pipeline.documents.join('\n\n');
 
   try {
+    let hadFailure = false;
+    // C-3: determine start step (resume from checkpoint if set)
+    const startFrom = pipeline.resumeFromStep ?? 0;
+    if (startFrom > 0) pipeline.resumeFromStep = undefined; // clear after resuming
+
     for (const step of pipeline.steps.sort((a, b) => a.stepIndex - b.stepIndex)) {
+      // C-3: skip steps already checkpointed
+      if (step.stepIndex < startFrom) {
+        const saved = pipeline.checkpoints?.find(c => c.stepIndex === step.stepIndex);
+        if (saved) {
+          pipeline.stepOutputs[step.stepIndex] = saved.output;
+          step.status = 'done';
+          step.result = saved.output;
+          continue;
+        }
+      }
       pipeline.currentStepIndex = step.stepIndex;
       pipeline.updatedAt = new Date().toISOString();
+      step.status = 'running';
+      step.error = null;
       saveStore();
 
       const prompt = buildPrompt(step.promptTemplate, input, pipeline.stepOutputs, pipeline.documents);
@@ -60,13 +79,48 @@ export async function runPipeline(
         updatedAt: new Date().toISOString(),
       };
 
-      const result = await runTask(taskRecord);
-      pipeline.stepOutputs[step.stepIndex] = result;
+      try {
+        const result = await runTask(taskRecord);
+        step.status = 'done';
+        step.result = result;
+        pipeline.stepOutputs[step.stepIndex] = result;
+
+        // C-3: save checkpoint after each successful step
+        if (!pipeline.checkpoints) pipeline.checkpoints = [];
+        const existing = pipeline.checkpoints.findIndex(c => c.stepIndex === step.stepIndex);
+        const cp = { stepIndex: step.stepIndex, output: result, savedAt: new Date().toISOString() };
+        if (existing >= 0) pipeline.checkpoints[existing] = cp;
+        else pipeline.checkpoints.push(cp);
+
+      } catch (err) {
+        step.status = 'failed';
+        step.error = err instanceof Error ? err.message : String(err);
+        hadFailure = true;
+
+        const policy: PipelineFailPolicy = step.onFail ?? 'abort';
+        if (!flag('PIPELINE_RESILIENCE') || policy === 'abort') {
+          throw new RuhoolError(
+            'E_PIPELINE_STEP_FAILED',
+            `Pipeline step ${step.stepIndex} failed: ${step.error}`,
+            { pipelineId: pipeline.id, stepIndex: step.stepIndex }
+          );
+        } else if (policy === 'skip') {
+          step.status = 'skipped';
+          pipeline.stepOutputs[step.stepIndex] = '';
+          // continue to next step
+        } else if (policy === 'ask_user') {
+          pipeline.status = 'awaiting_user';
+          pipeline.updatedAt = new Date().toISOString();
+          saveStore();
+          return; // pause and wait
+        }
+      }
+
       pipeline.updatedAt = new Date().toISOString();
       saveStore();
     }
 
-    pipeline.status = 'done';
+    pipeline.status = hadFailure ? 'partial-failure' : 'done';
     pipeline.completedAt = new Date().toISOString();
 
     if (pipeline.reportOnComplete) {
@@ -237,5 +291,84 @@ export function registerAgentPipelinesRoutes(app: Hono, deps: AgentPipelinesDeps
     saveStore();
 
     return c.json({ pipeline });
+  });
+
+  // C-3: POST /api/agent-pipelines/:id/resume — resume from last checkpoint
+  app.post('/api/agent-pipelines/:id/resume', async (c) => {
+    const store = getStore();
+    const pipeline = (store.agentPipelines ?? []).find(
+      (p) => p.id === c.req.param('id') && !p.deletedAt
+    );
+    if (!pipeline) return c.json({ error: 'Not found' }, 404);
+    if (pipeline.status === 'running') {
+      return c.json({ error: 'Pipeline is already running' }, 409);
+    }
+
+    // Find the highest completed checkpoint
+    const checkpoints = pipeline.checkpoints ?? [];
+    const lastCheckpoint = checkpoints
+      .sort((a, b) => b.stepIndex - a.stepIndex)[0];
+
+    const resumeFromStep = lastCheckpoint ? lastCheckpoint.stepIndex + 1 : 0;
+    pipeline.resumeFromStep = resumeFromStep;
+    pipeline.status = 'scheduled'; // will be picked up by worker or run immediately
+    pipeline.updatedAt = new Date().toISOString();
+    saveStore();
+
+    // Fire immediately
+    void runPipeline(pipeline, { getStore, saveStore, runTask });
+
+    return c.json({ ok: true, resumeFromStep, pipelineId: pipeline.id });
+  });
+
+  // D-2: POST /api/agent-pipelines/:id/respond — Human-in-the-Loop response
+  app.post('/api/agent-pipelines/:id/respond', async (c) => {
+    const store = getStore();
+    const pipeline = (store.agentPipelines ?? []).find(
+      (p) => p.id === c.req.param('id') && !p.deletedAt
+    );
+    if (!pipeline) return c.json({ error: 'Not found' }, 404);
+    if (pipeline.status !== 'awaiting_user') {
+      return c.json({ error: `Pipeline is not awaiting user input (status: ${pipeline.status})` }, 409);
+    }
+
+    const body = await c.req.json<{ stepIndex: number; response: string }>();
+    const step = pipeline.steps.find(s => s.stepIndex === body.stepIndex);
+    if (!step) return c.json({ error: `Step ${body.stepIndex} not found` }, 404);
+
+    // Apply user's response as step output
+    step.status = 'done';
+    step.result = body.response;
+    pipeline.stepOutputs[body.stepIndex] = body.response;
+
+    // Resume from next step
+    pipeline.resumeFromStep = body.stepIndex + 1;
+    pipeline.updatedAt = new Date().toISOString();
+    saveStore();
+
+    // Fire pipeline continuation
+    void runPipeline(pipeline, { getStore, saveStore, runTask });
+
+    return c.json({ ok: true, resumedFromStep: body.stepIndex + 1 });
+  });
+
+  // D-2: GET /api/agent-pipelines/awaiting — list pipelines awaiting user input
+  app.get('/api/agent-pipelines/awaiting', (c) => {
+    const store = getStore();
+    const awaiting = (store.agentPipelines ?? [])
+      .filter(p => p.status === 'awaiting_user' && !p.deletedAt)
+      .map(p => {
+        const step = p.steps.find(s => s.stepIndex === p.currentStepIndex);
+        return {
+          id: p.id,
+          name: p.name,
+          currentStepIndex: p.currentStepIndex,
+          stepLabel: step?.label ?? `خطوة ${p.currentStepIndex + 1}`,
+          stepError: step?.error,
+          updatedAt: p.updatedAt,
+        };
+      });
+    c.header('Cache-Control', 'private, max-age=10');
+    return c.json({ pipelines: awaiting, count: awaiting.length });
   });
 }

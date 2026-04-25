@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
-import type { StoreData, AgentTaskRecord } from '../store/types.js';
+import type { StoreData, AgentTaskRecord, NotificationRecord } from '../store/types.js';
+import { RuhoolError } from './errors.js';
+import { flag } from './flags.js';
 
 export interface WorkerDeps {
   getStore: () => StoreData;
@@ -7,10 +9,105 @@ export interface WorkerDeps {
   runTask: (task: AgentTaskRecord) => Promise<string>;
 }
 
+// Parse [NOTIFY] markers from agent output and save to store.notificationRecords
+function processNotifications(store: StoreData, output: string, agentId: string): void {
+  const matches = output.matchAll(/\[NOTIFY\]\s*(\{[\s\S]*?\})/g);
+  for (const match of matches) {
+    try {
+      const data = JSON.parse(match[1]);
+      if (!data.title) continue;
+      if (!store.notificationRecords) store.notificationRecords = [];
+      const rec: NotificationRecord = {
+        id: crypto.randomUUID(),
+        agentId,
+        title: String(data.title),
+        message: String(data.message || ''),
+        type: (data.type as NotificationRecord['type']) || 'info',
+        link: data.link,
+        linkLabel: data.linkLabel,
+        read: false,
+        priority: (data.priority as NotificationRecord['priority']) || 'normal',
+        createdAt: new Date().toISOString(),
+      };
+      store.notificationRecords.push(rec);
+    } catch { /* skip malformed */ }
+  }
+}
+
+// Strip [NOTIFY] blocks from result before saving to inbox/result
+function stripNotifyBlocks(text: string): string {
+  return text.replace(/\[NOTIFY\]\s*\{[\s\S]*?\}/g, '').trim();
+}
+
 const POLL_INTERVAL_MS = 30_000;
+const RETRY_BACKOFF_MS = [30_000, 120_000, 300_000]; // 30s → 2m → 5m
+const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_TIMEOUT_MS = 300_000; // 5 minutes
+const STALE_RUNNING_MS = 10 * 60_000; // 10 minutes
+
+// B-7: reconcile tasks stuck at 'running' from a previous server process
+function reconcileStuckTasks(deps: WorkerDeps): void {
+  if (!flag('CRASH_RECOVERY')) return;
+  const store = deps.getStore();
+  const now = Date.now();
+  let changed = false;
+
+  for (const task of (store.agentTasks ?? [])) {
+    if (task.status !== 'running' || task.deletedAt) continue;
+    const startedAt = task.startedAt ? new Date(task.startedAt).getTime() : 0;
+    if (now - startedAt < STALE_RUNNING_MS) continue;
+
+    const retryCount = (task.retryCount ?? 0) + 1;
+    const maxRetries = task.maxRetries ?? DEFAULT_MAX_RETRIES;
+
+    if (retryCount <= maxRetries) {
+      task.status = 'queued';
+      task.startedAt = null;
+      task.retryCount = retryCount;
+      task.lastError = 'server_restart_recovery';
+      task.scheduledFor = null;
+    } else {
+      task.status = 'failed';
+      task.lastError = 'server_restart_max_retries_exceeded';
+    }
+    task.updatedAt = new Date().toISOString();
+    changed = true;
+  }
+
+  // B-7: pipelines stuck at 'running' — mark failed (they can be re-run manually)
+  for (const p of (store.agentPipelines ?? [])) {
+    if (p.status === 'running' && !p.deletedAt) {
+      p.status = 'failed';
+      p.updatedAt = new Date().toISOString();
+      changed = true;
+    }
+  }
+
+  if (changed) deps.saveStore();
+}
+
+// B-5: wrap runTask with a timeout
+async function runWithTimeout(
+  task: AgentTaskRecord,
+  runTask: WorkerDeps['runTask']
+): Promise<string> {
+  const ms = task.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  return Promise.race([
+    runTask(task),
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new RuhoolError('E_TASK_TIMEOUT', `Task timed out after ${ms}ms`, { taskId: task.id })),
+        ms
+      )
+    ),
+  ]);
+}
 
 export function startAgentTaskWorker(deps: WorkerDeps): () => void {
   const { getStore, saveStore, runTask } = deps;
+
+  // B-7: reconcile stuck tasks before starting
+  reconcileStuckTasks(deps);
 
   const tick = async () => {
     const store = getStore();
@@ -24,7 +121,6 @@ export function startAgentTaskWorker(deps: WorkerDeps): () => void {
         new Date(p.scheduledFor) <= new Date()
     );
     if (duePipelines.length > 0) {
-      // lazy import to avoid circular dep at module load time
       const { runPipeline } = await import('../routes/agent-pipelines.js');
       for (const p of duePipelines) {
         p.stepOutputs = {};
@@ -52,9 +148,17 @@ export function startAgentTaskWorker(deps: WorkerDeps): () => void {
       saveStore();
 
       try {
-        const result = await runTask(task);
+        // B-5: run with timeout
+        const result = flag('TASK_RETRY')
+          ? await runWithTimeout(task, runTask)
+          : await runTask(task);
+
+        // Process [NOTIFY] markers before saving result
+        processNotifications(store, result, task.agentId);
+        const cleanResult = stripNotifyBlocks(result) || result;
+
         task.status = 'done';
-        task.result = result;
+        task.result = cleanResult;
         task.completedAt = new Date().toISOString();
 
         if (task.reportOnComplete) {
@@ -69,14 +173,32 @@ export function startAgentTaskWorker(deps: WorkerDeps): () => void {
             read: false,
             starred: false,
             tags: ['agent-task'],
-            bodyMarkdown: result,
-            html: `<pre style="white-space:pre-wrap;font-family:inherit">${result.slice(0, 180)}…</pre>`,
+            bodyMarkdown: cleanResult,
+            html: `<pre style="white-space:pre-wrap;font-family:inherit">${cleanResult.slice(0, 500)}${cleanResult.length > 500 ? '…' : ''}</pre>`,
           });
           store.reportInbox = inbox;
         }
       } catch (err) {
-        task.status = 'failed';
-        task.result = err instanceof Error ? err.message : String(err);
+        // B-5: retry with exponential backoff
+        if (flag('TASK_RETRY')) {
+          const retryCount = (task.retryCount ?? 0) + 1;
+          const maxRetries = task.maxRetries ?? DEFAULT_MAX_RETRIES;
+          task.retryCount = retryCount;
+          task.lastError = err instanceof Error ? err.message : String(err);
+
+          if (retryCount <= maxRetries) {
+            const delay = RETRY_BACKOFF_MS[retryCount - 1] ?? RETRY_BACKOFF_MS[RETRY_BACKOFF_MS.length - 1];
+            task.status = 'queued';
+            task.startedAt = null;
+            task.scheduledFor = new Date(Date.now() + delay).toISOString();
+          } else {
+            task.status = 'failed';
+            task.result = task.lastError;
+          }
+        } else {
+          task.status = 'failed';
+          task.result = err instanceof Error ? err.message : String(err);
+        }
       }
 
       task.updatedAt = new Date().toISOString();

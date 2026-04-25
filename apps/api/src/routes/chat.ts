@@ -14,6 +14,11 @@ import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { Logger } from 'pino';
 import { parseNaturalTime } from '../services/natural-time.js';
+import { sanitizeUserInput } from '../services/security/sanitize-input.js';
+import { flag } from '../services/flags.js';
+import { shouldInjectReportActions, buildReportsContextBlock, REPORT_ACTIONS_PROMPT } from '../services/chat/report-actions.js';
+import { wrapToolResult } from '../services/security/trust-wrap.js';
+import { trimToTokenBudget, getContextWindow } from '../services/context/window.js';
 
 import {
   parseAndExecuteActions,
@@ -275,6 +280,11 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       && _headerOverrideV2 !== '0'
       && _headerOverrideV2 !== 'false';
 
+    // B-1: sanitize user input to block persona override attempts
+    if (flag('INPUT_SANITIZER') && body.message) {
+      body.message = sanitizeUserInput(body.message);
+    }
+
     let convId = body.conversationId;
     bootLogger.info({ msg: 'chat-route-trace', step: 'entry', conversationId: convId || null, bodyAgentId: body.agentId || null, messageText: (body.message || '').slice(0, 80) }, 'chat-route-trace');
 
@@ -503,11 +513,9 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       });
     }
 
-    // Context window guard: last 30 messages to avoid token overflow
-    const CHAT_HISTORY_LIMIT = 30;
+    // C-5: token-based context window (replaces message-count guard)
     const history = store.messages.filter((m) => m.conversationId === convId)
-      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      .slice(-CHAT_HISTORY_LIMIT);
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     const chatMsgs: Array<{ role: string; content: string | Array<{ type: string; [k: string]: unknown }> }> = [];
     for (const m of history) {
       const last = chatMsgs[chatMsgs.length - 1];
@@ -520,6 +528,51 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       }
     }
     while (chatMsgs.length > 0 && chatMsgs[0].role !== 'user') chatMsgs.shift();
+
+    // C-5: trim to token budget based on model context window
+    const contextWindow = getContextWindow(selectedModel || anthropicRow?.defaultModel || 'claude-sonnet-4-6');
+    const { trimmed, droppedCount } = trimToTokenBudget(chatMsgs, contextWindow, 6_000);
+    if (droppedCount > 0) {
+      bootLogger.info({ droppedCount, contextWindow }, 'C-5: context trimmed to token budget');
+      chatMsgs.length = 0;
+      chatMsgs.push(...trimmed);
+
+      // D-3: inject existing rolling context summary at top, then generate new one in background
+      const existingConv = store.conversations.find(cv => cv.id === convId);
+      if (existingConv?.rollingContext) {
+        chatMsgs.unshift({
+          role: 'user',
+          content: `[ملخص المحادثة السابقة / Prior context summary: ${existingConv.rollingContext}]`,
+        });
+        // ensure first msg stays user
+        while (chatMsgs.length > 1 && chatMsgs[0].role !== 'user') chatMsgs.shift();
+      }
+
+      // Generate new rolling summary in background (non-blocking)
+      void (async () => {
+        try {
+          const haikuProvider = pickProviderForModel('claude-haiku-4-5-20251001');
+          if (!haikuProvider || !convId) return;
+          const droppedText = trimmed.slice(0, droppedCount)
+            .map(m => `${m.role}: ${(typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).slice(0, 300)}`)
+            .join('\n');
+          let summary = '';
+          for await (const chunk of haikuProvider.chat({
+            model: 'claude-haiku-4-5-20251001',
+            systemPrompt: 'Summarize this conversation exchange in 2-3 sentences. Be concise and factual.',
+            messages: [{ role: 'user', content: droppedText }],
+          })) {
+            if ((chunk as { type: string; content?: string }).type === 'text') {
+              summary += (chunk as { content: string }).content;
+            }
+          }
+          if (summary) {
+            const conv = store.conversations.find(cv => cv.id === convId);
+            if (conv) { conv.rollingContext = summary; conv.rollingContextAt = new Date().toISOString(); saveStore(); }
+          }
+        } catch { /* non-critical */ }
+      })();
+    }
 
     if (hasImages && chatMsgs.length > 0) {
       const lastIdx = chatMsgs.length - 1;
@@ -1011,36 +1064,38 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 .slice(0, 8);
               const topRated = items.filter((i) => i.rating >= 2).slice(0, 5);
 
-              activeSystemPrompt += `\n\n## مكتبة Zotero الفعلية (محقونة من /api/zotero)\n\n`;
-              activeSystemPrompt += `**الإحصائيات**:\n`;
-              activeSystemPrompt += `- إجمالي المصادر: ${total}\n`;
-              activeSystemPrompt += `- المجموعات: ${collections.length}\n`;
-              activeSystemPrompt += `- للقراءة: ${toRead} | يقرأها: ${reading} | مقروءة: ${read}\n`;
-              activeSystemPrompt += `- بدون تصنيف: ${total - toRead - reading - read}\n\n`;
+              // B-2: Zotero data is external — wrap with trust="low"
+              let zoteroBlock = `## مكتبة Zotero الفعلية\n\n`;
+              zoteroBlock += `**الإحصائيات**:\n`;
+              zoteroBlock += `- إجمالي المصادر: ${total}\n`;
+              zoteroBlock += `- المجموعات: ${collections.length}\n`;
+              zoteroBlock += `- للقراءة: ${toRead} | يقرأها: ${reading} | مقروءة: ${read}\n`;
+              zoteroBlock += `- بدون تصنيف: ${total - toRead - reading - read}\n\n`;
 
               if (collections.length > 0) {
-                activeSystemPrompt += `**المجموعات الموجودة** (لا تقترح إنشاء جديدة قبل التحقق):\n`;
-                for (const col of collections.slice(0, 15)) activeSystemPrompt += `- ${col.name}\n`;
-                activeSystemPrompt += `\n`;
+                zoteroBlock += `**المجموعات الموجودة**:\n`;
+                for (const col of collections.slice(0, 15)) zoteroBlock += `- ${col.name}\n`;
+                zoteroBlock += `\n`;
               }
 
               if (recent.length > 0) {
-                activeSystemPrompt += `**أحدث ${recent.length} مصادر مُضافة**:\n`;
+                zoteroBlock += `**أحدث ${recent.length} مصادر مُضافة**:\n`;
                 for (const it of recent) {
-                  activeSystemPrompt += `- "${it.title.slice(0, 100)}" (${it.year ?? 'n.d.'})${it.authors ? ` — ${it.authors.split(',')[0]}` : ''}${it.doi ? ` | DOI: ${it.doi}` : ''}\n`;
+                  zoteroBlock += `- "${it.title.slice(0, 100)}" (${it.year ?? 'n.d.'})${it.authors ? ` — ${it.authors.split(',')[0]}` : ''}${it.doi ? ` | DOI: ${it.doi}` : ''}\n`;
                 }
-                activeSystemPrompt += `\n`;
+                zoteroBlock += `\n`;
               }
 
               if (topRated.length > 0) {
-                activeSystemPrompt += `**أوراق مُقيّمة عالياً (⭐⭐+)**:\n`;
+                zoteroBlock += `**أوراق مُقيّمة عالياً (⭐⭐+)**:\n`;
                 for (const it of topRated) {
-                  activeSystemPrompt += `- ${'⭐'.repeat(it.rating)} "${it.title.slice(0, 80)}" (${it.year ?? 'n.d.'})\n`;
+                  zoteroBlock += `- ${'⭐'.repeat(it.rating)} "${it.title.slice(0, 80)}" (${it.year ?? 'n.d.'})\n`;
                 }
-                activeSystemPrompt += `\n`;
+                zoteroBlock += `\n`;
               }
 
-              activeSystemPrompt += `**ملاحظة**: عند اقتراح ورقة، **ابحث في هذه القائمة أولاً** قبل اقتراح خارجية. لو موجودة، أحل المستخدم لـ \`/zotero\` مع اسم الورقة.\n`;
+              zoteroBlock += `**ملاحظة**: عند اقتراح ورقة، **ابحث في هذه القائمة أولاً** قبل اقتراح خارجية.\n`;
+              activeSystemPrompt += '\n\n' + (flag('TOOL_TRUST_WRAP') ? wrapToolResult('zotero', zoteroBlock) : zoteroBlock);
             } catch (err) {
               activeSystemPrompt += `\n\n_⚠️ تعذّر الوصول إلى Zotero (${err instanceof Error ? err.message.slice(0, 100) : 'unknown'}). إذا سُئلت عن مكتبتي قل: "Zotero غير متاح حالياً، تأكد أن التطبيق مفتوح أو الاتصال بالـ Web API يعمل."_\n`;
             }
@@ -1186,6 +1241,39 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
 
         const agentHeader = detectedAgent !== 'manager' ? (AGENT_HEADERS[detectedAgent] || '') : '';
 
+        // B-4 STABLE PROMPT: report actions injected here explicitly, not via Proxy.
+        // This keeps system prompts deterministic — same agent always gets the same
+        // base prompt; report context only added when this agent can act on it.
+        if (flag('STABLE_PROMPT')
+            && (detectedAgent === 'manager' || detectedAgent === 'architect' || detectedAgent === 'doctor')
+            && shouldInjectReportActions(store)) {
+          activeSystemPrompt += '\n\n' + REPORT_ACTIONS_PROMPT + buildReportsContextBlock(store);
+        }
+
+        // D-1: inject top entities from entity memory into system prompt
+        if (flag('ENTITY_MEMORY') && store.entityMemory && store.entityMemory.length > 0) {
+          const topEntities = store.entityMemory
+            .filter(e => !e.conversationId || e.conversationId === convId || e.importance > 0.7)
+            .sort((a, b) => b.importance - a.importance || new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime())
+            .slice(0, 8);
+          if (topEntities.length > 0) {
+            const block = topEntities
+              .map(e => `- [${e.entityType}] ${e.name}: ${e.context.slice(0, 80)}`)
+              .join('\n');
+            activeSystemPrompt += `\n\n## كيانات من سياقاتك السابقة (تذكير تلقائي)\n${block}`;
+          }
+        }
+
+        // C-6: pin prompt version hash at first message
+        const liveConvRecord = store.conversations.find((cv) => cv.id === convId);
+        if (liveConvRecord && !liveConvRecord.promptVersionHash && activeSystemPrompt) {
+          liveConvRecord.promptVersionHash = crypto
+            .createHash('sha256').update(activeSystemPrompt).digest('hex').slice(0, 8);
+          liveConvRecord.pinnedAt = new Date().toISOString();
+          saveStore();
+          bootLogger.info({ hash: liveConvRecord.promptVersionHash, agentId: detectedAgent }, 'C-6: prompt-version-pinned');
+        }
+
         await stream.writeSSE({ event: 'thinking', data: JSON.stringify({ agentId: detectedAgent }) });
 
         const routedProvider = pickProviderForModel(model);
@@ -1282,8 +1370,26 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                         logActivity('chat', `${AGENT_DISPLAY_NAMES[from] || from} \u2192 ${AGENT_DISPLAY_NAMES[to] || to}`, task.slice(0, 200), { agentId: to, metadata: { from, to, task: task.slice(0, 500), via: 'tool_use' } });
                       },
                       from: 'manager',
+                      // C-2: Nested Streaming \u2014 pipe specialist tokens directly to SSE
+                      ...(CHAT_V2 && specialistMessageId ? {
+                        onToken: (token: string) => {
+                          void stream.writeSSE({
+                            event: 'message.delta',
+                            data: JSON.stringify({ messageId: specialistMessageId, text: token }),
+                          });
+                        },
+                      } : {}),
                     },
                   });
+                  // Parse [NOTIFY] markers from specialist output — agents can send notifications
+                  if (result.output) {
+                    const specNotifs = parseNotifyActions(result.output, inp.specialist);
+                    if (specNotifs.length > 0) {
+                      saveStore();
+                      await stream.writeSSE({ event: 'notifications', data: JSON.stringify({ notifications: specNotifs }) });
+                    }
+                  }
+
                   // Record this round's output so the NEXT specialist can see it.
                   turnPriorMessages.push({
                     role: 'assistant',
@@ -1499,17 +1605,17 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
               if (detectedAgent === 'architect') {
                 const actions = parseArchitectActions(fullResponse, detectedAgent);
                 if (actions.length > 0) {
-                  await stream.writeSSE({ event: 'approvals', data: JSON.stringify({ approvals: actions }) });
+                  // FIX: use 'approval_request' — matches what chat-view.tsx listens for
+                  await stream.writeSSE({ event: 'approval_request', data: JSON.stringify({ approvals: actions }) });
                 }
               }
-              if (detectedAgent === 'manager' && !toolUseDispatched) {
+              // B-8: when TOOL_USE_ONLY_DELEGATION flag is on, skip text marker fallback entirely
+              if (detectedAgent === 'manager' && !toolUseDispatched && !flag('TOOL_USE_ONLY_DELEGATION')) {
                 try {
                   const dels = parseTextMarkerDelegations(fullResponse);
                   if (dels.length > 0) {
                     bootLogger.warn({ fallback: 'text-marker', count: dels.length }, 'AGT-05 fallback triggered');
                     logDelegations(dels, logActivity, { conversationId: convId });
-                    // BUG A FIX: legacy `delegations` event produced a second
-                    // bubble summary alongside v2 per-agent bubbles.
                     if (!CHAT_V2) {
                       await stream.writeSSE({ event: 'delegations', data: JSON.stringify({ delegations: dels }) });
                     }
@@ -1758,6 +1864,43 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 const usr = recent.find((m) => m.role === 'user');
                 if (asst && usr) extractGraphFromMessage(convId!, usr.id, asst.id);
               } catch {}
+
+              // C-7: entity extraction — background, non-blocking
+              if (fullResponse.length > 50) {
+                void (async () => {
+                  try {
+                    const { extractEntities } = await import('../services/memory/entity-extractor.js');
+                    const entities = extractEntities(fullResponse);
+                    if (entities.length > 0) {
+                      const s = getStore();
+                      if (!s.entityMemory) s.entityMemory = [];
+                      const now = new Date().toISOString();
+                      for (const e of entities) {
+                        const existing = s.entityMemory.find(
+                          em => em.name.toLowerCase() === e.name.toLowerCase()
+                        );
+                        if (existing) {
+                          existing.lastSeenAt = now;
+                          existing.importance = Math.min(1, existing.importance + 0.1);
+                        } else {
+                          s.entityMemory.push({
+                            id: crypto.randomUUID(),
+                            entityType: e.type,
+                            name: e.name,
+                            context: fullResponse.slice(0, 150),
+                            conversationId: convId ?? undefined,
+                            agentId: detectedAgent,
+                            importance: 0.5,
+                            lastSeenAt: now,
+                            createdAt: now,
+                          });
+                        }
+                      }
+                      saveStore();
+                    }
+                  } catch { /* ignore */ }
+                })();
+              }
             }
             await stream.writeSSE({ event: 'done', data: '{}' });
           }
@@ -1779,10 +1922,12 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
             if (detectedAgent === 'architect') {
               const actions = parseArchitectActions(fullResponse, detectedAgent);
               if (actions.length > 0) {
-                await stream.writeSSE({ event: 'approvals', data: JSON.stringify({ approvals: actions }) });
+                // FIX: use 'approval_request' — matches chat-view.tsx listener
+                await stream.writeSSE({ event: 'approval_request', data: JSON.stringify({ approvals: actions }) });
               }
             }
-            if (detectedAgent === 'manager' && !toolUseDispatched) {
+            // B-8: gate text marker fallback behind flag
+            if (detectedAgent === 'manager' && !toolUseDispatched && !flag('TOOL_USE_ONLY_DELEGATION')) {
               try {
                 const dels = parseTextMarkerDelegations(fullResponse);
                 if (dels.length > 0) {

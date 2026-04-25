@@ -10,6 +10,7 @@ import { SplitPaneArea } from './split-pane';
 import { NotificationBell } from '@/components/notifications/notification-bell';
 import { useAppStore } from '@/store/app';
 import { cn } from '@/lib/utils';
+import { AwaitingUserNotifier } from '@/components/agents/AwaitingUserDialog';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { hydrate, hydrated, mobileSidebarOpen, setMobileSidebarOpen, language } = useAppStore();
@@ -108,6 +109,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <TaskSidebar />
         </div>
         <MobileTabBar />
+        {/* D-2: Human-in-the-Loop — global notifier for awaiting_user pipelines */}
+        <AwaitingUserNotifier />
       </div>
     </div>
   );
