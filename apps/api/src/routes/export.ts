@@ -138,14 +138,35 @@ export function registerExportRoutes(app: Hono, deps: ExportRoutesDeps): void {
     }
 
     if (restoreMedia) {
+      // F-012: validate filename to prevent path traversal.
+      // Only basenames allowed; reject path separators, drive letters, "..", and absolute paths.
+      const isSafeBasename = (name: string): boolean => {
+        if (typeof name !== 'string' || name.length === 0 || name.length > 255) return false;
+        if (name.includes('/') || name.includes('\\')) return false;
+        if (name === '.' || name === '..') return false;
+        if (/^[a-zA-Z]:/.test(name)) return false; // Windows drive letter
+        // Allow only safe chars: alphanumerics, dot, underscore, hyphen, parens, spaces
+        if (!/^[a-zA-Z0-9._\- ()]+$/.test(name)) return false;
+        return true;
+      };
+      const MAX_FILES_PER_KIND = 5000;
+      const MAX_BYTES_PER_FILE = 200 * 1024 * 1024; // 200 MB
+
       const writeFiles = (arr: Array<{ filename: string; base64: string }> | undefined, dir: string): number => {
         if (!arr) return 0;
-        fs.mkdirSync(dir, { recursive: true });
+        const safeDir = path.resolve(dir);
+        fs.mkdirSync(safeDir, { recursive: true });
         let n = 0;
-        for (const f of arr) {
-          const fp = path.join(dir, f.filename);
+        const slice = arr.slice(0, MAX_FILES_PER_KIND);
+        for (const f of slice) {
+          if (!isSafeBasename(f.filename)) continue; // skip unsafe
+          const fp = path.resolve(safeDir, f.filename);
+          // Defense in depth: ensure resolved path is still inside safeDir
+          if (!fp.startsWith(safeDir + path.sep) && fp !== safeDir) continue;
+          const buf = Buffer.from(f.base64, 'base64');
+          if (buf.length > MAX_BYTES_PER_FILE) continue;
           if (!merge || !fs.existsSync(fp)) {
-            fs.writeFileSync(fp, Buffer.from(f.base64, 'base64'));
+            fs.writeFileSync(fp, buf);
             n++;
           }
         }

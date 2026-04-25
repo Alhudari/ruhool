@@ -54,9 +54,13 @@ export function registerRunsRoutes(app: Hono, deps: RunsRoutesDeps): void {
         saveStore,
         runOneStep: async (args) => {
           const url = 'http://localhost:' + ((store as unknown as { __apiPort?: number }).__apiPort || 3001) + '/api/chat';
+          // F-013: include auth header for loopback so production fail-closed mode works
+          const apiToken = process.env.RUHOOL_API_TOKEN;
+          const headers: Record<string, string> = { 'content-type': 'application/json' };
+          if (apiToken) headers['Authorization'] = `Bearer ${apiToken}`;
           const res = await fetch(url, {
             method: 'POST',
-            headers: { 'content-type': 'application/json' },
+            headers,
             body: JSON.stringify({
               conversationId: args.conversationId,
               message: args.message,

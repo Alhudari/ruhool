@@ -123,9 +123,13 @@ export function registerCanvasRoutes(app: Hono): void {
     try {
       // Call manager/research agent via the same chat API
       const port = (process.env.APP_PORT || '3001');
+      // F-013: forward auth so loopback works under production fail-closed
+      const apiToken = process.env.RUHOOL_API_TOKEN;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Ruhool-Chat-V2': '0' };
+      if (apiToken) headers['Authorization'] = `Bearer ${apiToken}`;
       const res = await fetch(`http://localhost:${port}/api/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Ruhool-Chat-V2': '0' },
+        headers,
         body: JSON.stringify({
           message: instruction,
           agentId: 'research',

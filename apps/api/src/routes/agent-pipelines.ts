@@ -59,13 +59,18 @@ export async function runPipeline(
     if (startFrom > 0) pipeline.resumeFromStep = undefined; // clear after resuming
 
     for (const step of pipeline.steps.sort((a, b) => a.stepIndex - b.stepIndex)) {
-      // C-3: skip steps already checkpointed
+      // C-3 + F-010: skip if before resume point AND has either a checkpoint OR is already done with a result
       if (step.stepIndex < startFrom) {
         const saved = pipeline.checkpoints?.find(c => c.stepIndex === step.stepIndex);
         if (saved) {
           pipeline.stepOutputs[step.stepIndex] = saved.output;
           step.status = 'done';
           step.result = saved.output;
+          continue;
+        }
+        // F-010: also skip if step was completed in this run (status=done with a result)
+        if (step.status === 'done' && step.result != null) {
+          pipeline.stepOutputs[step.stepIndex] = step.result;
           continue;
         }
       }
@@ -338,7 +343,7 @@ export function registerAgentPipelinesRoutes(app: Hono, deps: AgentPipelinesDeps
     return c.json({ ok: true, resumeFromStep, pipelineId: pipeline.id });
   });
 
-  // D-2: POST /api/agent-pipelines/:id/respond — Human-in-the-Loop response
+  // D-2 + F-010 + F-011: POST /api/agent-pipelines/:id/respond — Human-in-the-Loop response
   app.post('/api/agent-pipelines/:id/respond', async (c) => {
     const store = getStore();
     const pipeline = (store.agentPipelines ?? []).find(
@@ -350,13 +355,30 @@ export function registerAgentPipelinesRoutes(app: Hono, deps: AgentPipelinesDeps
     }
 
     const body = await c.req.json<{ stepIndex: number; response: string }>();
+    // F-011: stale request guard — only accept the actual paused step
+    if (body.stepIndex !== pipeline.currentStepIndex) {
+      return c.json({
+        error: `Step index mismatch — pipeline is paused at step ${pipeline.currentStepIndex}, not ${body.stepIndex}`,
+      }, 409);
+    }
     const step = pipeline.steps.find(s => s.stepIndex === body.stepIndex);
     if (!step) return c.json({ error: `Step ${body.stepIndex} not found` }, 404);
+    if (step.status !== 'failed' && step.status !== 'pending') {
+      return c.json({ error: `Step ${body.stepIndex} is not waiting (status: ${step.status})` }, 409);
+    }
 
     // Apply user's response as step output
     step.status = 'done';
     step.result = body.response;
+    step.error = null;
     pipeline.stepOutputs[body.stepIndex] = body.response;
+
+    // F-010: persist as a checkpoint so resume skips this step instead of re-running it
+    if (!pipeline.checkpoints) pipeline.checkpoints = [];
+    const existingCp = pipeline.checkpoints.findIndex(c => c.stepIndex === body.stepIndex);
+    const cp = { stepIndex: body.stepIndex, output: body.response, savedAt: new Date().toISOString() };
+    if (existingCp >= 0) pipeline.checkpoints[existingCp] = cp;
+    else pipeline.checkpoints.push(cp);
 
     // Resume from next step
     pipeline.resumeFromStep = body.stepIndex + 1;

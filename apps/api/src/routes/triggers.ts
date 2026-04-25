@@ -74,8 +74,12 @@ export function registerTriggersRoutes(app: Hono, deps: TriggersRoutesDeps): voi
         saveStore,
         runOneStep: async (args) => {
           const port = (store as unknown as { __apiPort?: number }).__apiPort || 3001;
+          // F-013: forward auth so loopback works under production fail-closed
+          const apiToken = process.env.RUHOOL_API_TOKEN;
+          const headers: Record<string, string> = { 'content-type': 'application/json' };
+          if (apiToken) headers['Authorization'] = `Bearer ${apiToken}`;
           const res = await fetch(`http://localhost:${port}/api/chat`, {
-            method: 'POST', headers: { 'content-type': 'application/json' },
+            method: 'POST', headers,
             body: JSON.stringify({ conversationId: args.conversationId, message: args.message, agentId: args.agentId, chainDepth: args.chainDepth, skipPlayMaker: true }),
           });
           const reader = res.body?.getReader();
