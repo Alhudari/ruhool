@@ -374,6 +374,8 @@ export interface DispatchDeps {
   temperature?: number;
   /** Generation services made available to the specialist through tool_use. */
   generationTools?: Omit<GenerationToolContext, 'specialist'>;
+  /** C-2: Nested Streaming — called for each token as it's generated */
+  onToken?: (token: string, agentId: string) => void;
 }
 
 export interface DispatchArtifact {
@@ -571,7 +573,11 @@ export async function dispatch(params: {
       temperature: deps.temperature,
       ...(hasTools ? { tools } : {}),
     } as Parameters<UnifiedProvider['chat']>[0])) {
-      if (chunk.type === 'text') roundText += chunk.content;
+      if (chunk.type === 'text') {
+        roundText += chunk.content;
+        // C-2: Nested Streaming — emit token immediately to caller
+        deps.onToken?.(chunk.content, specialist);
+      }
       else if (chunk.type === 'usage') roundUsage = chunk.usage;
       else if (chunk.type === 'tool_use') toolUses.push({ id: chunk.id, name: chunk.name, input: chunk.input });
       else if (chunk.type === 'error') throw new Error(chunk.error);

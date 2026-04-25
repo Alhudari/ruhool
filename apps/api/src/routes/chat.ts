@@ -18,6 +18,7 @@ import { sanitizeUserInput } from '../services/security/sanitize-input.js';
 import { flag } from '../services/flags.js';
 import { shouldInjectReportActions, buildReportsContextBlock, REPORT_ACTIONS_PROMPT } from '../services/chat/report-actions.js';
 import { wrapToolResult } from '../services/security/trust-wrap.js';
+import { trimToTokenBudget, getContextWindow } from '../services/context/window.js';
 
 import {
   parseAndExecuteActions,
@@ -512,11 +513,9 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       });
     }
 
-    // Context window guard: last 30 messages to avoid token overflow
-    const CHAT_HISTORY_LIMIT = 30;
+    // C-5: token-based context window (replaces message-count guard)
     const history = store.messages.filter((m) => m.conversationId === convId)
-      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      .slice(-CHAT_HISTORY_LIMIT);
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     const chatMsgs: Array<{ role: string; content: string | Array<{ type: string; [k: string]: unknown }> }> = [];
     for (const m of history) {
       const last = chatMsgs[chatMsgs.length - 1];
@@ -529,6 +528,15 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       }
     }
     while (chatMsgs.length > 0 && chatMsgs[0].role !== 'user') chatMsgs.shift();
+
+    // C-5: trim to token budget based on model context window
+    const contextWindow = getContextWindow(selectedModel || anthropicRow?.defaultModel || 'claude-sonnet-4-6');
+    const { trimmed, droppedCount } = trimToTokenBudget(chatMsgs, contextWindow, 6_000);
+    if (droppedCount > 0) {
+      bootLogger.info({ droppedCount, contextWindow }, 'C-5: context trimmed to token budget');
+      chatMsgs.length = 0;
+      chatMsgs.push(...trimmed);
+    }
 
     if (hasImages && chatMsgs.length > 0) {
       const lastIdx = chatMsgs.length - 1;
@@ -1206,6 +1214,16 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
           activeSystemPrompt += '\n\n' + REPORT_ACTIONS_PROMPT + buildReportsContextBlock(store);
         }
 
+        // C-6: pin prompt version hash at first message
+        const liveConvRecord = store.conversations.find((cv) => cv.id === convId);
+        if (liveConvRecord && !liveConvRecord.promptVersionHash && activeSystemPrompt) {
+          liveConvRecord.promptVersionHash = crypto
+            .createHash('sha256').update(activeSystemPrompt).digest('hex').slice(0, 8);
+          liveConvRecord.pinnedAt = new Date().toISOString();
+          saveStore();
+          bootLogger.info({ hash: liveConvRecord.promptVersionHash, agentId: detectedAgent }, 'C-6: prompt-version-pinned');
+        }
+
         await stream.writeSSE({ event: 'thinking', data: JSON.stringify({ agentId: detectedAgent }) });
 
         const routedProvider = pickProviderForModel(model);
@@ -1302,6 +1320,15 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                         logActivity('chat', `${AGENT_DISPLAY_NAMES[from] || from} \u2192 ${AGENT_DISPLAY_NAMES[to] || to}`, task.slice(0, 200), { agentId: to, metadata: { from, to, task: task.slice(0, 500), via: 'tool_use' } });
                       },
                       from: 'manager',
+                      // C-2: Nested Streaming \u2014 pipe specialist tokens directly to SSE
+                      ...(CHAT_V2 && specialistMessageId ? {
+                        onToken: (token: string) => {
+                          void stream.writeSSE({
+                            event: 'message.delta',
+                            data: JSON.stringify({ messageId: specialistMessageId, text: token }),
+                          });
+                        },
+                      } : {}),
                     },
                   });
                   // Record this round's output so the NEXT specialist can see it.
@@ -1777,6 +1804,43 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 const usr = recent.find((m) => m.role === 'user');
                 if (asst && usr) extractGraphFromMessage(convId!, usr.id, asst.id);
               } catch {}
+
+              // C-7: entity extraction — background, non-blocking
+              if (fullResponse.length > 50) {
+                void (async () => {
+                  try {
+                    const { extractEntities } = await import('../services/memory/entity-extractor.js');
+                    const entities = extractEntities(fullResponse);
+                    if (entities.length > 0) {
+                      const s = getStore();
+                      if (!s.entityMemory) s.entityMemory = [];
+                      const now = new Date().toISOString();
+                      for (const e of entities) {
+                        const existing = s.entityMemory.find(
+                          em => em.name.toLowerCase() === e.name.toLowerCase()
+                        );
+                        if (existing) {
+                          existing.lastSeenAt = now;
+                          existing.importance = Math.min(1, existing.importance + 0.1);
+                        } else {
+                          s.entityMemory.push({
+                            id: crypto.randomUUID(),
+                            entityType: e.type,
+                            name: e.name,
+                            context: fullResponse.slice(0, 150),
+                            conversationId: convId ?? undefined,
+                            agentId: detectedAgent,
+                            importance: 0.5,
+                            lastSeenAt: now,
+                            createdAt: now,
+                          });
+                        }
+                      }
+                      saveStore();
+                    }
+                  } catch { /* ignore */ }
+                })();
+              }
             }
             await stream.writeSSE({ event: 'done', data: '{}' });
           }

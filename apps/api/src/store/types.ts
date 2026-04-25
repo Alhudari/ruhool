@@ -40,6 +40,12 @@ export interface ConvRecord {
   participantAgentIds?: string[];
   studioProject?: StudioProjectData;
   createdAt: string; updatedAt: string;
+  // C-6: prompt version pinned at first message
+  promptVersionHash?: string;
+  pinnedAt?: string;
+  // C-9: rolling context summary
+  rollingContext?: string;
+  rollingContextAt?: string;
 }
 
 /** CHAT_V2 P1: bubble kind.
@@ -516,6 +522,33 @@ export interface GraphEdge {
   confidence?: number;
 }
 
+// ─── C-1: Unified Run Events ──────────────────────────────────────────────────
+
+export type AgentEventType =
+  | 'run.started' | 'run.completed' | 'run.failed' | 'run.cancelled'
+  | 'step.started' | 'step.completed' | 'step.failed'
+  | 'model.call.started' | 'model.call.completed'
+  | 'tool.call.started' | 'tool.call.completed' | 'tool.call.failed'
+  | 'token.delta'
+  | 'delegation.started' | 'delegation.completed'
+  | 'budget.warning' | 'budget.exceeded'
+  | 'checkpoint.saved'
+  | 'context.trimmed'
+  | 'entity.extracted'
+  | 'memory.saved';
+
+export interface AgentEvent {
+  id: string;
+  runId: string;
+  type: AgentEventType;
+  at: number;
+  agentId?: string;
+  stepId?: string;
+  durationMs?: number;
+  tokens?: { in?: number; out?: number; costUsd?: number };
+  payload?: Record<string, unknown>;
+}
+
 export interface AgentRunRecord {
   id: string;
   conversationId: string;
@@ -530,6 +563,13 @@ export interface AgentRunRecord {
   endedAt?: string;
   lastStepAt?: string;
   trace?: Array<{ stepNumber: number; agentId: string; summary: string; tokensUsed: number; at: string }>;
+  // C-1: unified event stream
+  events?: AgentEvent[];
+  // C-4: budget
+  budgetUsd?: number;
+  budgetSpentUsd?: number;
+  // C-6: prompt version
+  promptVersionHash?: string;
 }
 
 export interface KeepNote {
@@ -1123,6 +1163,8 @@ export interface StoreData {
   agentTasks?: AgentTaskRecord[];
   // ---- A-5: Overnight Pipelines ----
   agentPipelines?: AgentPipelineRecord[];
+  // ---- C-7: Entity Memory ----
+  entityMemory?: EntityMemoryRecord[];
 }
 
 export interface ProjectFile {
@@ -1337,4 +1379,33 @@ export interface AgentPipelineRecord {
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;
+  // C-3: step-level checkpoints
+  checkpoints?: Array<{ stepIndex: number; output: string; savedAt: string }>;
+  resumeFromStep?: number;
+  // C-4: budget
+  budget?: {
+    maxUsd: number;
+    spentUsd: number;
+    warningThreshold: number;
+    downgradeModel?: string;
+  };
+}
+
+// ─── C-7: Entity Memory ───────────────────────────────────────────────────────
+
+export type MemoryEntityKind =
+  | 'person' | 'paper' | 'project' | 'decision'
+  | 'concept' | 'place' | 'organization' | 'date';
+
+export interface EntityMemoryRecord {
+  id: string;
+  entityType: MemoryEntityKind;
+  name: string;
+  aliases?: string[];
+  context: string;
+  conversationId?: string;
+  agentId?: string;
+  importance: number;
+  lastSeenAt: string;
+  createdAt: string;
 }

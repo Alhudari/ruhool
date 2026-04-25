@@ -37,8 +37,21 @@ export async function runPipeline(
 
   try {
     let hadFailure = false;
+    // C-3: determine start step (resume from checkpoint if set)
+    const startFrom = pipeline.resumeFromStep ?? 0;
+    if (startFrom > 0) pipeline.resumeFromStep = undefined; // clear after resuming
 
     for (const step of pipeline.steps.sort((a, b) => a.stepIndex - b.stepIndex)) {
+      // C-3: skip steps already checkpointed
+      if (step.stepIndex < startFrom) {
+        const saved = pipeline.checkpoints?.find(c => c.stepIndex === step.stepIndex);
+        if (saved) {
+          pipeline.stepOutputs[step.stepIndex] = saved.output;
+          step.status = 'done';
+          step.result = saved.output;
+          continue;
+        }
+      }
       pipeline.currentStepIndex = step.stepIndex;
       pipeline.updatedAt = new Date().toISOString();
       step.status = 'running';
@@ -71,6 +84,14 @@ export async function runPipeline(
         step.status = 'done';
         step.result = result;
         pipeline.stepOutputs[step.stepIndex] = result;
+
+        // C-3: save checkpoint after each successful step
+        if (!pipeline.checkpoints) pipeline.checkpoints = [];
+        const existing = pipeline.checkpoints.findIndex(c => c.stepIndex === step.stepIndex);
+        const cp = { stepIndex: step.stepIndex, output: result, savedAt: new Date().toISOString() };
+        if (existing >= 0) pipeline.checkpoints[existing] = cp;
+        else pipeline.checkpoints.push(cp);
+
       } catch (err) {
         step.status = 'failed';
         step.error = err instanceof Error ? err.message : String(err);
@@ -270,5 +291,33 @@ export function registerAgentPipelinesRoutes(app: Hono, deps: AgentPipelinesDeps
     saveStore();
 
     return c.json({ pipeline });
+  });
+
+  // C-3: POST /api/agent-pipelines/:id/resume — resume from last checkpoint
+  app.post('/api/agent-pipelines/:id/resume', async (c) => {
+    const store = getStore();
+    const pipeline = (store.agentPipelines ?? []).find(
+      (p) => p.id === c.req.param('id') && !p.deletedAt
+    );
+    if (!pipeline) return c.json({ error: 'Not found' }, 404);
+    if (pipeline.status === 'running') {
+      return c.json({ error: 'Pipeline is already running' }, 409);
+    }
+
+    // Find the highest completed checkpoint
+    const checkpoints = pipeline.checkpoints ?? [];
+    const lastCheckpoint = checkpoints
+      .sort((a, b) => b.stepIndex - a.stepIndex)[0];
+
+    const resumeFromStep = lastCheckpoint ? lastCheckpoint.stepIndex + 1 : 0;
+    pipeline.resumeFromStep = resumeFromStep;
+    pipeline.status = 'scheduled'; // will be picked up by worker or run immediately
+    pipeline.updatedAt = new Date().toISOString();
+    saveStore();
+
+    // Fire immediately
+    void runPipeline(pipeline, { getStore, saveStore, runTask });
+
+    return c.json({ ok: true, resumeFromStep, pipelineId: pipeline.id });
   });
 }
