@@ -16,6 +16,7 @@ import type { Logger } from 'pino';
 import { z } from 'zod';
 import { parseNaturalTime } from '../services/natural-time.js';
 import { sanitizeUserInput } from '../services/security/sanitize-input.js';
+import { redact } from '../services/security/redact.js';
 import { flag } from '../services/flags.js';
 import { shouldInjectReportActions, buildReportsContextBlock, REPORT_ACTIONS_PROMPT } from '../services/chat/report-actions.js';
 import { wrapToolResult } from '../services/security/trust-wrap.js';
@@ -345,7 +346,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
     }
 
     let convId = body.conversationId;
-    bootLogger.info({ msg: 'chat-route-trace', step: 'entry', conversationId: convId || null, bodyAgentId: body.agentId || null, messageText: (body.message || '').slice(0, 80) }, 'chat-route-trace');
+    bootLogger.info({ msg: 'chat-route-trace', step: 'entry', conversationId: convId || null, bodyAgentId: body.agentId || null, messageText: redact((body.message || '').slice(0, 80)) }, 'chat-route-trace');
 
     // A-8: Smart Reminders — detect "ذكرني" / "remind me" before routing to agent
     const reminderRe = /^ذكرني\b|^remind me\b/i;

@@ -1,5 +1,6 @@
 import type { Hono } from 'hono';
 import type { StoreData } from '../store/types.js';
+import { flag } from '../services/flags.js';
 
 export type ObservabilityDeps = {
   getStore: () => StoreData;
@@ -7,6 +8,12 @@ export type ObservabilityDeps = {
 
 export function registerObservabilityRoutes(app: Hono, deps: ObservabilityDeps): void {
   const { getStore } = deps;
+
+  // F-022: register a guard middleware that respects OBSERVABILITY flag
+  app.use('/api/observability/*', async (c, next) => {
+    if (!flag('OBSERVABILITY')) return c.json({ error: 'Observability disabled' }, 404);
+    return next();
+  });
 
   // C-8: GET /api/observability/stats
   app.get('/api/observability/stats', (c) => {

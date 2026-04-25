@@ -107,12 +107,14 @@ export async function runPipeline(
         step.result = result;
         pipeline.stepOutputs[step.stepIndex] = result;
 
-        // C-3: save checkpoint after each successful step
-        if (!pipeline.checkpoints) pipeline.checkpoints = [];
-        const existing = pipeline.checkpoints.findIndex(c => c.stepIndex === step.stepIndex);
-        const cp = { stepIndex: step.stepIndex, output: result, savedAt: new Date().toISOString() };
-        if (existing >= 0) pipeline.checkpoints[existing] = cp;
-        else pipeline.checkpoints.push(cp);
+        // C-3: save checkpoint after each successful step (gated by F-022 flag)
+        if (flag('PIPELINE_CHECKPOINT')) {
+          if (!pipeline.checkpoints) pipeline.checkpoints = [];
+          const existing = pipeline.checkpoints.findIndex(c => c.stepIndex === step.stepIndex);
+          const cp = { stepIndex: step.stepIndex, output: result, savedAt: new Date().toISOString() };
+          if (existing >= 0) pipeline.checkpoints[existing] = cp;
+          else pipeline.checkpoints.push(cp);
+        }
 
       } catch (err) {
         step.status = 'failed';

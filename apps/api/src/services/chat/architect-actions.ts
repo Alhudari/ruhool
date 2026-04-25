@@ -170,9 +170,17 @@ export function createArchitectActions(deps: ArchitectActionsDeps): ArchitectAct
           (store.conversations as ConvRecord[]).splice(idx, 1);
           store.messages = (store.messages || []).filter((m) => m.conversationId !== id);
           if (approval.type === 'deep_delete_conversation') {
-            store.memories = (store.memories || []).filter((m: { metadata?: { conversationId?: string } }) => m?.metadata?.conversationId !== id);
-            store.tasks = (store.tasks || []).filter((t: { metadata?: { conversationId?: string } }) => t?.metadata?.conversationId !== id);
-            store.approvals = (store.approvals || []).filter((a: { metadata?: { conversationId?: string } }) => a?.metadata?.conversationId !== id);
+            // F-020: filter both metadata.conversationId AND direct conversationId fields
+            const matchesConv = (record: { conversationId?: string; metadata?: { conversationId?: string } }) =>
+              record?.conversationId === id || record?.metadata?.conversationId === id;
+            store.memories = (store.memories || []).filter((m) => !matchesConv(m as Parameters<typeof matchesConv>[0]));
+            store.tasks = (store.tasks || []).filter((t) => !matchesConv(t as unknown as Parameters<typeof matchesConv>[0]));
+            store.approvals = (store.approvals || []).filter((a) => !matchesConv(a as unknown as Parameters<typeof matchesConv>[0]));
+            // F-020: also remove agentTasks linked to this conversation
+            const sx = store as StoreData & { agentTasks?: Array<{ conversationId?: string | null }> };
+            if (sx.agentTasks) {
+              sx.agentTasks = sx.agentTasks.filter((t) => t.conversationId !== id);
+            }
           }
           saveStore();
           return { ok: true };

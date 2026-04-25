@@ -276,6 +276,36 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
       .catch(() => {});
   }, []);
 
+  // F-018: cleanup all long-lived resources on unmount
+  useEffect(() => {
+    return () => {
+      // Abort active SSE stream
+      if (cancelRef.current) {
+        try { cancelRef.current(); } catch { /* ignore */ }
+        cancelRef.current = null;
+      }
+      // Stop recording interval
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      // Stop SpeechRecognition if active
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch { /* ignore */ }
+        recognitionRef.current = null;
+      }
+      // Stop MediaRecorder + release tracks
+      if (mediaRecorderRef.current) {
+        try {
+          if (mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop();
+          const stream = mediaRecorderRef.current.stream;
+          if (stream) stream.getTracks().forEach(t => t.stop());
+        } catch { /* ignore */ }
+        mediaRecorderRef.current = null;
+      }
+    };
+  }, []);
+
   const cycleResponseLength = useCallback(() => {
     setResponseLength((prev) => {
       const next = prev === 'short' ? 'medium' : prev === 'medium' ? 'long' : 'short';
@@ -463,12 +493,12 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
     nameDetectAbortRef.current = controller;
     const handle = setTimeout(async () => {
       try {
-        const r = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001'}/api/chat/detect-agent-names`, {
-          method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text: input }), signal: controller.signal,
-        });
-        if (!r.ok) return;
-        const data = await r.json() as { matches: Array<{ name: string; id: string }>; topicMatches?: Array<{ name: string; id: string; reason: string }> };
+        // F-019: use shared apiFetch which respects NEXT_PUBLIC_API_URL + auth token
+        const data = await apiFetch<{ matches: Array<{ name: string; id: string }>; topicMatches?: Array<{ name: string; id: string; reason: string }> }>(
+          '/api/chat/detect-agent-names',
+          { method: 'POST', body: JSON.stringify({ text: input }), signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
         // Don't suggest the active agent itself, or already in chat, or dismissed
         const filterFn = (m: { id: string; name: string }) =>
           m.id !== activeAgentId && !input.includes('@' + m.name)
