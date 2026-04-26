@@ -27,7 +27,7 @@ describe('getSpecialistIdentity — canonical rename', () => {
   it('getSpecialistDisplayName returns the Arabic display name', () => {
     expect(getSpecialistDisplayName('manager')).toBe('الراعي');
     expect(getSpecialistDisplayName('architect')).toBe('المصمم');
-    expect(getSpecialistDisplayName('research')).toBe('عبدان');
+    expect(getSpecialistDisplayName('research')).toBe('الباحث');
   });
 
   it('falls back to the input string for unknown specialists', () => {

@@ -199,6 +199,17 @@ export async function setupDatabase(): Promise<void> {
 }
 
 // ─── Migration from JSON store ───
+// DEPRECATED FOR D-7 / Wave 1 — this function targets a legacy relational
+// schema (providers / conversations / messages as separate tables). Wave 1
+// uses a single `app_state(id, data jsonb, updated_at)` row instead, so
+// the inserts below would write to tables that don't exist in the Wave 1
+// schema. Kept for historical reference only.
+//
+// To migrate a local JSON store to the Wave 1 layout, write a small one-off
+// that reads `data/.store.json` and runs `saveStoreToDb(parsed)` directly
+// (with STORE_BACKEND=postgres + DATABASE_URL set). For Abdullah's "start
+// clean" preference (D-7 prompt), no migration is needed — Vercel boots
+// against an empty `app_state` row and fills naturally.
 
 export async function migrateFromJsonToPostgres(): Promise<void> {
   const DATA_DIR = path.resolve(import.meta.dirname || '.', '../../../data');

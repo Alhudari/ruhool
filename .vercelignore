@@ -1,6 +1,6 @@
 .turbo
 .git
-data
-backups
+/data
+/backups
 *.log
 coverage

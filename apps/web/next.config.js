@@ -1,7 +1,6 @@
 /** @type {import('next').NextConfig} */
 const isDev = process.env.NODE_ENV !== 'production';
 
-// API URL — Railway in production, localhost in dev
 const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3001';
 const apiHost = new URL(apiUrl).origin;
 const wsHost = apiHost.replace(/^http/, 'ws');
@@ -13,11 +12,13 @@ const CSP = [
   "font-src 'self' https://fonts.gstatic.com",
   `connect-src 'self' ${apiHost} ${wsHost}${isDev ? ' ws://127.0.0.1:3000 http://127.0.0.1:3000' : ''}`,
   "img-src 'self' data: blob:",
+  "frame-src 'self'",
+  "frame-ancestors 'self'",
 ].join('; ');
 
 const securityHeaders = [
   { key: 'Content-Security-Policy', value: CSP },
-  { key: 'X-Frame-Options', value: 'DENY' },
+  { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
 ];
@@ -29,4 +30,8 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+const withBundleAnalyzer = require('@next/bundle-analyzer')({
+  enabled: process.env.ANALYZE === 'true',
+});
+
+module.exports = withBundleAnalyzer(nextConfig);

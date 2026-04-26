@@ -4,12 +4,13 @@
 .env.production
 .env.*.local
 
-# User data (persists locally, never in git)
-data/
-backups/
+# User data (persists locally, never in git) — root-only so we don't
+# accidentally ignore source folders named "data" (e.g. apps/api/src/data/).
+/data/
+/backups/
 
 # Private data (double-ignored for safety)
-data/private/
+/data/private/
 
 # Dependencies
 node_modules/

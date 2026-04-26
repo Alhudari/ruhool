@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, Check, Trash2, CheckCheck, ExternalLink } from 'lucide-react';
+import { Bell, Check, Trash2, CheckCheck, ExternalLink, Settings2, Plus, Clock, X, ToggleLeft, ToggleRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
@@ -10,13 +10,13 @@ import type { NotificationRecord } from './notification-bell';
 
 const AGENT_NAMES: Record<string, { en: string; ar: string }> = {
   manager: { en: "Al-Ra'i", ar: 'الراعي' },
-  research: { en: 'Abdan', ar: 'عبدان' },
-  'reading-helper': { en: 'Shwasha', ar: 'شواشة' },
-  'writing-critic': { en: 'Al-Safra', ar: 'الصفرا' },
-  comparator: { en: 'Rammana', ar: 'رمّانة' },
+  research: { en: 'Al-Bahith', ar: 'الباحث' },
+  'reading-helper': { en: 'Al-Mulakhkhis', ar: 'المُلخِّص' },
+  'writing-critic': { en: 'Al-Naqid', ar: 'الناقد' },
+  comparator: { en: 'Al-Muqarin', ar: 'المُقارِن' },
   architect: { en: "Al-Musammim", ar: "المصمم" },
-  'content-creator': { en: 'Al-Dabsa', ar: 'الدبسا' },
-  creative: { en: 'Creative', ar: 'الكرييتف' },
+  'content-creator': { en: 'Al-Sarid', ar: 'السارد' },
+  creative: { en: "Al-Mubdi'", ar: 'المبدع' },
   'tasks-agent': { en: 'Maham', ar: 'مهام' },
 };
 
@@ -50,6 +50,58 @@ export function NotificationsPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [activeTab, setActiveTab] = useState<'notifications' | 'rules'>('notifications');
+
+  // J-13: Notification rules
+  interface NotificationRule {
+    id: string; titleEn: string; titleAr: string; enabled: boolean; isBuiltIn: boolean;
+    trigger: { type: string; timeOfDay?: string; offsetHours?: number };
+    snoozedUntil?: string;
+  }
+  const [rules, setRules] = useState<NotificationRule[]>([]);
+  const [rulesLoading, setRulesLoading] = useState(false);
+  const [showAddRule, setShowAddRule] = useState(false);
+  const [newRuleForm, setNewRuleForm] = useState({ titleEn: '', titleAr: '', triggerType: 'daily-morning', timeOfDay: '08:00', messageEn: '', messageAr: '' });
+
+  const fetchRules = useCallback(async () => {
+    setRulesLoading(true);
+    try { setRules(await apiFetch<NotificationRule[]>('/api/notifications/rules')); }
+    catch { /* ignore */ } finally { setRulesLoading(false); }
+  }, []);
+
+  const toggleRule = async (id: string, enabled: boolean) => {
+    setRules(prev => prev.map(r => r.id === id ? { ...r, enabled } : r));
+    await apiFetch(`/api/notifications/rules/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }).catch(() => fetchRules());
+  };
+
+  const snoozeRule = async (id: string) => {
+    await apiFetch(`/api/notifications/rules/${id}/snooze`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hours: 24 }),
+    }).catch(() => {});
+    fetchRules();
+  };
+
+  const createRule = async () => {
+    if (!newRuleForm.titleEn.trim()) return;
+    await apiFetch('/api/notifications/rules', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        titleEn: newRuleForm.titleEn, titleAr: newRuleForm.titleAr,
+        trigger: { type: newRuleForm.triggerType, timeOfDay: newRuleForm.timeOfDay },
+        messageTemplate: { en: newRuleForm.messageEn, ar: newRuleForm.messageAr },
+        enabled: true,
+      }),
+    }).catch(() => {});
+    setShowAddRule(false);
+    setNewRuleForm({ titleEn: '', titleAr: '', triggerType: 'daily-morning', timeOfDay: '08:00', messageEn: '', messageAr: '' });
+    fetchRules();
+  };
+
+  useEffect(() => { if (activeTab === 'rules') fetchRules(); }, [activeTab, fetchRules]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -122,12 +174,131 @@ export function NotificationsPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8">
-      <div className="flex items-center gap-3 mb-6">
-        <Bell size={22} className="text-on-surface-secondary" />
-        <h1 className="text-xl font-semibold text-on-surface">
-          {isRTL ? 'التنبيهات' : 'Notifications'}
-        </h1>
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <Bell size={22} className="text-on-surface-secondary" />
+          <h1 className="text-xl font-semibold text-on-surface">
+            {isRTL ? 'التنبيهات' : 'Notifications'}
+          </h1>
+        </div>
+        {/* Tab switcher */}
+        <div className="flex gap-1">
+          {([{ id: 'notifications', en: 'Inbox', ar: 'الصندوق' }, { id: 'rules', en: 'Rules', ar: 'القواعد' }] as const).map(t => (
+            <button key={t.id} onClick={() => setActiveTab(t.id)}
+              className={cn('flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-colors',
+                activeTab === t.id ? 'bg-accent text-on-accent border-accent' : 'border-border text-on-surface-secondary hover:bg-surface-secondary'
+              )}>
+              {t.id === 'rules' ? <Settings2 size={12} /> : <Bell size={12} />}
+              {isRTL ? t.ar : t.en}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {/* ── Rules tab ─────────────────────────────────────── */}
+      {activeTab === 'rules' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-on-surface-secondary">
+              {isRTL ? `${rules.length} قاعدة` : `${rules.length} rules`}
+            </p>
+            <button onClick={() => setShowAddRule(v => !v)}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-accent text-on-accent hover:opacity-90">
+              <Plus size={12} />
+              {isRTL ? 'قاعدة جديدة' : 'New rule'}
+            </button>
+          </div>
+
+          {/* Add rule form */}
+          {showAddRule && (
+            <div className="rounded-xl border border-border bg-surface-secondary p-4 space-y-3">
+              <h3 className="text-sm font-semibold text-on-surface">{isRTL ? 'قاعدة جديدة' : 'New Rule'}</h3>
+              <div className="grid grid-cols-2 gap-2">
+                <input value={newRuleForm.titleEn} onChange={e => setNewRuleForm(f => ({ ...f, titleEn: e.target.value }))}
+                  placeholder="Title (English)"
+                  className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-accent" />
+                <input value={newRuleForm.titleAr} onChange={e => setNewRuleForm(f => ({ ...f, titleAr: e.target.value }))}
+                  placeholder="العنوان (عربي)" dir="rtl"
+                  className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-accent" />
+              </div>
+              <div className="flex gap-2">
+                <select value={newRuleForm.triggerType} onChange={e => setNewRuleForm(f => ({ ...f, triggerType: e.target.value }))}
+                  className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-on-surface focus:outline-none flex-1">
+                  <option value="daily-morning">Daily morning</option>
+                  <option value="daily-evening">Daily evening</option>
+                  <option value="cron">Cron</option>
+                </select>
+                <input type="time" value={newRuleForm.timeOfDay} onChange={e => setNewRuleForm(f => ({ ...f, timeOfDay: e.target.value }))}
+                  className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-on-surface focus:outline-none w-32" />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setShowAddRule(false)}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-border text-on-surface-secondary hover:bg-surface-tertiary">
+                  {isRTL ? 'إلغاء' : 'Cancel'}
+                </button>
+                <button onClick={createRule} disabled={!newRuleForm.titleEn.trim()}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-accent text-on-accent hover:opacity-90 disabled:opacity-50">
+                  {isRTL ? 'إنشاء' : 'Create'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Rules list */}
+          {rulesLoading ? (
+            <div className="text-center py-8 text-on-surface-tertiary text-sm">{isRTL ? 'جاري التحميل...' : 'Loading...'}</div>
+          ) : (
+            <div className="rounded-xl border border-border bg-surface-secondary overflow-hidden">
+              {rules.length === 0 ? (
+                <p className="py-12 text-center text-sm text-on-surface-tertiary">{isRTL ? 'لا قواعد' : 'No rules'}</p>
+              ) : (
+                <div className="divide-y divide-border">
+                  {rules.map(rule => {
+                    const isSnoozed = rule.snoozedUntil && new Date(rule.snoozedUntil) > new Date();
+                    return (
+                      <div key={rule.id} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-tertiary transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-on-surface">
+                            {isRTL && rule.titleAr ? rule.titleAr : rule.titleEn}
+                          </p>
+                          <p className="text-[11px] text-on-surface-tertiary mt-0.5">
+                            {rule.trigger.type}
+                            {rule.trigger.timeOfDay && ` @ ${rule.trigger.timeOfDay}`}
+                            {rule.isBuiltIn && <span className="ms-2 px-1 rounded bg-surface-tertiary">built-in</span>}
+                            {isSnoozed && <span className="ms-2 text-warning">snoozed</span>}
+                          </p>
+                        </div>
+                        {/* Snooze */}
+                        <button onClick={() => snoozeRule(rule.id)} title={isRTL ? 'تأجيل 24 ساعة' : 'Snooze 24h'}
+                          className="p-1.5 text-on-surface-tertiary hover:text-warning rounded hover:bg-warning/10 transition-colors">
+                          <Clock size={14} />
+                        </button>
+                        {/* Enable toggle */}
+                        <button onClick={() => toggleRule(rule.id, !rule.enabled)}
+                          className={cn('p-1.5 rounded transition-colors', rule.enabled ? 'text-success hover:text-success/70' : 'text-on-surface-tertiary hover:text-on-surface')}>
+                          {rule.enabled ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
+                        </button>
+                        {/* Delete (non-builtins only) */}
+                        {!rule.isBuiltIn && (
+                          <button onClick={async () => {
+                            await apiFetch(`/api/notifications/rules/${rule.id}`, { method: 'DELETE' }).catch(() => {});
+                            fetchRules();
+                          }} className="p-1.5 text-on-surface-tertiary hover:text-error rounded transition-colors">
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Notifications inbox tab ───────────────────────── */}
+      {activeTab === 'notifications' && (<div>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-4">
@@ -256,6 +427,7 @@ export function NotificationsPage() {
           );
         })}
       </div>
+      </div>)} {/* end notifications tab */}
     </div>
   );
 }

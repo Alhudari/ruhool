@@ -34,11 +34,18 @@ interface AgentOption {
 }
 
 const BUILTIN_AGENTS: AgentOption[] = [
-  { id: 'manager', name: { en: 'Al-Ra\'i', ar: 'الراعي' } },
-  { id: 'research', name: { en: 'Abdan', ar: 'عبدان' } },
-  { id: 'reading-helper', name: { en: 'Shwasha', ar: 'شواشة' } },
-  { id: 'writing-critic', name: { en: 'Al-Safra', ar: 'الصفرا' } },
-  { id: 'content-creator', name: { en: 'Al-Dabsa', ar: 'الدبسا' } },
+  { id: 'manager', name: { en: "Al-Ra'i", ar: 'الراعي' } },
+  { id: 'doctor', name: { en: 'Al-Duktor', ar: 'الدكتور' } },
+  { id: 'research', name: { en: 'Al-Bahith', ar: 'الباحث' } },
+  { id: 'reading-helper', name: { en: 'Al-Mulakhkhis', ar: 'المُلخِّص' } },
+  { id: 'writing-critic', name: { en: 'Al-Naqid', ar: 'الناقد' } },
+  { id: 'comparator', name: { en: 'Al-Muqarin', ar: 'المُقارِن' } },
+  { id: 'content-creator', name: { en: 'Al-Sarid', ar: 'السارد' } },
+  { id: 'creative', name: { en: "Al-Mubdi'", ar: 'المبدع' } },
+  { id: 'tasks-agent', name: { en: 'Maham', ar: 'مهام' } },
+  { id: 'analyst', name: { en: 'Al-Muhallil', ar: 'المحلل' } },
+  { id: 'research-companion', name: { en: 'Al-Khuwy', ar: 'الخوي' } },
+  { id: 'mudawwin', name: { en: 'Al-Mudawwin', ar: 'المُدوّن' } },
 ];
 
 const CRON_PRESETS = [

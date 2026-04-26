@@ -1,12 +1,10 @@
-'use client';
-
 import { AppShell } from '@/components/layout/app-shell';
-import { LibraryPageView } from '@/components/library/library-page';
+import { UnifiedLibraryPage } from '@/components/library/UnifiedLibraryPage';
 
 export default function Library() {
   return (
     <AppShell>
-      <LibraryPageView />
+      <UnifiedLibraryPage />
     </AppShell>
   );
 }

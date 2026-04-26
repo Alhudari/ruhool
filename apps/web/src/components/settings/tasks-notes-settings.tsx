@@ -52,7 +52,7 @@ export function TasksNotesSettings() {
   return (
     <div className="space-y-6" dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="flex items-center gap-2">
-        <CheckSquare size={18} className="text-emerald-500" />
+        <CheckSquare size={18} className="text-success" />
         <h2 className="text-lg font-semibold text-on-surface">
           {isRTL ? 'المهام والملاحظات' : 'Tasks & Notes'}
         </h2>

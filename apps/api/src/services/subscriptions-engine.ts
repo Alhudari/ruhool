@@ -24,7 +24,7 @@ export function createSubscriptionsEngine(deps: SubscriptionsEngineDeps) {
   const { getStore, saveStore, capabilityCheckers, createNotification } = deps;
 
   async function checkSubscriptionRules() {
-    const store = getStore() as StoreData & { subscriptions?: SubscriptionRecord[] };
+    const store = getStore() as Omit<StoreData, 'subscriptions'> & { subscriptions?: SubscriptionRecord[] };
     const subs = (store.subscriptions || []).filter(
       (s) => s.status === 'active' && s.notifications?.length,
     );

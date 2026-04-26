@@ -45,39 +45,39 @@ const CASES: Array<{
   intruderContent: string;
 }> = [
   {
-    target: 'عبدان',
-    intruderDisplay: 'شواشة',
-    intruderAgent: 'shwasha',
+    target: 'الباحث',
+    intruderDisplay: 'المُلخِّص',
+    intruderAgent: 'reading-helper',
     intruderContent: 'يا حلاتها القراءة، خلّنا نتمشّى في النص براحة.',
   },
   {
-    target: 'شواشة',
-    intruderDisplay: 'عبدان',
-    intruderAgent: 'abdan',
+    target: 'المُلخِّص',
+    intruderDisplay: 'الباحث',
+    intruderAgent: 'research',
     intruderContent: 'تقرير بحثي: المصادر المعتمدة بلغت 14 مرجعاً محكّماً.',
   },
   {
-    target: 'الصفرا',
-    intruderDisplay: 'الدبسا',
+    target: 'الناقد',
+    intruderDisplay: 'السارد',
     intruderAgent: 'content-creator',
     intruderContent: 'يا جماعة! Post إنستا نار، كابشن قصير، هاشتاقات حماسية.',
   },
   {
-    target: 'رمّانة',
-    intruderDisplay: 'الصفرا',
+    target: 'المُقارِن',
+    intruderDisplay: 'الناقد',
     intruderAgent: 'writing-critic',
     intruderContent: 'الصياغة مرتبكة، الفقرة الثانية تحتاج تكثيفاً نقدياً صارماً.',
   },
   {
-    target: 'الدبسا',
-    intruderDisplay: 'رمّانة',
+    target: 'السارد',
+    intruderDisplay: 'المُقارِن',
     intruderAgent: 'comparator',
     intruderContent: 'مقارنة: الخيار (أ) يتفوّق على (ب) في ثلاثة محاور من أصل خمسة.',
   },
   {
     target: 'المصمم',
-    intruderDisplay: 'عبدان',
-    intruderAgent: 'abdan',
+    intruderDisplay: 'الباحث',
+    intruderAgent: 'research',
     intruderContent: 'خلاصة المراجعة المنهجية: الفجوة البحثية تتركّز في ثلاثة محاور.',
   },
 ];
@@ -108,11 +108,15 @@ describe('persona integrity across specialists', () => {
       // 1. Target's base prompt is present unchanged.
       expect(sys).toContain(base as string);
 
-      // 2. Identity directive names the target specialist. (BUG-2 FIX: directive
-      // now opens with a bilingual banner instead of "أنت …".)
-      expect(sys.startsWith('=== هوية الوكيل / AGENT IDENTITY')).toBe(true);
+      // 2. B-1 Identity Lock: directive present and names the target specialist.
+      // Identity is now LAST (not first) so user messages cannot override it.
+      expect(sys).toContain('=== هوية الوكيل / AGENT IDENTITY');
       expect(sys).toContain('تقمّص');
       expect(sys).toContain(`أنت ${c.target}`);
+      // Verify identity is after the base prompt (i.e., placed last)
+      const baseIdx = sys.indexOf(base as string);
+      const identityIdx = sys.lastIndexOf('=== هوية الوكيل / AGENT IDENTITY');
+      expect(identityIdx).toBeGreaterThan(baseIdx);
 
       // 3. Closing reinforcement names the target specialist.
       expect(sys).toContain(`تذكير: أنت ${c.target}`);

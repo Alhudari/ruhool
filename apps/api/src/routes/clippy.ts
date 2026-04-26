@@ -2,6 +2,25 @@ import type { Hono } from 'hono';
 import type { StoreData } from '../store/types.js';
 import { AnthropicProvider } from '../services/llm/index.js';
 
+export interface ClippyTourFeedback {
+  id: string;
+  stepId: string;
+  stepTitle: string;
+  feedback: string;
+  date: string;
+}
+
+export function parseClippyTourFeedback(text: string): Omit<ClippyTourFeedback, 'id' | 'date'>[] {
+  const results: Omit<ClippyTourFeedback, 'id' | 'date'>[] = [];
+  const regex = /\[TOUR_FEEDBACK\s+stepId="([^"]*)"(?:\s+stepTitle="([^"]*)")?\]([\s\S]*?)\[\/TOUR_FEEDBACK\]/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const feedback = match[3].trim();
+    if (feedback) results.push({ stepId: match[1], stepTitle: match[2] ?? match[1], feedback });
+  }
+  return results;
+}
+
 export interface ClippyRoutesDeps {
   getStore: () => StoreData;
   saveStore: () => void;
@@ -24,7 +43,11 @@ export function registerClippyRoutes(app: Hono, deps: ClippyRoutesDeps): void {
       if (!anthropicCache.current) anthropicCache.current = new AnthropicProvider(anthropicRow.apiKey, anthropicRow.baseUrl || undefined);
 
       const sys = builtinSystemPrompts.clippy || '';
-      const userMsg = `أصدر quip واحد فقط: دعابة خفيفة أو تحفيز قصير. سطر واحد، أقل من 80 حرف، بدون علامات اقتباس.\n\nآخر quips (لا تكررها): ${recentQuips.slice(-3).join(' | ') || '(لا يوجد)'}`;
+      // Detect language preference from store (responseLength setting also stored, language is separate)
+      const lang = (store as unknown as { language?: string }).language ?? 'ar';
+      const userMsg = lang === 'en'
+        ? `Issue ONE quip: a gentle joke or short motivation. One line, under 80 chars, no quotes. **Reply in English only.**\n\nRecent quips (don't repeat): ${recentQuips.slice(-3).join(' | ') || '(none)'}`
+        : `أصدر quip واحد فقط: دعابة خفيفة أو تحفيز قصير. سطر واحد، أقل من 80 حرف، بدون علامات اقتباس.\n\nآخر quips (لا تكررها): ${recentQuips.slice(-3).join(' | ') || '(لا يوجد)'}`;
 
       let out = '';
       for await (const chunk of anthropicCache.current.chat({
@@ -52,6 +75,30 @@ export function registerClippyRoutes(app: Hono, deps: ClippyRoutesDeps): void {
     const store = getStore();
     const s = ((store as unknown as { clippySettings?: { quipsEnabled?: boolean; intervalMinutes?: number } }).clippySettings) || {};
     return c.json({ quipsEnabled: s.quipsEnabled ?? true, intervalMinutes: s.intervalMinutes ?? 4 });
+  });
+
+  // Tour feedback routes
+  app.get('/api/clippy/tour-feedback', (c) => {
+    const store = getStore();
+    return c.json((store as unknown as { clippyTourFeedback?: ClippyTourFeedback[] }).clippyTourFeedback ?? []);
+  });
+
+  app.delete('/api/clippy/tour-feedback/:id', (c) => {
+    const { id } = c.req.param();
+    const store = getStore();
+    const s = store as unknown as { clippyTourFeedback?: ClippyTourFeedback[] };
+    const before = s.clippyTourFeedback?.length ?? 0;
+    s.clippyTourFeedback = (s.clippyTourFeedback ?? []).filter((f) => f.id !== id);
+    if ((s.clippyTourFeedback?.length ?? 0) === before) return c.json({ error: 'not found' }, 404);
+    saveStore();
+    return c.json({ ok: true });
+  });
+
+  app.delete('/api/clippy/tour-feedback', (c) => {
+    const store = getStore();
+    (store as unknown as { clippyTourFeedback?: ClippyTourFeedback[] }).clippyTourFeedback = [];
+    saveStore();
+    return c.json({ ok: true });
   });
 
   app.put('/api/clippy/settings', async (c) => {

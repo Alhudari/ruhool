@@ -2,6 +2,7 @@
 // Seeds empty arrays, Experiments category, built-in tags, prompt overrides.
 
 import type { StoreData } from './types.js';
+import { DEFAULT_MIND_BLOCK, DEFAULT_AGENT_INTEGRATIONS } from '@ruhool/core';
 
 export const EXPERIMENTS_CATEGORY_ID = 'builtin:experiments';
 
@@ -27,6 +28,18 @@ export function applyStoreDefaults(
   if (!store.libraryCategories) store.libraryCategories = [];
   if (!store.libraryTags) store.libraryTags = [];
   if (!store.libraryItemMeta) store.libraryItemMeta = {};
+  if (!store.readingSessions) store.readingSessions = [];
+  if (!store.pageAnalyses) store.pageAnalyses = [];
+  if (!store.agentNameOverrides) store.agentNameOverrides = {};
+  // Prefer the new field; only seed it when neither field has data so we
+  // don't clobber legacy data still waiting on migration 007.
+  if (!store.alMulakhkhisSettings && !store.shwashaSettings) {
+    store.alMulakhkhisSettings = {
+      mindBlock: DEFAULT_MIND_BLOCK,
+      agentIntegrations: DEFAULT_AGENT_INTEGRATIONS,
+      defaultLanguage: 'en',
+    };
+  }
 
   if (!store.libraryCategories!.find((c) => c.id === EXPERIMENTS_CATEGORY_ID)) {
     store.libraryCategories!.push({
@@ -54,6 +67,16 @@ export function applyStoreDefaults(
       });
     }
     opts.saveStore();
+  }
+
+  // B-5: backfill retry fields for existing AgentTaskRecords
+  for (const t of (store.agentTasks ?? [])) {
+    if (t.retryCount === undefined) t.retryCount = 0;
+    if (t.maxRetries === undefined) t.maxRetries = 3;
+    if (t.nextRetryAt === undefined) t.nextRetryAt = null;
+    if (t.timeoutMs === undefined) t.timeoutMs = null;
+    if (t.lastError === undefined) t.lastError = null;
+    if (t.idempotencyKey === undefined) t.idempotencyKey = null;
   }
 
   let overridesRestored = 0;

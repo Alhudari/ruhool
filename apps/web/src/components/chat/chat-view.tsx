@@ -13,6 +13,7 @@ import { ResultCard, isResearchResult } from './result-card';
 import { TaskProgressCard } from './task-progress-card';
 import { ChatGroupHeader } from './chat-group-header';
 import { TypingIndicator } from './typing-indicator';
+import { CostPill } from './CostPill';
 import { ArtifactPreview } from '@/components/workflow-runs/artifact-preview';
 import type { WorkflowArtifact } from '@/hooks/use-workflow-sse';
 
@@ -24,33 +25,48 @@ interface AgentDisplayInfo {
 }
 
 const BUILTIN_AGENT_DISPLAY: Record<string, AgentDisplayInfo> = {
-  manager: { name: { en: "Al-Ra'i", ar: 'الراعي' }, color: 'bg-amber-500/20 text-amber-600 dark:text-amber-400', bgColor: 'bg-amber-500', initial: 'ع' },
-  research: { name: { en: 'Abdan', ar: 'عبدان' }, color: 'bg-purple-500/20 text-purple-600 dark:text-purple-400', bgColor: 'bg-purple-500', initial: 'ع' },
-  'reading-helper': { name: { en: 'Shwasha', ar: 'شواشة' }, color: 'bg-blue-500/20 text-blue-600 dark:text-blue-400', bgColor: 'bg-blue-500', initial: 'ش' },
-  'writing-critic': { name: { en: 'Al-Safra', ar: 'الصفرا' }, color: 'bg-green-500/20 text-green-600 dark:text-green-400', bgColor: 'bg-green-500', initial: 'ص' },
-  comparator: { name: { en: 'Rammana', ar: 'رمّانة' }, color: 'bg-red-500/20 text-red-600 dark:text-red-400', bgColor: 'bg-red-500', initial: 'ر' },
+  manager: { name: { en: "Al-Ra'i", ar: 'الراعي' }, color: 'bg-amber-500/20 text-amber-600 dark:text-amber-400', bgColor: 'bg-amber-500', initial: 'ر' },
+  doctor: { name: { en: 'Al-Duktor', ar: 'الدكتور' }, color: 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400', bgColor: 'bg-indigo-500', initial: 'د' },
+  research: { name: { en: 'Al-Bahith', ar: 'الباحث' }, color: 'bg-purple-500/20 text-purple-600 dark:text-purple-400', bgColor: 'bg-purple-500', initial: 'ب' },
+  'reading-helper': { name: { en: 'Al-Mulakhkhis', ar: 'المُلخِّص' }, color: 'bg-blue-500/20 text-blue-600 dark:text-blue-400', bgColor: 'bg-blue-500', initial: 'خ' },
+  'writing-critic': { name: { en: 'Al-Naqid', ar: 'الناقد' }, color: 'bg-green-500/20 text-green-600 dark:text-green-400', bgColor: 'bg-green-500', initial: 'ن' },
+  comparator: { name: { en: 'Al-Muqarin', ar: 'المُقارِن' }, color: 'bg-red-500/20 text-red-600 dark:text-red-400', bgColor: 'bg-red-500', initial: 'ق' },
   architect: { name: { en: 'Al-Musammim', ar: 'المصمم' }, color: 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400', bgColor: 'bg-yellow-500', initial: 'م' },
-  'content-creator': { name: { en: 'Al-Dabsa', ar: 'الدبسا' }, color: 'bg-pink-500/20 text-pink-600 dark:text-pink-400', bgColor: 'bg-pink-500', initial: 'د' },
-  creative: { name: { en: 'The Creative', ar: '\u0627\u0644\u0643\u0631\u064a\u064a\u062a\u0641' }, color: 'bg-rose-500/20 text-rose-600 dark:text-rose-400', bgColor: 'bg-rose-500', initial: '\u0643' },
-  'tasks-agent': { name: { en: 'Maham', ar: '\u0645\u0647\u0627\u0645' }, color: 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400', bgColor: 'bg-emerald-500', initial: '\u0645' },
-  analyst: { name: { en: 'Al-Muhallil', ar: 'المحلل' }, color: 'bg-teal-500/20 text-teal-600 dark:text-teal-400', bgColor: 'bg-teal-500', initial: 'م' },
-  munazzim: { name: { en: 'Al-Munazzim', ar: 'المنظّم' }, color: 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400', bgColor: 'bg-indigo-500', initial: 'م' },
-  mushakhkhis: { name: { en: 'Al-Mushakhkhis', ar: 'المشخّص' }, color: 'bg-red-500/20 text-red-600 dark:text-red-400', bgColor: 'bg-red-500', initial: 'م' },
+  'content-creator': { name: { en: 'Al-Sarid', ar: 'السارد' }, color: 'bg-pink-500/20 text-pink-600 dark:text-pink-400', bgColor: 'bg-pink-500', initial: 'س' },
+  creative: { name: { en: "Al-Mubdi'", ar: 'المبدع' }, color: 'bg-rose-500/20 text-rose-600 dark:text-rose-400', bgColor: 'bg-rose-500', initial: 'ب' },
+  'tasks-agent': { name: { en: 'Maham', ar: 'مهام' }, color: 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400', bgColor: 'bg-emerald-500', initial: 'م' },
+  analyst: { name: { en: 'Al-Muhallil', ar: 'المحلل' }, color: 'bg-teal-500/20 text-teal-600 dark:text-teal-400', bgColor: 'bg-teal-500', initial: 'ح' },
+  munazzim: { name: { en: 'Al-Munazzim', ar: 'المنظّم' }, color: 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400', bgColor: 'bg-indigo-500', initial: 'ن' },
+  mushakhkhis: { name: { en: 'Al-Mushakhkhis', ar: 'المشخّص' }, color: 'bg-red-500/20 text-red-600 dark:text-red-400', bgColor: 'bg-red-500', initial: 'ش' },
+  'research-companion': { name: { en: 'Al-Khuwy', ar: 'الخوي' }, color: 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400', bgColor: 'bg-emerald-500', initial: 'خ' },
+  fatin: { name: { en: 'Al-Fatin', ar: 'الفطين' }, color: 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400', bgColor: 'bg-cyan-500', initial: 'ف' },
+  playmaker: { name: { en: 'Al-Mumarrir', ar: 'المُمرر' }, color: 'bg-violet-500/20 text-violet-600 dark:text-violet-400', bgColor: 'bg-violet-500', initial: 'م' },
+  mudawwin: { name: { en: 'Al-Mudawwin', ar: 'المُدوّن' }, color: 'bg-amber-500/20 text-amber-600 dark:text-amber-400', bgColor: 'bg-amber-500', initial: 'د' },
+  sayyaq: { name: { en: 'Al-Katib', ar: 'الكاتب' }, color: 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400', bgColor: 'bg-cyan-500', initial: 'ك' },
+  clippy: { name: { en: 'Clippy', ar: 'Clippy' }, color: 'bg-sky-500/20 text-sky-600 dark:text-sky-400', bgColor: 'bg-sky-500', initial: 'C' },
 };
 
 const ALL_BUILTIN_AGENTS = [
-  { id: 'manager', name: { en: "Al-Ra'i", ar: 'الراعي' }, desc: { en: 'The guide', ar: 'القائد' } },
-  { id: 'research', name: { en: 'Abdan', ar: 'عبدان' }, desc: { en: 'Deep research', ar: 'بحث عميق' } },
-  { id: 'reading-helper', name: { en: 'Shwasha', ar: 'شواشة' }, desc: { en: 'Reading helper', ar: 'مساعد القراءة' } },
-  { id: 'writing-critic', name: { en: 'Al-Safra', ar: 'الصفرا' }, desc: { en: 'Writing critic', ar: 'ناقدة الكتابة' } },
-  { id: 'comparator', name: { en: 'Rammana', ar: 'رمّانة' }, desc: { en: 'Comparator', ar: 'المقارنة' } },
+  { id: 'manager', name: { en: "Al-Ra'i", ar: 'الراعي' }, desc: { en: 'PhD workspace CEO', ar: 'مدير غرفة الدكتوراه' } },
+  { id: 'doctor', name: { en: 'Al-Duktor', ar: 'الدكتور' }, desc: { en: 'Life workspace CEO', ar: 'مدير غرفة الحياة' } },
+  { id: 'research', name: { en: 'Al-Bahith', ar: 'الباحث' }, desc: { en: 'Deep research', ar: 'بحث عميق' } },
+  { id: 'reading-helper', name: { en: 'Al-Mulakhkhis', ar: 'المُلخِّص' }, desc: { en: 'Reading + summarization', ar: 'قراءة وتلخيص' } },
+  { id: 'writing-critic', name: { en: 'Al-Naqid', ar: 'الناقد' }, desc: { en: 'Writing critic', ar: 'ناقد الكتابة' } },
+  { id: 'comparator', name: { en: 'Al-Muqarin', ar: 'المُقارِن' }, desc: { en: 'Compare papers', ar: 'مقارنة الأوراق' } },
   { id: 'architect', name: { en: 'Al-Musammim', ar: 'المصمم' }, desc: { en: 'Agent architect', ar: 'مدير الوكلاء' } },
-  { id: 'content-creator', name: { en: 'Al-Dabsa', ar: 'الدبسا' }, desc: { en: 'Content creator', ar: 'صناعة المحتوى' } },
-  { id: 'creative', name: { en: 'The Creative', ar: '\u0627\u0644\u0643\u0631\u064a\u064a\u062a\u0641' }, desc: { en: 'Video creator', ar: '\u0635\u0627\u0646\u0639 \u0627\u0644\u0641\u064a\u062f\u064a\u0648' } },
-  { id: 'tasks-agent', name: { en: 'Maham', ar: '\u0645\u0647\u0627\u0645' }, desc: { en: 'Task manager', ar: '\u0645\u062f\u064a\u0631 \u0627\u0644\u0645\u0647\u0627\u0645' } },
-  { id: 'analyst', name: { en: 'Al-Muhallil', ar: 'المحلل' }, desc: { en: 'Subscription & cost analyst', ar: 'محلل الاشتراكات والتكاليف' } },
-  { id: 'munazzim', name: { en: 'Al-Munazzim', ar: 'المنظّم' }, desc: { en: 'Conversations & projects', ar: 'إدارة المحادثات والمشاريع' } },
-  { id: 'mushakhkhis', name: { en: 'Al-Mushakhkhis', ar: 'المشخّص' }, desc: { en: 'System diagnostics', ar: 'فحص النظام والمفاتيح' } },
+  { id: 'content-creator', name: { en: 'Al-Sarid', ar: 'السارد' }, desc: { en: 'Arabic content', ar: 'المحتوى العربي' } },
+  { id: 'creative', name: { en: "Al-Mubdi'", ar: 'المبدع' }, desc: { en: 'Video creator', ar: 'صانع الفيديو' } },
+  { id: 'tasks-agent', name: { en: 'Maham', ar: 'مهام' }, desc: { en: 'Task manager', ar: 'مدير المهام' } },
+  { id: 'analyst', name: { en: 'Al-Muhallil', ar: 'المحلل' }, desc: { en: 'Cost analyst', ar: 'محلل التكاليف' } },
+  { id: 'munazzim', name: { en: 'Al-Munazzim', ar: 'المنظّم' }, desc: { en: 'Conversations & projects', ar: 'المحادثات والمشاريع' } },
+  { id: 'mushakhkhis', name: { en: 'Al-Mushakhkhis', ar: 'المشخّص' }, desc: { en: 'System diagnostics', ar: 'فحص النظام' } },
+  { id: 'research-companion', name: { en: 'Al-Khuwy', ar: 'الخوي' }, desc: { en: 'PhD companion', ar: 'رفيق الدكتوراه' } },
+  { id: 'fatin', name: { en: 'Al-Fatin', ar: 'الفطين' }, desc: { en: 'Vision agent', ar: 'وكيل الرؤية' } },
+  { id: 'playmaker', name: { en: 'Al-Mumarrir', ar: 'المُمرر' }, desc: { en: 'Routing intelligence', ar: 'الذكاء التوجيهي' } },
+  { id: 'mudawwin', name: { en: 'Al-Mudawwin', ar: 'المُدوّن' }, desc: { en: 'Meeting tracker', ar: 'متابع الاجتماعات' } },
+  { id: 'sayyaq', name: { en: 'Al-Katib', ar: 'الكاتب' }, desc: { en: 'Writing assistant', ar: 'مساعد الكتابة' } },
+  { id: 'clippy', name: { en: 'Clippy', ar: 'Clippy' }, desc: { en: 'Onboarding assistant', ar: 'مساعد الإعداد' } },
+
 ];
 
 const COLOR_OPTIONS = [
@@ -85,6 +101,13 @@ interface Message {
   artifacts?: WorkflowArtifact[];
   streaming?: boolean;
   errored?: boolean;
+  dispatchId?: string;
+  dispatchStep?: 'route' | 'dept-selected' | 'worker' | 'synthesis' | 'final';
+  dispatchChain?: string[];
+  costUsd?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+
 }
 
 /** CHAT_V2 Wave D client-side feature flag. Default ON — Wave B's backend is live,
@@ -133,10 +156,11 @@ interface ChatViewProps {
   initialMessage?: string;
   conversationId?: string | null;
   agentId?: string;
+  projectId?: string;
   onConversationCreated?: (id: string) => void;
 }
 
-export function ChatView({ initialMessage, conversationId: propConvId, agentId, onConversationCreated }: ChatViewProps) {
+export function ChatView({ initialMessage, conversationId: propConvId, agentId, projectId, onConversationCreated }: ChatViewProps) {
   const { language, isStreaming, setIsStreaming } = useAppStore();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -148,12 +172,16 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
   // CHAT_V2 Wave D: per-agent "typing…" indicator list. Populated on message.start,
   // drained on message.done/error.
   const [activeStreamingAgents, setActiveStreamingAgents] = useState<string[]>([]);
+  // A-1: thinking agent — shows "يفكر..." before text starts
+  const [thinkingAgentId, setThinkingAgentId] = useState<string | null>(null);
+  // A-1: reconnect notice
+  const [reconnectAttempt, setReconnectAttempt] = useState<number | null>(null);
   // For sequential multi-mention follow-up
   const nextAgentToTriggerRef = useRef<string | null>(null);
   // Targeted agents for next message (multi-select via participant chips)
   const [targetedAgents, setTargetedAgents] = useState<Set<string>>(new Set());
   // Chain context: when an agent @mentions another, track depth + reason
-  const chainContextRef = useRef<{ depth: number; reason: string; calledBy: string; replyToMessageId?: string } | null>(null);
+  const chainContextRef = useRef<{ depth: number; reason: string; calledBy: string; replyToMessageId?: string; chainMentions?: string[] } | null>(null);
   // Reply-to state: when set, next message is scoped to that specific message
   const [replyingTo, setReplyingTo] = useState<{ id: string; authorName: string; authorAgentId?: string; preview: string } | null>(null);
   // Ref mirror of isStreaming so chain follow-ups see the real-time value and aren't
@@ -198,11 +226,19 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
   }, [targetedAgents.size]);
   // Disambiguation popup: shows when user types an agent's name without @
   const [nameSuggestions, setNameSuggestions] = useState<Array<{ name: string; id: string }>>([]);
-  // Topic-based suggestions (when user mentions a TOPIC like "video" → suggest الكرييتف)
+  // Topic-based suggestions (when user mentions a TOPIC like "video" → suggest المبدع)
   const [topicSuggestions, setTopicSuggestions] = useState<Array<{ name: string; id: string; reason: string }>>([]);
   const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<Set<string>>(new Set());
   const nameDetectAbortRef = useRef<AbortController | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<Array<{ id: string; type: string; title: { ar: string; en: string }; description: string; payload?: Record<string, unknown> }>>([]);
+  const [reportToasts, setReportToasts] = useState<Array<{ id: string; kind: 'success' | 'error'; msg: string }>>([]);
+
+  // Each report toast auto-dismisses after 6s. Errors stay 10s.
+  const showToast = useCallback((kind: 'success' | 'error', msg: string) => {
+    const id = crypto.randomUUID();
+    setReportToasts((prev) => [...prev, { id, kind, msg }]);
+    setTimeout(() => setReportToasts((prev) => prev.filter((t) => t.id !== id)), kind === 'error' ? 10_000 : 6_000);
+  }, []);
 
   const resolveApproval = useCallback(async (id: string, action: 'approve' | 'reject') => {
     try {
@@ -221,6 +257,7 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
   const [mentionFilter, setMentionFilter] = useState('');
   const [mentionStartIndex, setMentionStartIndex] = useState(-1);
   const [activeParticipantMenu, setActiveParticipantMenu] = useState<string | null>(null);
+  const [responseLength, setResponseLength] = useState<'short' | 'medium' | 'long'>('medium');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const cancelRef = useRef<(() => void) | null>(null);
@@ -231,6 +268,53 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
   const addAgentRef = useRef<HTMLDivElement>(null);
   const mentionPopupRef = useRef<HTMLDivElement>(null);
   const isRTL = language === 'ar';
+
+  // Load + sync response length preference
+  useEffect(() => {
+    apiFetch<{ responseLength: 'short' | 'medium' | 'long' }>('/api/settings/response-length')
+      .then((d) => setResponseLength(d.responseLength))
+      .catch(() => {});
+  }, []);
+
+  // F-018: cleanup all long-lived resources on unmount
+  useEffect(() => {
+    return () => {
+      // Abort active SSE stream
+      if (cancelRef.current) {
+        try { cancelRef.current(); } catch { /* ignore */ }
+        cancelRef.current = null;
+      }
+      // Stop recording interval
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      // Stop SpeechRecognition if active
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch { /* ignore */ }
+        recognitionRef.current = null;
+      }
+      // Stop MediaRecorder + release tracks
+      if (mediaRecorderRef.current) {
+        try {
+          if (mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop();
+          const stream = mediaRecorderRef.current.stream;
+          if (stream) stream.getTracks().forEach(t => t.stop());
+        } catch { /* ignore */ }
+        mediaRecorderRef.current = null;
+      }
+    };
+  }, []);
+
+  const cycleResponseLength = useCallback(() => {
+    setResponseLength((prev) => {
+      const next = prev === 'short' ? 'medium' : prev === 'medium' ? 'long' : 'short';
+      apiFetch('/api/settings/response-length', {
+        method: 'PUT', body: JSON.stringify({ responseLength: next }),
+      }).catch(() => {});
+      return next;
+    });
+  }, []);
 
   // Fetch custom agents to merge into display map
   useEffect(() => {
@@ -357,11 +441,20 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
     }
   }, [convId, agentDisplay, language, isRTL]);
 
+  // F-015: image upload limits (must mirror server-side limits)
+  const MAX_IMAGES = 8;
+  const MAX_IMAGE_BYTES = 6 * 1024 * 1024; // 6 MB per image
+  const ALLOWED_IMAGE_MIME = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
   // Handle files from attach/camera → read as base64, add to pendingImages
   const handleImageFiles = useCallback(async (files: FileList | File[]) => {
     const arr: Array<{ id: string; base64: string; mimeType: string; previewUrl: string; name: string }> = [];
-    for (const f of Array.from(files)) {
-      if (!f.type.startsWith('image/')) continue;
+    const fileList = Array.from(files);
+    let skipped = 0;
+    for (const f of fileList) {
+      if (pendingImages.length + arr.length >= MAX_IMAGES) { skipped++; continue; }
+      if (!ALLOWED_IMAGE_MIME.includes(f.type)) { skipped++; continue; }
+      if (f.size > MAX_IMAGE_BYTES) { skipped++; continue; }
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const r = new FileReader();
         r.onload = () => resolve(r.result as string);
@@ -371,8 +464,12 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
       const base64 = dataUrl.replace(/^data:[^;]+;base64,/, '');
       arr.push({ id: crypto.randomUUID(), base64, mimeType: f.type, previewUrl: dataUrl, name: f.name });
     }
+    if (skipped > 0 && typeof window !== 'undefined') {
+      // Show a brief alert; user can see the message in-place
+      console.warn(`Skipped ${skipped} image(s): exceeded limits or unsupported type`);
+    }
     if (arr.length) setPendingImages((prev) => [...prev, ...arr]);
-  }, []);
+  }, [pendingImages.length]);
 
   // Insert @mention into input
   const insertMention = useCallback((mentionAgentId: string) => {
@@ -396,12 +493,12 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
     nameDetectAbortRef.current = controller;
     const handle = setTimeout(async () => {
       try {
-        const r = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001'}/api/chat/detect-agent-names`, {
-          method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text: input }), signal: controller.signal,
-        });
-        if (!r.ok) return;
-        const data = await r.json() as { matches: Array<{ name: string; id: string }>; topicMatches?: Array<{ name: string; id: string; reason: string }> };
+        // F-019: use shared apiFetch which respects NEXT_PUBLIC_API_URL + auth token
+        const data = await apiFetch<{ matches: Array<{ name: string; id: string }>; topicMatches?: Array<{ name: string; id: string; reason: string }> }>(
+          '/api/chat/detect-agent-names',
+          { method: 'POST', body: JSON.stringify({ text: input }), signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
         // Don't suggest the active agent itself, or already in chat, or dismissed
         const filterFn = (m: { id: string; name: string }) =>
           m.id !== activeAgentId && !input.includes('@' + m.name)
@@ -458,7 +555,7 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
   }, [participants]);
 
   const sendMessage = useCallback(
-    (text: string, overrideAgentId?: string, chainDepth?: number, replyToOverride?: { id: string; authorAgentId?: string } | null) => {
+    async (text: string, overrideAgentId?: string, chainDepth?: number, replyToOverride?: { id: string; authorAgentId?: string } | null, chainMentionsOverride?: string[]) => {
       // Use the ref so chain follow-ups scheduled via setTimeout see the CURRENT state,
       // not the stale `isStreaming` closure value from when the callback was created.
       if (isStreamingRef.current) return;
@@ -506,13 +603,57 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
       let sawV2 = false;
 
       const effectiveAgentId = overrideAgentId || agentId;
+
+      // Round 5 — hierarchical dispatch branch.
+      // When target is the CEO of a workspace (manager = PhD, doctor = Life)
+      // and no @mention is present in the final text, route through the
+      // dispatcher. It persists each step as a conversation message
+      // server-side, so we just refetch the message list after.
+      const isCeoTarget = effectiveAgentId === 'manager' || effectiveAgentId === 'doctor';
+      const hasMention = /@[؀-ۿa-zA-Z_-]+/.test(finalText);
+      if (isCeoTarget && !hasMention) {
+        try {
+          const cfg = await apiFetch<{ enabled?: boolean }>('/api/dispatch/config').catch(() => ({ enabled: false }));
+          if (cfg.enabled) {
+            let activeWs: string | null = null;
+            try { activeWs = window.localStorage.getItem('ruhool.active-workspace'); } catch { /* noop */ }
+            const resp = await apiFetch<{ conversationId?: string }>('/api/dispatch/chat', {
+              method: 'POST',
+              body: JSON.stringify({
+                message: finalText,
+                language,
+                conversationId: convId,
+                targetAgentId: effectiveAgentId,
+                workspaceId: activeWs ?? (effectiveAgentId === 'doctor' ? 'life' : 'phd'),
+              }),
+            });
+            const newId = resp.conversationId ?? convId;
+            if (newId && newId !== convId) {
+              setConvId(newId);
+              onConversationCreated?.(newId);
+            }
+            if (newId) {
+              const fresh = await apiFetch<Message[]>(`/api/conversations/${newId}/messages`).catch(() => null);
+              if (fresh) setMessages(fresh);
+            }
+            setIsStreaming(false);
+            setStreamingContent('');
+            return;
+          }
+        } catch {
+          // Fall through to legacy path on any failure.
+        }
+      }
+
       const cancel = apiStream(
         '/api/chat',
         {
           conversationId: convId,
           message: finalText,
           ...(effectiveAgentId ? { agentId: effectiveAgentId } : {}),
+          ...(projectId ? { projectId } : {}),
           ...(chainDepth ? { chainDepth } : {}),
+          ...(chainMentionsOverride && chainMentionsOverride.length > 0 ? { chainMentions: chainMentionsOverride } : {}),
           ...(activeReply?.id ? { replyToMessageId: activeReply.id } : {}),
           ...(pendingImages.length > 0 ? { images: pendingImages.map((img) => ({ base64: img.base64, mimeType: img.mimeType })) } : {}),
         },
@@ -530,6 +671,12 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
             if (d.participants) {
               setParticipants(d.participants as string[]);
             }
+          } else if (event === 'thinking') {
+            // A-1: server signals LLM is about to generate
+            setThinkingAgentId((d.agentId as string) || responseAgentId);
+          } else if (event === 'reconnecting') {
+            // A-1: connection dropped, retrying
+            setReconnectAttempt((d.attempt as number) || 1);
           } else if (event === 'text') {
             // BUG-1 FIX: if v2 is active, legacy `text` would produce a second
             // duplicate bubble at stream close. Drop it.
@@ -544,6 +691,22 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
           } else if (event === 'approval_request') {
             const list = (d.approvals as Array<{ id: string; type: string; title: { ar: string; en: string }; description: string; payload?: Record<string, unknown> }>) || [];
             setPendingApprovals((prev) => [...prev, ...list]);
+          } else if (event === 'reports') {
+            const results = (d.results as Array<{ action: string; name?: string; id?: string; error?: string }>) || [];
+            for (const r of results) {
+              const verb = r.action === 'create' ? 'أُنشئ' : r.action === 'update' ? 'حُدِّث' : r.action === 'toggle' ? 'تبدّل حالة' : r.action === 'send' ? 'أُرسل' : r.action === 'delete' ? 'حُذف' : r.action;
+              const label = r.name ?? r.id ?? '';
+              const msg = r.error ? `فشل ${r.action}: ${r.error}` : `تقرير: ${verb} ${label ? `"${label}"` : ''}`.trim();
+              showToast(r.error ? 'error' : 'success', msg);
+            }
+          } else if (event === 'tasks') {
+            const list = (d.tasks as Array<{ title?: string; id?: string }>) || [];
+            if (list.length === 1) showToast('success', `📋 أُضيفت مهمة: "${list[0].title ?? ''}"`);
+            else if (list.length > 1) showToast('success', `📋 أُضيفت ${list.length} مهام`);
+          } else if (event === 'notifications') {
+            const list = (d.notifications as Array<{ title?: string; id?: string }>) || [];
+            if (list.length === 1) showToast('success', `🔔 تنبيه: "${list[0].title ?? ''}"`);
+            else if (list.length > 1) showToast('success', `🔔 ${list.length} تنبيهات جديدة`);
           } else if (event === 'next_agent_queued') {
             nextAgentToTriggerRef.current = d.agentId as string;
             chainContextRef.current = {
@@ -551,6 +714,7 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
               reason: (d.reason as string) || 'multi-mention',
               calledBy: (d.calledBy as string) || '',
               replyToMessageId: (d.replyToMessageId as string) || undefined,
+              chainMentions: Array.isArray(d.chainMentions) ? (d.chainMentions as string[]) : undefined,
             };
           } else if (event === 'message.start' && isChatV2Enabled()) {
             // BUG-1 FIX: mark v2 active so we drop any subsequent legacy `text`
@@ -583,6 +747,7 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
               }
             }
           } else if (event === 'message.delta' && isChatV2Enabled()) {
+            setThinkingAgentId(null); // A-1: text arriving, stop thinking indicator
             const msgId = d.messageId as string;
             const chunk = (d.text as string) || '';
             if (msgId && chunk) {
@@ -651,6 +816,8 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
           setStreamingContent('');
           setIsStreaming(false);
           setActiveStreamingAgents([]);
+          setThinkingAgentId(null);
+          setReconnectAttempt(null);
           setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
           collected = '';
           setTimeout(() => inputRef.current?.focus(), 50);
@@ -673,7 +840,13 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
                 ? `(تلقائي) دور ${agentDisplay[next]?.name[language] || next}: راجع آخر ردّ من ${prevName} وقم بدورك.`
                 : `(auto) ${agentDisplay[next]?.name[language] || next}: review ${prevName}'s last reply and do your part.`);
             setTimeout(() => {
-              sendMessage(followUp, next, ctx?.depth, ctx?.replyToMessageId ? { id: ctx.replyToMessageId, authorAgentId: responseAgentId } : null);
+              sendMessage(
+                followUp,
+                next,
+                ctx?.depth,
+                ctx?.replyToMessageId ? { id: ctx.replyToMessageId, authorAgentId: responseAgentId } : null,
+                ctx?.chainMentions,
+              );
             }, 600);
           }
         },
@@ -982,6 +1155,30 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
         </div>
       )}
 
+      {/* Report action toasts — transient confirmations when an agent
+          executes [REPORT:*] intents. */}
+      {reportToasts.length > 0 && (
+        <div className="fixed top-4 inset-x-0 z-50 flex flex-col items-center gap-2 pointer-events-none">
+          {reportToasts.map((t) => (
+            <div
+              key={t.id}
+              className={`pointer-events-auto max-w-md px-4 py-2.5 rounded-lg shadow-lg text-sm border animate-in fade-in slide-in-from-top-2 flex items-center gap-3 ${
+                t.kind === 'error'
+                  ? 'bg-red-50 border-red-200 text-red-800'
+                  : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              }`}
+            >
+              <span className="flex-1">📨 {t.msg}</span>
+              <button
+                onClick={() => setReportToasts((prev) => prev.filter((x) => x.id !== t.id))}
+                aria-label="إغلاق التنبيه"
+                className="opacity-60 hover:opacity-100 leading-none text-lg"
+              >×</button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Approval popup — appears in chat when an agent requests permission */}
       {pendingApprovals.length > 0 && (
         <div className="px-4 pt-4">
@@ -1035,13 +1232,23 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
             const isHandoff = msg.kind === 'handoff';
             const isProgress = msg.kind === 'progress' || (msg.streaming && !msg.content);
             const isArtifact = msg.kind === 'artifact';
+            // Round 5 — dispatch-in-chat bubble variants.
+            const isDispatchRoute = msg.dispatchStep === 'dept-selected' || msg.dispatchStep === 'route';
+            const isDispatchWorker = msg.dispatchStep === 'worker';
+            const isDispatchSynth = msg.dispatchStep === 'synthesis';
             const timestamp = formatRelativeTime(msg.createdAt, isRTL);
             return (
               <div
                 key={msg.id}
                 className={cn(
                   'group flex gap-3 relative',
-                  isHandoff && 'opacity-75'
+                  isHandoff && 'opacity-75',
+                  // Route captions: indent, no avatar, small muted text.
+                  isDispatchRoute && 'ms-10 opacity-70',
+                  // Worker drafts: indent, slightly muted background.
+                  isDispatchWorker && 'ms-10',
+                  // Synthesis: bolder left border to stand out.
+                  isDispatchSynth && 'border-s-2 border-accent/40 ps-3',
                 )}
               >
                 <div
@@ -1066,6 +1273,19 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
                       <p className="text-[10px] text-on-surface-tertiary" dir={language === 'ar' ? 'ltr' : 'rtl'}>
                         {assistantTranslit}
                       </p>
+                    )}
+                    {msg.dispatchStep && (
+                      <span className={cn(
+                        'text-[9px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wide',
+                        msg.dispatchStep === 'synthesis' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' :
+                        msg.dispatchStep === 'worker' ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400' :
+                        'bg-muted text-muted-foreground'
+                      )}>
+                        {msg.dispatchStep === 'synthesis' ? (isRTL ? 'تجميع' : 'synthesis') :
+                         msg.dispatchStep === 'worker' ? (isRTL ? 'عامل' : 'worker') :
+                         msg.dispatchStep === 'dept-selected' ? (isRTL ? 'توجيه' : 'routing') :
+                         msg.dispatchStep}
+                      </span>
                     )}
                     {timestamp && (
                       <p className="text-[10px] text-on-surface-tertiary ml-auto shrink-0">
@@ -1105,6 +1325,21 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
                       {msg.artifacts.map((a, i) => (
                         <ArtifactPreview key={a.id || `${msg.id}-a-${i}`} artifact={a} isRTL={isRTL} />
                       ))}
+                    </div>
+                  )}
+                  {/* Round 5 — dispatch synthesis meta: cost + chain */}
+                  {isDispatchSynth && (
+                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      <CostPill
+                        inputTokens={msg.tokensIn}
+                        outputTokens={msg.tokensOut}
+                        usd={msg.costUsd}
+                      />
+                      {Array.isArray(msg.dispatchChain) && msg.dispatchChain.length > 0 && (
+                        <span className="text-[10px] text-on-surface-tertiary inline-flex items-center gap-1 font-mono">
+                          <bdi>{msg.dispatchChain.join(' ← ')}</bdi>
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1155,8 +1390,8 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
                   >
                     <Copy size={14} />
                   </button>
-                  {/* Retry — only on USER messages. Removes this message + everything
-                      after it, then re-sends it so the agent(s) reply again. */}
+                  {/* Retry — on USER messages: removes + resends.
+                      On ASSISTANT errored messages: removes + retriggers last user msg. */}
                   {msg.role === 'user' && (
                     <button
                       onClick={() => {
@@ -1165,13 +1400,30 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
                         if (idx < 0) return;
                         const userText = msg.content;
                         const userAgentId = msg.agentId;
-                        // Drop this user message and everything after it; sendMessage
-                        // will append a fresh copy and open a new stream.
                         setMessages((prev) => prev.slice(0, idx));
                         setTimeout(() => sendMessage(userText, userAgentId), 30);
                       }}
                       className="p-1.5 rounded-[var(--radius)] text-on-surface-tertiary hover:text-accent hover:bg-accent/10"
                       title={isRTL ? 'أعد الإرسال' : 'Resend'}
+                    >
+                      <RotateCcw size={14} />
+                    </button>
+                  )}
+                  {/* A-1: retry on failed assistant messages */}
+                  {msg.role === 'assistant' && msg.errored && (
+                    <button
+                      onClick={() => {
+                        if (isStreamingRef.current) return;
+                        const idx = messages.findIndex((m) => m.id === msg.id);
+                        // Find the last user message before this error
+                        const lastUser = [...messages.slice(0, idx)].reverse().find((m) => m.role === 'user');
+                        if (!lastUser) return;
+                        const userIdx = messages.findIndex((m) => m.id === lastUser.id);
+                        setMessages((prev) => prev.slice(0, userIdx));
+                        setTimeout(() => sendMessage(lastUser.content, lastUser.agentId), 30);
+                      }}
+                      className="p-1.5 rounded-[var(--radius)] text-red-400 hover:text-accent hover:bg-accent/10"
+                      title={isRTL ? 'أعد المحاولة' : 'Retry'}
                     >
                       <RotateCcw size={14} />
                     </button>
@@ -1200,6 +1452,30 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
                 );
               })}
 
+          {/* A-1: thinking indicator — before first token arrives */}
+          {thinkingAgentId && !activeStreamingAgents.includes(thinkingAgentId) && (() => {
+            const info = agentDisplay[thinkingAgentId] || BUILTIN_AGENT_DISPLAY.manager;
+            return (
+              <div className="flex gap-3 items-center px-1">
+                <div className={cn('w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-white text-xs font-medium shadow-sm animate-pulse', info.bgColor)}>
+                  {info.initial}
+                </div>
+                <p className="text-xs italic text-on-surface-tertiary animate-pulse">
+                  {isRTL ? `${info.name.ar} يفكر…` : `${info.name.en} is thinking…`}
+                </p>
+              </div>
+            );
+          })()}
+
+          {/* A-1: reconnect notice */}
+          {reconnectAttempt !== null && (
+            <div className="flex justify-center">
+              <p className="text-xs text-amber-500 bg-amber-500/10 px-3 py-1 rounded-full animate-pulse">
+                {isRTL ? `إعادة الاتصال… (محاولة ${reconnectAttempt}/3)` : `Reconnecting… (attempt ${reconnectAttempt}/3)`}
+              </p>
+            </div>
+          )}
+
           {/* Active background task cards */}
           {Array.from(activeTasks.entries()).map(([taskId]) => (
             <div key={taskId} className="flex gap-3">
@@ -1208,7 +1484,7 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-on-surface-tertiary mb-1">
-                  {isRTL ? 'عبدان' : 'Abdan'}
+                  {isRTL ? 'الباحث' : 'Al-Bahith'}
                 </p>
                 <TaskProgressCard
                   taskId={taskId}
@@ -1463,6 +1739,28 @@ export function ChatView({ initialMessage, conversationId: propConvId, agentId, 
               )}
               style={{ minHeight: '48px', maxHeight: '120px' }}
             />
+            {/* Response length toggle — bottom left corner */}
+            <div className={cn(
+              'absolute bottom-2 flex items-center',
+              isRTL ? 'right-2' : 'left-2'
+            )}>
+              <button
+                onClick={cycleResponseLength}
+                title={isRTL
+                  ? `طول الرد: ${responseLength === 'short' ? 'مختصر' : responseLength === 'medium' ? 'متوسط' : 'مطوّل'}`
+                  : `Response: ${responseLength}`}
+                className="flex items-center gap-1 px-2 py-1 rounded-[var(--radius)] text-[10px] font-medium transition-colors hover:bg-surface-secondary"
+                style={{
+                  color: responseLength === 'short' ? 'var(--color-amber-400, #f59e0b)'
+                    : responseLength === 'long' ? 'var(--color-blue-400, #60a5fa)'
+                    : 'var(--color-on-surface-tertiary)',
+                  background: responseLength !== 'medium' ? 'var(--color-surface-secondary, rgba(0,0,0,0.1))' : undefined,
+                }}
+              >
+                {responseLength === 'short' ? (isRTL ? 'م↓' : 'S') : responseLength === 'medium' ? (isRTL ? 'م↔' : 'M') : (isRTL ? 'م↑' : 'L')}
+              </button>
+            </div>
+
             <div className={cn(
               'absolute bottom-2 flex items-center gap-1',
               isRTL ? 'left-2' : 'right-2'

@@ -22,6 +22,16 @@ export function getOrCreateEncryptionKey(): Buffer {
     if (/^[0-9a-f]{64}$/i.test(fromEnv)) return Buffer.from(fromEnv, 'hex');
     return crypto.createHash('sha256').update(fromEnv).digest();
   }
+  // M6: in cloud (postgres-backed) mode, the local filesystem is ephemeral
+  // (Vercel) and the auto-generated key file would either fail to write OR
+  // produce a fresh key on every cold start — both make encrypted apiKeys
+  // permanently unreadable. Fail loud at boot so the deployment surfaces a
+  // clear "set ENCRYPTION_KEY" error instead of mysteriously losing secrets.
+  if (process.env.STORE_BACKEND === 'postgres') {
+    throw new Error(
+      '[sec] STORE_BACKEND=postgres requires ENCRYPTION_KEY env var (>=32 chars, or 64-char hex). The filesystem fallback is unsafe on serverless deployments — every cold start would generate a fresh key and previously-saved provider apiKeys would be permanently unreadable.',
+    );
+  }
   ensureDataDir();
   if (fs.existsSync(ENCRYPTION_KEY_FILE)) {
     return Buffer.from(fs.readFileSync(ENCRYPTION_KEY_FILE, 'utf-8').trim(), 'hex');

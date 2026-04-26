@@ -25,6 +25,9 @@ export interface ChatCallOptions {
   maxTokens?: number;
   /** Optional tool definitions (Anthropic only for now; others ignore). */
   tools?: AnthropicTool[];
+  /** F-008: abort signal — providers should pass this to fetch/SDK calls
+   *  so timeouts/disconnects actually cancel the upstream request. */
+  signal?: AbortSignal;
 }
 
 export type TextChunk = { type: 'text'; content: string };

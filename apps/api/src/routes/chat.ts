@@ -13,6 +13,19 @@ import crypto from 'node:crypto';
 import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { Logger } from 'pino';
+import { z } from 'zod';
+import { parseNaturalTime } from '../services/natural-time.js';
+import { sanitizeUserInput } from '../services/security/sanitize-input.js';
+import { redact } from '../services/security/redact.js';
+import { flag } from '../services/flags.js';
+import { shouldInjectReportActions, buildReportsContextBlock, REPORT_ACTIONS_PROMPT } from '../services/chat/report-actions.js';
+import { wrapToolResult } from '../services/security/trust-wrap.js';
+import { trimToTokenBudget, getContextWindow } from '../services/context/window.js';
+
+// FIX-23: cache capability checks for mushakhkhis (5 minutes)
+type CapResult = { field: string; caps: Record<string, { ok: boolean; message?: string }> | null };
+let _capCheckCache: { at: number; results: CapResult[] } | null = null;
+const CAP_CHECK_TTL_MS = 5 * 60_000;
 
 import {
   parseAndExecuteActions,
@@ -30,7 +43,7 @@ import type {
   TaskRecord,
   StoreData,
 } from '../store/types.js';
-import type { ProjectRecord } from './projects.js';
+import { buildProjectContext } from './projects.js';
 import type { SubscriptionRecord } from './subscriptions.js';
 import type { UnifiedProvider } from '../services/llm/index.js';
 import { AnthropicProvider } from '../services/llm/index.js';
@@ -42,6 +55,7 @@ import {
   detectDirectiveMentions as _detectDirectiveMentions,
 } from '../services/chat/mention.js';
 import { getCachedResponse, setCacheEntry } from '../services/chat/response-cache.js';
+import { rateLimit } from '../middleware/rate-limit.js';
 import { askPlayMaker as _askPlayMaker, type PlayMakerHint } from '../services/chat/play-maker.js';
 import {
   parseTextMarkerDelegations,
@@ -50,7 +64,7 @@ import {
   planAndRunWorkflowTool,
 } from '../services/agents/manager.js';
 import type { WorkflowOrchestrator } from '../services/workflow/orchestrator.js';
-import { dispatch as specialistsDispatch } from '../services/agents/specialists.js';
+import { dispatch as specialistsDispatch, buildIdentityDirective } from '../services/agents/specialists.js';
 
 type AnthropicCache = {
   current: AnthropicProvider | null;
@@ -75,10 +89,15 @@ export type ChatRoutesDeps = {
   parseTaskActions: (response: string) => unknown[];
   executeTaskActions: (actions: unknown[]) => TaskItem[];
   parseNotifyActions: (response: string, agentId: string) => NotificationRecord[];
+  parseReportActions?: (response: string) => unknown[];
+  executeReportActions?: (actions: unknown[]) => Array<{ action: string; id?: string; name?: string; error?: string }>;
   autoTitleIfNeeded: (convId: string) => Promise<void> | void;
   autoSummarizeIfNeeded: (convId: string) => Promise<void> | void;
   extractGraphFromMessage: (convId: string, userMsgId: string, assistantMsgId: string) => Promise<void> | void;
   buildSubscriptionSnapshot: () => Promise<string>;
+
+  // projects data dir (for file context injection)
+  dataDir?: string;
 
   // runtime services
   runResearch: (taskId: string) => Promise<void> | void;
@@ -159,6 +178,8 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
     parseTaskActions,
     executeTaskActions,
     parseNotifyActions,
+    parseReportActions,
+    executeReportActions,
     autoTitleIfNeeded,
     autoSummarizeIfNeeded,
     extractGraphFromMessage,
@@ -233,9 +254,79 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
     return c.json({ matches, topicMatches });
   });
 
-  app.post('/api/chat', async (c) => {
+  const chatLimit = rateLimit({ capacity: 20, refillPerSec: 2 });
+
+  // F-014 + F-015: runtime schema validation for /api/chat body
+  const MAX_MESSAGE_LEN = 16_000;
+  const MAX_CONTEXT_LEN = 8_000;
+  const MAX_IMAGES = 8;
+  const MAX_IMAGE_BASE64_LEN = 8_000_000; // ~6 MB decoded
+  const ALLOWED_IMAGE_MIME = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+  const chatBodySchema = z.object({
+    conversationId: z.string().uuid().optional(),
+    message: z.string().max(MAX_MESSAGE_LEN),
+    model: z.string().max(100).optional(),
+    agentId: z.string().max(100).optional(),
+    context: z.string().max(MAX_CONTEXT_LEN).optional(),
+    replyToMessageId: z.string().max(200).optional(),
+    chainDepth: z.number().int().min(0).max(20).optional(),
+    chainMentions: z.array(z.string().max(100)).max(20).optional(),
+    images: z.array(z.object({
+      base64: z.string().max(MAX_IMAGE_BASE64_LEN),
+      mimeType: z.string().refine(m => ALLOWED_IMAGE_MIME.includes(m), 'unsupported image MIME'),
+    })).max(MAX_IMAGES).optional(),
+    skipPlayMaker: z.boolean().optional(),
+    projectId: z.string().max(200).optional(),
+  });
+
+  // F-007: idempotency cache — dedupe retried POSTs that already entered the handler.
+  // Maps idempotency key → timestamp. Entries TTL 5 minutes.
+  const idempotencyCache = new Map<string, number>();
+  const IDEMPOTENCY_TTL_MS = 5 * 60_000;
+
+  app.post('/api/chat', chatLimit, async (c) => {
+    // F-007: dedupe via X-Idempotency-Key — second request with same key returns 409
+    const idempotencyKey = c.req.header('x-idempotency-key');
+    if (idempotencyKey) {
+      // Sweep stale entries
+      const now = Date.now();
+      for (const [k, t] of idempotencyCache) {
+        if (now - t > IDEMPOTENCY_TTL_MS) idempotencyCache.delete(k);
+      }
+      if (idempotencyCache.has(idempotencyKey)) {
+        return c.json({ error: 'Duplicate request — this turn has already been processed', code: 'E_DUPLICATE_TURN' }, 409);
+      }
+      idempotencyCache.set(idempotencyKey, now);
+    }
+
     const store = getStore();
-    const body = await c.req.json<{ conversationId?: string; message: string; model?: string; agentId?: string; context?: string; replyToMessageId?: string; chainDepth?: number; images?: Array<{ base64: string; mimeType: string }>; skipPlayMaker?: boolean }>();
+    const rawBody = await c.req.json().catch(() => null);
+    if (rawBody === null) {
+      return c.json({ error: 'Invalid JSON body', code: 'E_INVALID_JSON' }, 400);
+    }
+    // F-014: runtime validation of request shape and limits
+    const parsed = chatBodySchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return c.json({
+        error: 'Invalid request body',
+        code: 'E_VALIDATION',
+        issues: parsed.error.issues.slice(0, 5).map(i => ({ path: i.path.join('.'), message: i.message })),
+      }, 400);
+    }
+    const body = parsed.data as {
+      conversationId?: string;
+      message: string;
+      model?: string;
+      agentId?: string;
+      context?: string;
+      replyToMessageId?: string;
+      chainDepth?: number;
+      chainMentions?: string[];
+      images?: Array<{ base64: string; mimeType: string }>;
+      skipPlayMaker?: boolean;
+      projectId?: string;
+    };
 
     // BUG A/C FIX: derive CHAT_V2 ONCE at handler entry so every branch (cache,
     // multi-mention, main loop, fallbacks) uses the same gate. When v2 is on,
@@ -249,12 +340,75 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       && _headerOverrideV2 !== '0'
       && _headerOverrideV2 !== 'false';
 
+    // B-1: sanitize user input to block persona override attempts
+    if (flag('INPUT_SANITIZER') && body.message) {
+      body.message = sanitizeUserInput(body.message);
+    }
+
     let convId = body.conversationId;
-    bootLogger.info({ msg: 'chat-route-trace', step: 'entry', conversationId: convId || null, bodyAgentId: body.agentId || null, messageText: (body.message || '').slice(0, 80) }, 'chat-route-trace');
+    bootLogger.info({ msg: 'chat-route-trace', step: 'entry', conversationId: convId || null, bodyAgentId: body.agentId || null, messageText: redact((body.message || '').slice(0, 80)) }, 'chat-route-trace');
+
+    // A-8: Smart Reminders — detect "ذكرني" / "remind me" before routing to agent
+    const reminderRe = /^ذكرني\b|^remind me\b/i;
+    if (reminderRe.test(body.message.trim())) {
+      const msg = body.message.trim();
+      // Extract time: last time token in message
+      const scheduledFor = parseNaturalTime(msg);
+      // Extract the reminder text: strip the time part
+      const reminderText = msg
+        .replace(/ذكرني\s*/i, '')
+        .replace(/remind me\s*(to|that)?\s*/i, '')
+        .replace(/بعد\s+\d+\s+ساعة|بعد\s+ساعتين|بعد\s+نصف\s+ساعة|بعد\s+\d+\s+دقيقة|بعد\s+يوم|غداً|غدا|الصبح|الصباح|الليل|in\s+\d+\s+hours?|in\s+\d+\s+min\w*|tomorrow/gi, '')
+        .trim() || msg;
+
+      const now = new Date().toISOString();
+      const reminderTask = {
+        id: crypto.randomUUID(),
+        agentId: 'system',
+        prompt: `reminder: ${reminderText}`,
+        status: 'queued' as const,
+        scheduledFor: scheduledFor ?? null,
+        startedAt: null,
+        completedAt: null,
+        result: null,
+        conversationId: convId ?? null,
+        pipelineId: null,
+        pipelineStepIndex: null,
+        createdBy: 'user' as const,
+        label: `تذكير: ${reminderText.slice(0, 60)}`,
+        reportOnComplete: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+      if (!store.agentTasks) store.agentTasks = [];
+      store.agentTasks.push(reminderTask);
+      saveStore();
+
+      const isArabicMsg = /[؀-ۿ]/.test(body.message);
+      const whenStr = scheduledFor
+        ? new Date(scheduledFor).toLocaleString(isArabicMsg ? 'ar-SA' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' })
+        : (isArabicMsg ? 'الآن' : 'now');
+      const ackText = isArabicMsg
+        ? `حسناً، سأذكرك بـ"${reminderText.slice(0, 60)}" ${scheduledFor ? `في ${whenStr}` : 'الآن'} 🔔`
+        : `Got it, I'll remind you "${reminderText.slice(0, 60)}" ${scheduledFor ? `at ${whenStr}` : 'now'} 🔔`;
+
+      return streamSSE(c, async (stream) => {
+        await stream.writeSSE({ event: 'conversation', data: JSON.stringify({ conversationId: convId ?? crypto.randomUUID(), agentId: 'system', participants: ['system'] }) });
+        await stream.writeSSE({ event: 'text', data: JSON.stringify({ content: ackText }) });
+        await stream.writeSSE({ event: 'done', data: '{}' });
+      });
+    }
 
     const mention = detectMention(body.message);
     bootLogger.info({ msg: 'chat-route-trace', step: 'after-mention', mentionAgentId: mention.agentId, conversationId: convId || null }, 'chat-route-trace');
-    const allMentioned = detectAllMentions(body.message);
+    // If the client is replaying a chained turn, it passes the
+    // original @mention list through `chainMentions` — otherwise
+    // `detectAllMentions` re-parses the current message. This makes
+    // chains longer than 2 hops possible: the server sees the full
+    // original sequence on every turn, not just the new follow-up.
+    const allMentioned = body.chainMentions && body.chainMentions.length > 0
+      ? body.chainMentions
+      : detectAllMentions(body.message);
     let messageForLLM = body.message;
     let detectedAgent: string;
     // isQuestionAboutOther was used by the former keyword-reroute guard — no longer needed.
@@ -317,7 +471,8 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
         agentId: detectedAgent,
         participants: ['manager'],
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      };
+        ...(body.projectId ? { projectId: body.projectId } : {}),
+      } as ConvRecord & { projectId?: string };
       if (detectedAgent !== 'manager' && !conv.participants!.includes(detectedAgent)) {
         conv.participants!.push(detectedAgent);
       }
@@ -395,7 +550,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       if (rq) {
         rq.add('research', { taskId }, { jobId: taskId });
       } else {
-        setTimeout(() => runResearch(taskId), 0);
+        setTimeout(() => { const p = runResearch(taskId); if (p && typeof p.catch === "function") void p.catch((err: unknown) => { console.error({ err, taskId }, "runResearch failed"); }); }, 0);
       }
 
       const responseText = isArabic
@@ -418,6 +573,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       });
     }
 
+    // C-5: token-based context window (replaces message-count guard)
     const history = store.messages.filter((m) => m.conversationId === convId)
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     const chatMsgs: Array<{ role: string; content: string | Array<{ type: string; [k: string]: unknown }> }> = [];
@@ -432,6 +588,54 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       }
     }
     while (chatMsgs.length > 0 && chatMsgs[0].role !== 'user') chatMsgs.shift();
+
+    // C-5: trim to token budget based on model context window
+    const contextWindow = getContextWindow(selectedModel || anthropicRow?.defaultModel || 'claude-sonnet-4-6');
+    const { trimmed, droppedCount } = trimToTokenBudget(chatMsgs, contextWindow, 6_000);
+    if (droppedCount > 0) {
+      bootLogger.info({ droppedCount, contextWindow }, 'C-5: context trimmed to token budget');
+      chatMsgs.length = 0;
+      chatMsgs.push(...trimmed);
+
+      // D-3: inject existing rolling context summary at top, then generate new one in background
+      const existingConv = store.conversations.find(cv => cv.id === convId);
+      if (existingConv?.rollingContext) {
+        chatMsgs.unshift({
+          role: 'user',
+          content: `[ملخص المحادثة السابقة / Prior context summary: ${existingConv.rollingContext}]`,
+        });
+        // ensure first msg stays user
+        while (chatMsgs.length > 1 && chatMsgs[0].role !== 'user') chatMsgs.shift();
+      }
+
+      // Generate new rolling summary in background (non-blocking)
+      void (async () => {
+        try {
+          const haikuProvider = pickProviderForModel('claude-haiku-4-5-20251001');
+          if (!haikuProvider || !convId) return;
+          const droppedText = trimmed.slice(0, droppedCount)
+            .map(m => `${m.role}: ${(typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).slice(0, 300)}`)
+            .join('\n');
+          let summary = '';
+          for await (const chunk of haikuProvider.chat({
+            model: 'claude-haiku-4-5-20251001',
+            systemPrompt: 'Summarize this conversation exchange in 2-3 sentences. Be concise and factual.',
+            messages: [{ role: 'user', content: droppedText }],
+          })) {
+            if ((chunk as { type: string; content?: string }).type === 'text') {
+              summary += (chunk as { content: string }).content;
+            }
+          }
+          if (summary) {
+            const conv = store.conversations.find(cv => cv.id === convId);
+            if (conv) { conv.rollingContext = summary; conv.rollingContextAt = new Date().toISOString(); saveStore(); }
+          }
+        } catch (err) {
+          // FIX-6: log warnings instead of silent fail
+          bootLogger.warn({ err: err instanceof Error ? err.message : err, convId }, 'rolling-context-summary failed');
+        }
+      })();
+    }
 
     if (hasImages && chatMsgs.length > 0) {
       const lastIdx = chatMsgs.length - 1;
@@ -515,7 +719,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
     const CHAT_V2 = CHAT_V2_GLOBAL;
 
     // CHAT_V2 P1 — multi-mention fast-path.
-    // If the user @-mentioned multiple specialists (e.g. "@عبدان @شواشة ما رأيكما"),
+    // If the user @-mentioned multiple specialists (e.g. "@الباحث @المُلخِّص ما رأيكما"),
     // fan out a sequential dispatch to each specialist directly, each producing its
     // own message row + SSE `message.start`/`message.delta`/`message.done` triple and
     // a `participants.update`. This bypasses the manager LLM for deterministic group
@@ -648,6 +852,10 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       let doneSent = false;
       const startTime = Date.now();
 
+      // Abort controller — cancelled when the client disconnects so LLM calls can stop early.
+      const abortController = new AbortController();
+      c.req.raw.signal?.addEventListener('abort', () => abortController.abort(), { once: true });
+
       // BUG B FIX: SSE keepalive. Browsers / proxies will drop an idle EventSource
       // after ~30s of silence, which surfaced as "Error: network error" when a
       // multi-round manager turn produced a long quiet period between tool_use
@@ -656,14 +864,20 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
       let keepaliveDone = false;
       const keepaliveTimer: NodeJS.Timeout = setInterval(() => {
         if (keepaliveDone) return;
-        stream.writeSSE({ event: 'ping', data: '{}' }).catch(() => { /* connection closed */ });
+        stream.writeSSE({ event: 'ping', data: '{}' }).catch(() => { abortController.abort(); });
       }, 15_000);
       const stopKeepalive = () => { keepaliveDone = true; clearInterval(keepaliveTimer); };
 
       try {
         await stream.writeSSE({ event: 'conversation', data: JSON.stringify({ conversationId: convId, agentId: detectedAgent, participants }) });
 
-        let activeSystemPrompt = BUILTIN_SYSTEM_PROMPTS[detectedAgent] || MANAGER_SYSTEM_PROMPT;
+        // R17 — prepend the same identity directive the dispatch path
+        // uses so direct-chat (@specialist on the main /api/chat) gets
+        // the same persona-bleed protection as manager-delegated calls.
+        // Was: provider.chat was called with BUILTIN_SYSTEM_PROMPTS[id]
+        // alone, so prior speakers' voices leaked into the reply.
+        const identityDirective = buildIdentityDirective(detectedAgent);
+        let activeSystemPrompt = identityDirective + '\n\n' + (BUILTIN_SYSTEM_PROMPTS[detectedAgent] || MANAGER_SYSTEM_PROMPT);
 
         if (detectedAgent === 'mushakhkhis') {
           try {
@@ -674,14 +888,21 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
             lines.push('');
             const apiKeys = ((store as unknown as { apiKeys?: Record<string, string> }).apiKeys || {}) as Record<string, string>;
             const subs = (((store as unknown as { subscriptions?: SubscriptionRecord[] }).subscriptions || []) as SubscriptionRecord[]).filter((s) => s.linkedApiField);
-            const checks = await Promise.all(
-              Object.entries(CAPABILITY_CHECKERS).map(async ([field, checker]) => {
-                const key = apiKeys[field];
-                if (!key) return { field, caps: null };
-                try { return { field, caps: await checker(key) }; }
-                catch (e) { return { field, caps: { error: { ok: false, message: String(e).slice(0, 100) } } }; }
-              })
-            );
+            // FIX-23: cache capability checks for 5 minutes — avoids hammering external APIs
+            let checks: CapResult[];
+            if (_capCheckCache && Date.now() - _capCheckCache.at < CAP_CHECK_TTL_MS) {
+              checks = _capCheckCache.results;
+            } else {
+              checks = await Promise.all(
+                Object.entries(CAPABILITY_CHECKERS).map(async ([field, checker]) => {
+                  const key = apiKeys[field];
+                  if (!key) return { field, caps: null };
+                  try { return { field, caps: await checker(key) }; }
+                  catch (e) { return { field, caps: { error: { ok: false, message: String(e).slice(0, 100) } } }; }
+                })
+              );
+              _capCheckCache = { at: Date.now(), results: checks };
+            }
             for (const { field, caps } of checks) {
               if (!caps) { lines.push(`- \u26AA ${field}: \u063A\u064A\u0631 \u0645\u0636\u0627\u0641`); continue; }
               const ok = Object.values(caps).some((c) => c.ok);
@@ -774,12 +995,182 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
 
           const projectId = (conv as { projectId?: string } | undefined)?.projectId;
           if (projectId) {
-            const proj = (((store as unknown as { projects?: ProjectRecord[] }).projects || []) as ProjectRecord[]).find((p) => p.id === projectId);
-            if (proj?.instructions) ctx += `\n\n## \u062A\u0639\u0644\u064A\u0645\u0627\u062A \u0627\u0644\u0645\u0634\u0631\u0648\u0639: ${proj.name}\n${proj.instructions}`;
+            const proj = (store.projects || []).find(p => p.id === projectId);
+            if (proj) ctx += buildProjectContext(proj, deps.dataDir || '', detectedAgent);
           }
 
           activeSystemPrompt += ctx;
         } catch { /* ignore */ }
+
+        // Inject PhD working schedule into research-related agents
+        if (['research-companion', 'manager', 'research', 'reading-helper', 'writing-critic', 'comparator', 'mudawwin'].includes(detectedAgent)) {
+          try {
+            const { getOrCreateSchedule, buildScheduleContext } = await import('./phd-schedule.js');
+            const sched = getOrCreateSchedule(store as unknown as import('../store/types.js').StoreData);
+            activeSystemPrompt += buildScheduleContext(sched);
+          } catch { /* ignore */ }
+        }
+
+        if (detectedAgent === 'mudawwin') {
+          try {
+            const { listNotes, readNote, listAllTasks } = await import('@ruhool/core');
+            const { readAuditLog } = await import('../services/audit-log.js');
+            const meetingPaths = await listNotes({ subPath: '01 PhD/01 Supervision/Supervision Interaction Points', recursive: false }).catch(() => [] as string[]);
+            const meetings = await Promise.all(
+              meetingPaths.map(async (p) => {
+                try {
+                  const n = await readNote(p);
+                  return { name: n.name, date: n.frontmatter.date as string | undefined, summary: n.frontmatter.Summary as string | undefined, next: n.frontmatter.Next_Meeting as string | undefined };
+                } catch { return null; }
+              })
+            );
+            const valid = meetings.filter(Boolean) as Array<{ name: string; date?: string; summary?: string; next?: string }>;
+            const sorted = valid.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+            const last = sorted[0];
+
+            activeSystemPrompt += `\n\n## سياق الإشراف الحالي\n\n`;
+            activeSystemPrompt += `**عدد الاجتماعات المسجلة**: ${valid.length}\n`;
+            if (last) {
+              activeSystemPrompt += `**آخر اجتماع**: #${last.name} في ${(last.date ?? '').slice(0, 10)}\n`;
+              if (last.summary) activeSystemPrompt += `**ملخص آخر اجتماع**: ${String(last.summary).slice(0, 300)}\n`;
+              if (last.next) activeSystemPrompt += `**الاجتماع القادم المخطط**: ${last.next}\n`;
+            }
+            activeSystemPrompt += `\n**رقم الاجتماع التالي المقترح**: ${valid.length + 1}\n`;
+
+            // Recent activity since last meeting (papers added, tasks done)
+            const phdTasks = await listAllTasks({ subPath: '01 PhD' }).catch(() => []);
+            const done = phdTasks.filter((t: { done: boolean }) => t.done);
+            activeSystemPrompt += `\n**النشاط منذ بدء البحث**:\n`;
+            activeSystemPrompt += `- مهام مكتملة: ${done.length}\n`;
+            activeSystemPrompt += `- مهام معلّقة: ${phdTasks.length - done.length}\n`;
+
+            // Audit feed since last meeting — gives Mudawwin a precise log
+            // of what happened with timestamps (papers synced, atomic notes
+            // created/edited, sources added, etc.)
+            const sinceIso = (last?.date && String(last.date)) || undefined;
+            const audit = await readAuditLog({ limit: 100, sinceIso }).catch(() => []);
+            if (audit.length > 0) {
+              activeSystemPrompt += `\n**سجل النشاط على Obsidian منذ آخر اجتماع** (${audit.length} عملية):\n`;
+              for (const e of audit.slice(0, 30)) {
+                const t = e.ts.slice(0, 16).replace('T', ' ');
+                activeSystemPrompt += `- [${t}] ${e.action}${e.path ? ` → ${e.path}` : ''}\n`;
+              }
+            }
+          } catch { /* ignore */ }
+        }
+
+        if (detectedAgent === 'research-companion') {
+          try {
+            const { buildCompanionMemoryContext } = await import('./companion.js');
+            const memCtx = buildCompanionMemoryContext(
+              (store as unknown as { companionMemory?: import('../store/types.js').CompanionMemoryEntry[] }).companionMemory ?? []
+            );
+            if (memCtx) activeSystemPrompt += '\n\n' + memCtx;
+            // Live vault context — graceful
+            try {
+              const { getVaultName, listTopLevelFolders, listAllTasks, listNotes } = await import('@ruhool/core');
+              const vaultName = getVaultName();
+              const topFolders = await listTopLevelFolders();
+              const litNotes = await listNotes({ subPath: '01 PhD/02 Literature Review/Academic Literature', recursive: false }).catch(() => [] as string[]);
+              const phdTasks = await listAllTasks({ subPath: '01 PhD' }).catch(() => []);
+              const pending = phdTasks.filter((t: { done: boolean }) => !t.done);
+
+              activeSystemPrompt += `\n\n## سياق Obsidian Vault الحقيقي (محدّث ${new Date().toISOString().slice(0, 10)})\n\n`;
+              activeSystemPrompt += `**اسم Vault**: \`${vaultName}\`\n`;
+              activeSystemPrompt += `**رابط فتح ملف**: \`obsidian://open?vault=${vaultName}&file=PATH\` — **يجب** ترميز المسافات بـ \`%20\` (مثال: \`01%20PhD/02%20Literature%20Review\`)\n\n`;
+
+              if (topFolders.length > 0) {
+                activeSystemPrompt += `**المجلدات الرئيسية في Vault** (المستخدم لديه هذه البنية فعلاً — لا تقترح إنشاء vault جديد):\n`;
+                for (const f of topFolders) activeSystemPrompt += `- \`${f}\`\n`;
+                activeSystemPrompt += `\n`;
+              }
+
+              if (litNotes.length > 0) {
+                activeSystemPrompt += `**أحدث 10 مصادر أكاديمية** في \`01 PhD/02 Literature Review/Academic Literature\` (إجمالي: ${litNotes.length}):\n`;
+                for (const n of litNotes.slice(-10).reverse()) {
+                  const fileName = n.split('/').pop()?.replace(/\.md$/, '') ?? n;
+                  activeSystemPrompt += `- ${fileName}\n`;
+                }
+                activeSystemPrompt += `\n`;
+              }
+
+              if (pending.length > 0) {
+                activeSystemPrompt += `**${pending.length} مهام معلّقة في 01 PhD** (عيّنة):\n`;
+                for (const t of pending.slice(0, 8)) {
+                  activeSystemPrompt += `- [ ] ${t.text}${t.section ? ` _(in ${t.section})_` : ''} — في \`${t.notePath}\`\n`;
+                }
+                activeSystemPrompt += `\n`;
+              }
+
+              const meetings = ((store as unknown as { meetingSessions?: Array<{ id: string }> }).meetingSessions ?? []).length;
+              const litSessions = ((store as unknown as { readingSessions?: Array<{ id: string }> }).readingSessions ?? []).length;
+              activeSystemPrompt += `**حالة منصة رحول**:\n`;
+              activeSystemPrompt += `- الاجتماعات المسجّلة في رحول: ${meetings}\n`;
+              activeSystemPrompt += `- جلسات القراءة عبر المُلخِّص: ${litSessions}\n`;
+              activeSystemPrompt += `\n`;
+
+              activeSystemPrompt += `\n**روابط منصة رحول للإحالة المستخدم إليها**:\n`;
+              activeSystemPrompt += `- لوحة الدكتوراه: \`/phd\`\n`;
+              activeSystemPrompt += `- مكتبة Zotero: \`/zotero\`\n`;
+              activeSystemPrompt += `- مساعد القراءة (المُلخِّص): \`/shwasha\`\n`;
+              activeSystemPrompt += `- الاجتماعات: \`/meetings\`\n`;
+              activeSystemPrompt += `- المهام: \`/tasks\`\n`;
+            } catch { /* vault not accessible — skip */ }
+
+            // ── Zotero context for Rumman — gives him real library awareness
+            // so he can suggest from existing items + know reading status. Cheap:
+            // 1 Zotero call per Rumman turn, cached server-side via response-cache.
+            try {
+              const { zoteroListItemsRich, zoteroListCollections } = await import('@ruhool/core');
+              const items = await zoteroListItemsRich(undefined, 200);
+              const collections = await zoteroListCollections().catch(() => []);
+              const total = items.length;
+              const toRead = items.filter((i) => i.tags.some((t) => /^to.?read$/i.test(t))).length;
+              const reading = items.filter((i) => i.tags.some((t) => /^reading$/i.test(t))).length;
+              const read = items.filter((i) => i.tags.some((t) => /^read$/i.test(t))).length;
+              const recent = [...items]
+                .filter((i) => i.dateAdded)
+                .sort((a, b) => (b.dateAdded ?? '').localeCompare(a.dateAdded ?? ''))
+                .slice(0, 8);
+              const topRated = items.filter((i) => i.rating >= 2).slice(0, 5);
+
+              // B-2: Zotero data is external — wrap with trust="low"
+              let zoteroBlock = `## مكتبة Zotero الفعلية\n\n`;
+              zoteroBlock += `**الإحصائيات**:\n`;
+              zoteroBlock += `- إجمالي المصادر: ${total}\n`;
+              zoteroBlock += `- المجموعات: ${collections.length}\n`;
+              zoteroBlock += `- للقراءة: ${toRead} | يقرأها: ${reading} | مقروءة: ${read}\n`;
+              zoteroBlock += `- بدون تصنيف: ${total - toRead - reading - read}\n\n`;
+
+              if (collections.length > 0) {
+                zoteroBlock += `**المجموعات الموجودة**:\n`;
+                for (const col of collections.slice(0, 15)) zoteroBlock += `- ${col.name}\n`;
+                zoteroBlock += `\n`;
+              }
+
+              if (recent.length > 0) {
+                zoteroBlock += `**أحدث ${recent.length} مصادر مُضافة**:\n`;
+                for (const it of recent) {
+                  zoteroBlock += `- "${it.title.slice(0, 100)}" (${it.year ?? 'n.d.'})${it.authors ? ` — ${it.authors.split(',')[0]}` : ''}${it.doi ? ` | DOI: ${it.doi}` : ''}\n`;
+                }
+                zoteroBlock += `\n`;
+              }
+
+              if (topRated.length > 0) {
+                zoteroBlock += `**أوراق مُقيّمة عالياً (⭐⭐+)**:\n`;
+                for (const it of topRated) {
+                  zoteroBlock += `- ${'⭐'.repeat(it.rating)} "${it.title.slice(0, 80)}" (${it.year ?? 'n.d.'})\n`;
+                }
+                zoteroBlock += `\n`;
+              }
+
+              zoteroBlock += `**ملاحظة**: عند اقتراح ورقة، **ابحث في هذه القائمة أولاً** قبل اقتراح خارجية.\n`;
+              activeSystemPrompt += '\n\n' + (flag('TOOL_TRUST_WRAP') ? wrapToolResult('zotero', zoteroBlock) : zoteroBlock);
+            } catch (err) {
+              activeSystemPrompt += `\n\n_⚠️ تعذّر الوصول إلى Zotero (${err instanceof Error ? err.message.slice(0, 100) : 'unknown'}). إذا سُئلت عن مكتبتي قل: "Zotero غير متاح حالياً، تأكد أن التطبيق مفتوح أو الاتصال بالـ Web API يعمل."_\n`;
+            }
+          } catch { /* ignore */ }
+        }
 
         if (detectedAgent === 'tasks-agent') {
           try {
@@ -808,8 +1199,19 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
           if (customAgent) activeSystemPrompt = customAgent.systemPrompt;
         }
 
+        // Response length directive — injected for all agents except clippy/playmaker
+        if (detectedAgent !== 'clippy' && detectedAgent !== 'playmaker') {
+          const rl = (store as unknown as { responseLength?: string }).responseLength ?? 'medium';
+          if (rl === 'short') {
+            activeSystemPrompt += '\n\n## تعليمات المستخدم: طول الرد\nأجب باختصار شديد — الحد الأقصى 3-4 جمل أو 5 نقاط. لا شرح مطوّل. الجوهر فقط.';
+          } else if (rl === 'long') {
+            activeSystemPrompt += '\n\n## تعليمات المستخدم: طول الرد\nأجب بتفصيل كامل — شرح شامل مع أمثلة وسياق وكل ما يلزم. لا تختصر.';
+          }
+          // 'medium' = default behaviour, no directive needed
+        }
+
         if (body.context) {
-          activeSystemPrompt += '\n\n[\u0633\u064A\u0627\u0642 \u0625\u0636\u0627\u0641\u064A \u0645\u0646 \u0627\u0644\u0648\u0627\u062C\u0647\u0629]\n' + body.context + '\n';
+          activeSystemPrompt += '\n\n[\u0633\u064A\u0627\u0642 \u0625\u0636\u0627\u0641\u064A \u0645\u0646 \u0627\u0644\u0648\u0627\u062C\u0647\u0629]\n' + body.context.replace(/<[^>]*>/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').slice(0, 2000) + '\n';
         }
 
         try {
@@ -909,6 +1311,41 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
 
         const agentHeader = detectedAgent !== 'manager' ? (AGENT_HEADERS[detectedAgent] || '') : '';
 
+        // B-4 STABLE PROMPT: report actions injected here explicitly, not via Proxy.
+        // This keeps system prompts deterministic — same agent always gets the same
+        // base prompt; report context only added when this agent can act on it.
+        if (flag('STABLE_PROMPT')
+            && (detectedAgent === 'manager' || detectedAgent === 'architect' || detectedAgent === 'doctor')
+            && shouldInjectReportActions(store)) {
+          activeSystemPrompt += '\n\n' + REPORT_ACTIONS_PROMPT + buildReportsContextBlock(store);
+        }
+
+        // D-1: inject top entities from entity memory into system prompt
+        if (flag('ENTITY_MEMORY') && store.entityMemory && store.entityMemory.length > 0) {
+          const topEntities = store.entityMemory
+            .filter(e => !e.conversationId || e.conversationId === convId || e.importance > 0.7)
+            .sort((a, b) => b.importance - a.importance || new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime())
+            .slice(0, 8);
+          if (topEntities.length > 0) {
+            const block = topEntities
+              .map(e => `- [${e.entityType}] ${e.name}: ${e.context.slice(0, 80)}`)
+              .join('\n');
+            activeSystemPrompt += `\n\n## كيانات من سياقاتك السابقة (تذكير تلقائي)\n${block}`;
+          }
+        }
+
+        // C-6: pin prompt version hash at first message
+        const liveConvRecord = store.conversations.find((cv) => cv.id === convId);
+        if (liveConvRecord && !liveConvRecord.promptVersionHash && activeSystemPrompt) {
+          liveConvRecord.promptVersionHash = crypto
+            .createHash('sha256').update(activeSystemPrompt).digest('hex').slice(0, 8);
+          liveConvRecord.pinnedAt = new Date().toISOString();
+          saveStore();
+          bootLogger.info({ hash: liveConvRecord.promptVersionHash, agentId: detectedAgent }, 'C-6: prompt-version-pinned');
+        }
+
+        await stream.writeSSE({ event: 'thinking', data: JSON.stringify({ agentId: detectedAgent }) });
+
         const routedProvider = pickProviderForModel(model);
         if (!routedProvider) {
           await stream.writeSSE({ event: 'error', data: JSON.stringify({ error: `No provider configured for model "${model}". Add its API key in Settings.` }) });
@@ -1003,8 +1440,33 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                         logActivity('chat', `${AGENT_DISPLAY_NAMES[from] || from} \u2192 ${AGENT_DISPLAY_NAMES[to] || to}`, task.slice(0, 200), { agentId: to, metadata: { from, to, task: task.slice(0, 500), via: 'tool_use' } });
                       },
                       from: 'manager',
+                      // FIX-11: forward abort signal so specialist stops on disconnect
+                      abortSignal: abortController.signal,
+                      // C-2: Nested Streaming \u2014 pipe specialist tokens directly to SSE
+                      ...(CHAT_V2 && specialistMessageId ? {
+                        onToken: (token: string) => {
+                          void stream.writeSSE({
+                            event: 'message.delta',
+                            data: JSON.stringify({ messageId: specialistMessageId, text: token }),
+                          });
+                        },
+                      } : {}),
                     },
                   });
+                  // FIX-7: Parse [NOTIFY] BEFORE storing message — wrap in try/catch
+                  // so SSE emission is guaranteed even if subsequent code throws.
+                  if (result.output) {
+                    try {
+                      const specNotifs = parseNotifyActions(result.output, inp.specialist);
+                      if (specNotifs.length > 0) {
+                        saveStore();
+                        await stream.writeSSE({ event: 'notifications', data: JSON.stringify({ notifications: specNotifs }) });
+                      }
+                    } catch (err) {
+                      bootLogger.warn({ err, specialist: inp.specialist }, 'specialist-notify-emit failed');
+                    }
+                  }
+
                   // Record this round's output so the NEXT specialist can see it.
                   turnPriorMessages.push({
                     role: 'assistant',
@@ -1153,7 +1615,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
               { agentId: detectedAgent, metadata: { provider: routedProvider.name, model, inputTokens: chunk.usage!.inputTokens, outputTokens: chunk.usage!.outputTokens, cost, durationMs: Date.now() - startTime } });
             await stream.writeSSE({ event: 'usage', data: JSON.stringify(chunk.usage) });
           } else if (chunk.type === 'error') {
-            await stream.writeSSE({ event: 'error', data: JSON.stringify({ error: chunk.error }) });
+            await stream.writeSSE({ event: 'error', data: JSON.stringify({ message: chunk.error, retryable: true }) });
           } else if (chunk.type === 'done') {
             if (doneSent) continue;
             doneSent = true;
@@ -1171,7 +1633,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 .replace(/\{[^{}]*?"(?:title|agent|priority|description)"\s*:[^{}]*?\}/g, '')
                 .trim() || '\u2713';
               // CHAT_V2 P1: when the manager delegated via tool_use, his closing text
-              // is a short acknowledgement ("أحلتها لعبدان") — render it as a subtler
+              // is a short acknowledgement ("أحلتها للباحث") — render it as a subtler
               // `handoff` bubble instead of a normal assistant bubble.
               const managerKind: 'handoff' | 'text' =
                 CHAT_V2 && detectedAgent === 'manager' && toolUseDispatched ? 'handoff' : 'text';
@@ -1183,7 +1645,7 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 kind: managerKind,
               });
               // CHAT_V2 P1: emit the manager's own bubble as start/delta/done so the UI
-              // can render the short handoff line ("أحلتها لعبدان") as its own message.
+              // can render the short handoff line ("أحلتها للباحث") as its own message.
               if (CHAT_V2 && cleanedForSave && cleanedForSave !== '\u2713') {
                 await stream.writeSSE({
                   event: 'message.start',
@@ -1220,17 +1682,17 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
               if (detectedAgent === 'architect') {
                 const actions = parseArchitectActions(fullResponse, detectedAgent);
                 if (actions.length > 0) {
-                  await stream.writeSSE({ event: 'approvals', data: JSON.stringify({ approvals: actions }) });
+                  // FIX: use 'approval_request' — matches what chat-view.tsx listens for
+                  await stream.writeSSE({ event: 'approval_request', data: JSON.stringify({ approvals: actions }) });
                 }
               }
-              if (detectedAgent === 'manager' && !toolUseDispatched) {
+              // B-8: when TOOL_USE_ONLY_DELEGATION flag is on, skip text marker fallback entirely
+              if (detectedAgent === 'manager' && !toolUseDispatched && !flag('TOOL_USE_ONLY_DELEGATION')) {
                 try {
                   const dels = parseTextMarkerDelegations(fullResponse);
                   if (dels.length > 0) {
                     bootLogger.warn({ fallback: 'text-marker', count: dels.length }, 'AGT-05 fallback triggered');
                     logDelegations(dels, logActivity, { conversationId: convId });
-                    // BUG A FIX: legacy `delegations` event produced a second
-                    // bubble summary alongside v2 per-agent bubbles.
                     if (!CHAT_V2) {
                       await stream.writeSSE({ event: 'delegations', data: JSON.stringify({ delegations: dels }) });
                     }
@@ -1246,12 +1708,88 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                   }
                 }
               }
+              if (parseReportActions && executeReportActions) {
+                try {
+                  const reportActions = parseReportActions(fullResponse);
+                  if (reportActions.length > 0) {
+                    const results = executeReportActions(reportActions);
+                    await stream.writeSSE({ event: 'reports', data: JSON.stringify({ results }) });
+                  }
+                } catch { /* ignore */ }
+              }
               try {
                 const notifs = parseNotifyActions(fullResponse, detectedAgent || 'manager');
                 if (notifs.length > 0) {
                   await stream.writeSSE({ event: 'notifications', data: JSON.stringify({ notifications: notifs }) });
                 }
               } catch { /* ignore */ }
+
+              // PhD schedule update: parse [PHD_SCHEDULE] tags from manager
+              if (detectedAgent === 'manager') {
+                try {
+                  const { parsePhdScheduleActions, applyScheduleUpdate } = await import('./phd-schedule.js');
+                  const updates = parsePhdScheduleActions(fullResponse);
+                  if (updates.length > 0) {
+                    const storeNow = getStore();
+                    for (const up of updates) {
+                      applyScheduleUpdate(storeNow as unknown as import('../store/types.js').StoreData, up);
+                    }
+                    saveStore();
+                  }
+                } catch { /* ignore */ }
+              }
+
+              // Mudawwin meeting create: parse [MEETING:CREATE] tags
+              if (detectedAgent === 'mudawwin') {
+                try {
+                  const { parseMeetingCreateActions, applyMeetingCreate } = await import('./meeting-actions.js');
+                  const meetings = parseMeetingCreateActions(fullResponse);
+                  for (const m of meetings) {
+                    const result = await applyMeetingCreate(m);
+                    if (result.ok) {
+                      await stream.writeSSE({ event: 'meeting_created', data: JSON.stringify({ path: result.path }) });
+                    } else {
+                      await stream.writeSSE({ event: 'meeting_error', data: JSON.stringify({ error: result.error }) });
+                    }
+                  }
+                } catch { /* ignore */ }
+              }
+
+              // Clippy tour feedback: parse [TOUR_FEEDBACK] tags and persist them
+              if (detectedAgent === 'clippy') {
+                try {
+                  const { parseClippyTourFeedback } = await import('./clippy.js');
+                  const feedbacks = parseClippyTourFeedback(fullResponse);
+                  if (feedbacks.length > 0) {
+                    const storeNow = getStore();
+                    const s = storeNow as unknown as { clippyTourFeedback?: import('./clippy.js').ClippyTourFeedback[] };
+                    if (!s.clippyTourFeedback) s.clippyTourFeedback = [];
+                    for (const f of feedbacks) {
+                      s.clippyTourFeedback.push({ id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), ...f });
+                    }
+                    saveStore();
+                  }
+                } catch { /* ignore */ }
+              }
+
+              // رمّان companion memory: parse [REMEMBER] tags and persist them
+              if (detectedAgent === 'research-companion') {
+                try {
+                  const { parseCompanionMemoryActions } = await import('./companion.js');
+                  const remembered = parseCompanionMemoryActions(fullResponse, convId!);
+                  if (remembered.length > 0) {
+                    const storeNow = getStore();
+                    if (!storeNow.companionMemory) (storeNow as unknown as { companionMemory: import('../store/types.js').CompanionMemoryEntry[] }).companionMemory = [];
+                    for (const entry of remembered) {
+                      (storeNow as unknown as { companionMemory: import('../store/types.js').CompanionMemoryEntry[] }).companionMemory.push({
+                        id: crypto.randomUUID(),
+                        ...entry,
+                      });
+                    }
+                    saveStore();
+                  }
+                } catch { /* ignore */ }
+              }
 
               try {
                 const catCreate = [...fullResponse.matchAll(/\[CATEGORY:CREATE\]\s*(\{[\s\S]*?\})/g)];
@@ -1392,8 +1930,8 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 }
               } catch { /* ignore */ }
 
-              autoSummarizeIfNeeded(convId!);
-              autoTitleIfNeeded(convId!);
+              void Promise.resolve(autoSummarizeIfNeeded(convId!)).catch(() => { /* background — ignore */ });
+              void Promise.resolve(autoTitleIfNeeded(convId!)).catch(() => { /* background — ignore */ });
               try {
                 const recent = store.messages
                   .filter((m) => m.conversationId === convId)
@@ -1403,6 +1941,53 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 const usr = recent.find((m) => m.role === 'user');
                 if (asst && usr) extractGraphFromMessage(convId!, usr.id, asst.id);
               } catch {}
+
+              // C-7: entity extraction — background, non-blocking
+              if (fullResponse.length > 50) {
+                void (async () => {
+                  try {
+                    const { extractEntities } = await import('../services/memory/entity-extractor.js');
+                    const entities = extractEntities(fullResponse);
+                    if (entities.length > 0) {
+                      const s = getStore();
+                      if (!s.entityMemory) s.entityMemory = [];
+                      const now = new Date().toISOString();
+                      for (const e of entities) {
+                        const existing = s.entityMemory.find(
+                          em => em.name.toLowerCase() === e.name.toLowerCase()
+                        );
+                        if (existing) {
+                          existing.lastSeenAt = now;
+                          existing.importance = Math.min(1, existing.importance + 0.1);
+                        } else {
+                          s.entityMemory.push({
+                            id: crypto.randomUUID(),
+                            entityType: e.type,
+                            name: e.name,
+                            context: fullResponse.slice(0, 150),
+                            conversationId: convId ?? undefined,
+                            agentId: detectedAgent,
+                            importance: 0.5,
+                            lastSeenAt: now,
+                            createdAt: now,
+                          });
+                        }
+                      }
+                      // FIX-2: LRU eviction — cap entity memory at 500 entries
+                      const ENTITY_MEMORY_CAP = 500;
+                      if (s.entityMemory.length > ENTITY_MEMORY_CAP) {
+                        s.entityMemory.sort((a, b) =>
+                          new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime()
+                        );
+                        s.entityMemory = s.entityMemory.slice(0, ENTITY_MEMORY_CAP);
+                      }
+                      saveStore();
+                    }
+                  } catch (err) {
+                    bootLogger.warn({ err: err instanceof Error ? err.message : err }, 'entity-extraction failed');
+                  }
+                })();
+              }
             }
             await stream.writeSSE({ event: 'done', data: '{}' });
           }
@@ -1424,10 +2009,12 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
             if (detectedAgent === 'architect') {
               const actions = parseArchitectActions(fullResponse, detectedAgent);
               if (actions.length > 0) {
-                await stream.writeSSE({ event: 'approvals', data: JSON.stringify({ approvals: actions }) });
+                // FIX: use 'approval_request' — matches chat-view.tsx listener
+                await stream.writeSSE({ event: 'approval_request', data: JSON.stringify({ approvals: actions }) });
               }
             }
-            if (detectedAgent === 'manager' && !toolUseDispatched) {
+            // B-8: gate text marker fallback behind flag
+            if (detectedAgent === 'manager' && !toolUseDispatched && !flag('TOOL_USE_ONLY_DELEGATION')) {
               try {
                 const dels = parseTextMarkerDelegations(fullResponse);
                 if (dels.length > 0) {
@@ -1448,14 +2035,23 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 }
               }
             }
+            if (parseReportActions && executeReportActions) {
+              try {
+                const reportActions = parseReportActions(fullResponse);
+                if (reportActions.length > 0) {
+                  const results = executeReportActions(reportActions);
+                  await stream.writeSSE({ event: 'reports', data: JSON.stringify({ results }) });
+                }
+              } catch { /* ignore */ }
+            }
             try {
               const notifs = parseNotifyActions(fullResponse, detectedAgent || 'manager');
               if (notifs.length > 0) {
                 await stream.writeSSE({ event: 'notifications', data: JSON.stringify({ notifications: notifs }) });
               }
             } catch { /* ignore */ }
-            autoSummarizeIfNeeded(convId!);
-            autoTitleIfNeeded(convId!);
+            void Promise.resolve(autoSummarizeIfNeeded(convId!)).catch(() => { /* background — ignore */ });
+            void Promise.resolve(autoTitleIfNeeded(convId!)).catch(() => { /* background — ignore */ });
             try {
               const recent = store.messages
                 .filter((m) => m.conversationId === convId)
@@ -1510,7 +2106,13 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
               }
             }
 
-            if (allMentioned.length > 1 && depth === 0) {
+            // Multi-mention chaining: walk the list of @mentions in order.
+            // Previously gated on `depth === 0` which broke sequential
+            // chains past the first hop ("@الراعي ثم @الباحث ثم @المُلخِّص"
+            // would stop at الباحث). We now advance through the chain for
+            // every step until we reach the last mentioned agent OR hit
+            // MAX_DEPTH as the safety stop.
+            if (allMentioned.length > 1 && depth < MAX_DEPTH) {
               const idx = allMentioned.indexOf(detectedAgent);
               const candidate = idx >= 0 && idx < allMentioned.length - 1 ? allMentioned[idx + 1] : null;
               if (candidate) { nextAgent = candidate; chainReason = 'multi-mention'; }
@@ -1540,6 +2142,11 @@ export function registerChatRoutes(app: Hono, deps: ChatRoutesDeps): void {
                 maxDepth: MAX_DEPTH,
                 calledBy: AGENT_DISPLAY_NAMES[detectedAgent] || detectedAgent,
                 replyToMessageId: lastAssistantMsg?.id,
+                // Forward the original mention list (if multi-mention
+                // is what's driving this chain) so the client can replay
+                // it on the next turn and the server keeps seeing the
+                // full sequence.
+                chainMentions: chainReason === 'multi-mention' ? allMentioned : undefined,
               }) });
             }
           } catch { /* ignore */ }

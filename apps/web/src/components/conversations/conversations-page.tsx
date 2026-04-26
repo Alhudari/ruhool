@@ -24,17 +24,23 @@ interface DeletionImpact { messages: number; memories: number; tasks: number; ap
 
 const AGENT_NAMES: Record<string, { ar: string; en: string }> = {
   manager: { ar: 'الراعي', en: "Al-Ra'i" },
-  research: { ar: 'عبدان', en: 'Abdan' },
-  'reading-helper': { ar: 'شواشة', en: 'Shwasha' },
-  'writing-critic': { ar: 'الصفرا', en: 'Al-Safra' },
-  comparator: { ar: 'رمّانة', en: 'Rammana' },
+  research: { ar: 'الباحث', en: 'Al-Bahith' },
+  'reading-helper': { ar: 'المُلخِّص', en: 'Al-Mulakhkhis' },
+  'writing-critic': { ar: 'الناقد', en: 'Al-Naqid' },
+  comparator: { ar: 'المُقارِن', en: 'Al-Muqarin' },
   architect: { ar: 'المصمم', en: 'Al-Musammim' },
-  'content-creator': { ar: 'الدبسا', en: 'Al-Dabsa' },
-  creative: { ar: 'الكرييتف', en: 'Creative' },
+  'content-creator': { ar: 'السارد', en: 'Al-Sarid' },
+  creative: { ar: 'المبدع', en: "Al-Mubdi'" },
   'tasks-agent': { ar: 'مهام', en: 'Maham' },
   analyst: { ar: 'المحلل', en: 'Al-Muhallil' },
   munazzim: { ar: 'المنظّم', en: 'Al-Munazzim' },
   mushakhkhis: { ar: 'المشخّص', en: 'Al-Mushakhkhis' },
+  'research-companion': { ar: 'الخوي', en: 'Al-Khuwy' },
+  fatin: { ar: 'الفطين', en: 'Al-Fatin' },
+  playmaker: { ar: 'المُمرر', en: 'Al-Mumarrir' },
+  mudawwin: { ar: 'المُدوّن', en: 'Al-Mudawwin' },
+  sayyaq: { ar: 'الكاتب', en: 'Al-Katib' },
+  clippy: { ar: 'Clippy', en: 'Clippy' },
 };
 
 export function ConversationsPageView() {
@@ -49,6 +55,7 @@ export function ConversationsPageView() {
   const [agentFilter, setAgentFilter] = useState<string>('all');
   const [projectFilter, setProjectFilter] = useState<string>('all');
   const [groupFilter, setGroupFilter] = useState<'all' | 'individual' | 'group'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const [confirmDel, setConfirmDel] = useState<{ ids: string[]; impacts: DeletionImpact | null } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -78,13 +85,19 @@ export function ConversationsPageView() {
       const isGroup = (cv.participants?.length || 1) > 1;
       if (groupFilter === 'group' && !isGroup) return false;
       if (groupFilter === 'individual' && isGroup) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const title = (cv.title || '').toLowerCase();
+        const agentName = (AGENT_NAMES[cv.agentId ?? '']?.ar || cv.agentId || '').toLowerCase();
+        if (!title.includes(q) && !agentName.includes(q)) return false;
+      }
       return true;
     }).sort((a, b) => {
       const ap = pinnedIds.includes(a.id), bp = pinnedIds.includes(b.id);
       if (ap !== bp) return ap ? -1 : 1;
       return new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime();
     });
-  }, [convs, agentFilter, projectFilter, groupFilter, showArchived, pinnedIds]);
+  }, [convs, agentFilter, projectFilter, groupFilter, showArchived, pinnedIds, searchQuery]);
 
   const allSelectedVisible = filtered.length > 0 && filtered.every((c) => selected.has(c.id));
   const toggleAll = () => {
@@ -181,6 +194,13 @@ export function ConversationsPageView() {
 
       {/* Filters */}
       <div className="flex items-center gap-2 flex-wrap">
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder={isRTL ? 'ابحث في المحادثات...' : 'Search conversations...'}
+          className="h-9 rounded-[var(--radius)] bg-surface border border-border text-sm px-3 min-w-[160px] focus:outline-none focus:ring-2 focus:ring-ring"
+        />
         <select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)}
           className="h-9 rounded-[var(--radius)] bg-surface border border-border text-sm px-2">
           <option value="all">{isRTL ? 'كل الوكلاء' : 'All agents'}</option>

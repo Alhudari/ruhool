@@ -1,16 +1,16 @@
-import { runAgentLoop } from './agent-runner';
+import { runAgentLoop } from './agent-runner.js';
 import {
   createTrigger, setHierarchyNode,
   scanForAlerts, resolveAlert,
   type Phase2StoreLike,
-} from './phase2';
+} from './phase2.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import 'dotenv/config';
 
-import { renderVideo, listRenders, archiveRender, deleteRender } from './render';
-import { setupDatabase } from './db-setup';
+import { renderVideo, listRenders, archiveRender, deleteRender } from './render.js';
+import { setupDatabase } from './db-setup.js';
 import { Queue, Worker } from 'bullmq';
 import {
   DATA_DIR, STORE_FILE, PAPERS_DIR, NOTES_DIR, BACKUPS_DIR,
@@ -29,7 +29,7 @@ import {
 const REDIS_CONNECTION = { host: process.env.REDIS_HOST || 'localhost', port: parseInt(process.env.REDIS_PORT || '6379', 10) };
 
 import type { ScheduleRecord, StoreData, NoteRecord } from './store/types.js';
-import { getStore, saveStore as _saveStore } from './store/index.js';
+import { getStore, saveStore as _saveStore, initializeStore } from './store/index.js';
 import { applyStoreDefaults, EXPERIMENTS_CATEGORY_ID } from './store/defaults.js';
 import { taskStore, updateTask } from './state/tasks-store.js';
 import { createRenderQueueState } from './state/render-queue.js';
@@ -56,7 +56,7 @@ import { createNotificationService } from './services/notifications.js';
 import { generateSummary, splitIntoSections } from './services/chat/summary.js';
 import { createNotifyActions } from './services/chat/notify-actions.js';
 import {
-  AnthropicProvider, OpenAIProvider, GeminiProvider,
+  AnthropicProvider, OpenAIProvider, GeminiProvider, OllamaProvider,
   pickProviderForModel as _pickProviderForModel, type UnifiedProvider,
 } from './services/llm/index.js';
 import { BUILTIN_SYSTEM_PROMPTS } from './state/builtin-prompts.js';
@@ -73,8 +73,19 @@ import { CAPABILITY_CHECKERS } from './services/capability-checkers.js';
 import { buildSubscriptionSnapshot as buildAnalystSnapshot } from './routes/analyst.js';
 import { makeEnsureSubscriptionDefaults } from './routes/subscriptions.js';
 import { createSubscriptionsEngine } from './services/subscriptions-engine.js';
-import { startSubscriptionChecker, startScheduleChecker as startScheduleCheckerWorker, startWatcher as startWatcherWorker } from './workers/scheduler.js';
+import { startSubscriptionChecker, startScheduleChecker as startScheduleCheckerWorker, startWatcher as startWatcherWorker, startZoteroRefreshChecker as startZoteroRefreshCheckerWorker, startHabitSpawnerChecker as startHabitSpawnerCheckerWorker, startZoteroSnapshotSync as startZoteroSnapshotSyncWorker } from './workers/scheduler.js';
+import { startZoteroVaultSyncScheduler, seedSyncStatus, type SyncStats } from './workers/zotero-vault-sync.js';
+import { startGoogleTasksSyncScheduler } from './workers/google-tasks-sync.js';
+import { registerGoogleTasksTrigger } from './services/google-tasks-trigger.js';
+import { spawnHabitsForToday } from './services/habit-spawner.js';
+import { parseReportActions, executeReportActions } from './services/chat/report-actions.js';
+import { sendReport as _sendReport } from './services/reports/send.js';
+import { auditLog as auditLogFn } from './services/audit-log.js';
+import type { DispatcherLLM } from './services/dispatch/index.js';
+import { startAgentOrgWatcher, onAgentOrgChanged } from './state/agent-org-watcher.js';
+import { invalidateAgentOrgCache } from './routes/agents.js';
 import { startResearchWorker as startResearchBullMQWorker } from './workers/bullmq.js';
+import { startAgentTaskWorker } from './services/agent-task-worker.js';
 import { createAudioService, FALLBACK_ELEVENLABS_VOICE } from './services/audio.js';
 import { createChatHelpers } from './services/chat-helpers.js';
 import { createResearchService } from './routes/research.js';
@@ -86,9 +97,19 @@ import { startServer } from './server/boot.js';
 
 void AGENT_HEADERS; void OpenAIProvider; void GeminiProvider; void BUILTIN_AGENTS; void parseTaskActions; void PRICING; void computeNextRun;
 
+// D-7 / Wave 1: pre-warm the store BEFORE any sync `getStore()` call. In
+// JSON-file mode this is fast; in `STORE_BACKEND=postgres` mode it awaits
+// the initial DB load. ESM top-level await blocks module evaluation until
+// this resolves, so subsequent imports see a fully-initialized store.
+await initializeStore();
+
 const logActivity = createLogActivity({ getStore: () => store, saveStore });
 
-const app = createApp();
+// `app` is exported so the Vercel Function wrapper in
+// `apps/web/src/app/api/[...path]/route.ts` can re-use the same Hono
+// instance with all routes already registered. On Vercel the import side
+// effects (initializeStore, route registration) run once per cold start.
+export const app = createApp();
 const store: StoreData = getStore();
 applyStoreDefaults(store, { saveStore, builtinSystemPrompts: BUILTIN_SYSTEM_PROMPTS });
 
@@ -113,10 +134,95 @@ function pickProviderForModel(model: string): UnifiedProvider | null {
   return _pickProviderForModel(model, { store, anthropicCache: _anthropicCache });
 }
 
+// ── Dispatcher LLM adapter ────────────────────────────────────────
+// Wraps the Anthropic provider (currently the only dispatch-capable
+// provider) into the narrow DispatcherLLM interface. The dispatcher is
+// LLM-agnostic; swapping providers later only requires another wrapper.
+function getDispatcherLLM(): DispatcherLLM | null {
+  const provider = registeredProvider;
+  if (!provider) return null;
+  const model = 'claude-sonnet-4-6';
+  return {
+    callSystemMessage: async (system, userMessage, opts) => {
+      let text = '';
+      let tokensIn = 0;
+      let tokensOut = 0;
+      try {
+        for await (const chunk of provider.chat({
+          model,
+          systemPrompt: system,
+          messages: [{ role: 'user', content: userMessage }],
+          maxTokens: opts?.maxTokens ?? 500,
+          temperature: opts?.temperature ?? 0.3,
+        })) {
+          if (chunk.type === 'text') text += chunk.content;
+          else if (chunk.type === 'usage') {
+            tokensIn = chunk.usage.inputTokens;
+            tokensOut = chunk.usage.outputTokens;
+          } else if (chunk.type === 'error') {
+            throw new Error(chunk.error);
+          }
+        }
+      } catch (err) {
+        throw err instanceof Error ? err : new Error(String(err));
+      }
+      const costUsd = provider.estimateCost(tokensIn, tokensOut, model);
+      return { text, tokensIn, tokensOut, costUsd };
+    },
+  };
+}
+
 const savedAnthropic = store.providers.find(p => p.type === 'anthropic' && p.enabled && p.apiKey);
 if (savedAnthropic?.apiKey) {
   registeredProvider = new AnthropicProvider(savedAnthropic.apiKey, savedAnthropic.baseUrl || undefined);
   bootLogger.info('  Restored Anthropic provider from saved data');
+}
+
+// Always ensure the Ollama provider row exists so the Settings toggle can
+// flip routing live without a restart. The provider is registered but may
+// start disabled; the actual ON/OFF for Shwasha's hybrid routing is
+// `store.shwashaSettings.ollamaEnabled`. URL changes still need a restart
+// because the OllamaProvider instance is constructed from the env-time URL.
+try {
+  const settingsEnabled = store.shwashaSettings?.ollamaEnabled ?? false;
+  const envEnabled = process.env.OLLAMA_ENABLED === 'true';
+  const ollamaEnabled = settingsEnabled || envEnabled;
+  const ollamaBaseUrl =
+    store.shwashaSettings?.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+
+  const existing = store.providers.find((p) => p.type === 'ollama');
+  if (!existing) {
+    const now = new Date().toISOString();
+    store.providers.push({
+      id: crypto.randomUUID(),
+      type: 'ollama',
+      displayName: 'Ollama (local)',
+      apiKey: null,
+      baseUrl: ollamaBaseUrl,
+      defaultModel: null,
+      enabled: ollamaEnabled,
+      status: 'unknown',
+      lastTestAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    saveStore();
+  } else if (existing.enabled !== ollamaEnabled || existing.baseUrl !== ollamaBaseUrl) {
+    existing.enabled = ollamaEnabled;
+    existing.baseUrl = ollamaBaseUrl;
+    existing.updatedAt = new Date().toISOString();
+    saveStore();
+  }
+
+  if (ollamaEnabled) {
+    const probe = new OllamaProvider(ollamaBaseUrl);
+    probe.testConnection().then((res) => {
+      if (res.ok) bootLogger.info({ models: res.models?.length ?? 0 }, '  Ollama provider registered (local)');
+      else bootLogger.warn({ err: res.error }, '  Ollama enabled but unreachable — local models will fail until connected');
+    }).catch((err) => bootLogger.warn({ err: err instanceof Error ? err.message : err }, '  Ollama probe failed'));
+  }
+} catch (err) {
+  bootLogger.warn({ err: err instanceof Error ? err.message : err }, '  Ollama registration failed (non-fatal)');
 }
 
 const notificationService = createNotificationService({
@@ -146,8 +252,13 @@ const ensureSubscriptionDefaults = makeEnsureSubscriptionDefaults({ getStore: ()
 const { checkSubscriptionRules } = createSubscriptionsEngine({
   getStore: () => store, saveStore, capabilityCheckers: CAPABILITY_CHECKERS, createNotification,
 });
-startSubscriptionChecker({ checkSubscriptionRules });
-setTimeout(() => { checkSubscriptionRules().catch(() => {}); }, 10_000);
+// D-7: skip module-level workers under Vercel — they wouldn't survive
+// stateless function boundaries anyway, and the setInterval timers would
+// just leak handles in the serverless runtime.
+if (!process.env.VERCEL) {
+  startSubscriptionChecker({ checkSubscriptionRules });
+  setTimeout(() => { checkSubscriptionRules().catch(() => {}); }, 10_000);
+}
 
 const audioService = createAudioService({
   getApiKey,
@@ -170,6 +281,10 @@ const RESEARCH_DIR = path.join(DATA_DIR, 'research');
 const TRASH_META = path.join(DATA_ROOT, '_trash.json');
 for (const d of [AUDIO_DIR, CAPTIONS_DIR, UPLOADS_DIR, VIDEOS_DIR, IMAGES_DIR]) fs.mkdirSync(d, { recursive: true });
 function ensureStudioAssetsDir() { if (!fs.existsSync(STUDIO_ASSETS_DIR)) fs.mkdirSync(STUDIO_ASSETS_DIR, { recursive: true }); }
+
+// Configure the audit log (writes to data/audit-log.jsonl)
+import { configureAuditLog } from './services/audit-log.js';
+configureAuditLog({ dataDir: DATA_ROOT });
 
 const renderAudioService = createRenderAudioService({
   audioDir: AUDIO_DIR, videosDir: VIDEOS_DIR,
@@ -232,6 +347,210 @@ function startScheduleChecker() {
   });
 }
 
+function startZoteroRefreshChecker() {
+  startZoteroRefreshCheckerWorker({
+    getStore: () => store as { zoteroLastRefreshAt?: string },
+    createNotification,
+    logger: bootLogger,
+  });
+}
+
+// Periodic Zotero snapshot sync (Phase C). Pulls items+collections every 6h
+// to keep the offline cache fresh. Disabled in tests via the env flag.
+function startZoteroSnapshotSync() {
+  if (process.env.RUHOOL_DISABLE_ZOTERO_SYNC === 'true' || process.env.NODE_ENV === 'test') return;
+  startZoteroSnapshotSyncWorker({
+    isConfigured: () => {
+      const cfg = (store as unknown as { zoteroConfig?: { mode?: string; webUserId?: string; webApiKey?: string } }).zoteroConfig;
+      if (!cfg) return false;
+      if (cfg.mode === 'web') return !!cfg.webUserId && !!cfg.webApiKey;
+      return true; // local mode: nothing to validate up front
+    },
+    syncOnce: async () => {
+      const errors: string[] = [];
+      let itemsCount = 0;
+      let collectionsCount = 0;
+      try {
+        const { zoteroListCollections } = await import('@ruhool/core');
+        const cols = await zoteroListCollections();
+        const storeRef = store as unknown as { zoteroSnapshot?: { mode: 'local' | 'web'; items: unknown[]; collections: Array<{ key: string; name: string; parentCollection?: string }>; fetchedAt: string; lastSuccessfulFetchAt?: string; lastError?: string | null } };
+        const now = new Date().toISOString();
+        if (!storeRef.zoteroSnapshot) {
+          storeRef.zoteroSnapshot = { mode: 'local', items: [], collections: [], fetchedAt: now, lastSuccessfulFetchAt: now, lastError: null };
+        }
+        storeRef.zoteroSnapshot.collections = cols.map((cc) => ({ key: cc.key, name: cc.name, parentCollection: cc.parentCollection }));
+        storeRef.zoteroSnapshot.fetchedAt = now;
+        storeRef.zoteroSnapshot.lastSuccessfulFetchAt = now;
+        storeRef.zoteroSnapshot.lastError = null;
+        collectionsCount = cols.length;
+      } catch (err) {
+        errors.push(`collections: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      try {
+        const { zoteroListItemsRich } = await import('@ruhool/core');
+        const items = await zoteroListItemsRich(undefined, 1000);
+        if (items.length > 0) {
+          const storeRef = store as unknown as { zoteroSnapshot?: { items: unknown[]; fetchedAt: string; lastSuccessfulFetchAt?: string; lastError?: string | null } };
+          if (!storeRef.zoteroSnapshot) return { ok: false, itemsCount: 0, collectionsCount, errors: ['no snapshot bootstrap'] };
+          storeRef.zoteroSnapshot.items = items;
+          const now = new Date().toISOString();
+          storeRef.zoteroSnapshot.fetchedAt = now;
+          storeRef.zoteroSnapshot.lastSuccessfulFetchAt = now;
+          storeRef.zoteroSnapshot.lastError = null;
+          itemsCount = items.length;
+        }
+      } catch (err) {
+        errors.push(`items: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      try { saveStore(); } catch { /* save failure is non-fatal for the tick */ }
+      return { ok: errors.length === 0, itemsCount, collectionsCount, errors };
+    },
+    logger: bootLogger,
+  });
+}
+
+interface PersistedVaultSync {
+  lastRunAt?: string | null;
+  lastRunStats?: SyncStats | null;
+  lastError?: string | null;
+}
+
+// Start the agent-org watcher as soon as the module loads. Any change
+// to data/agent-org.json drops the in-memory cache so the next
+// /api/agent-org GET re-reads fresh.
+onAgentOrgChanged(() => invalidateAgentOrgCache());
+startAgentOrgWatcher({
+  dataRoot: path.resolve(import.meta.dirname || '.', '../../../data'),
+  logger: { info: (m) => bootLogger.info(m), warn: (obj, m) => bootLogger.warn(obj, m) },
+});
+
+function startZoteroVaultSync() {
+  // Seed in-process status from persisted store so the UI shows the
+  // previous run summary on cold boot.
+  const persisted = (store as unknown as { zoteroVaultSync?: PersistedVaultSync }).zoteroVaultSync;
+  if (persisted) {
+    seedSyncStatus({
+      lastRunAt: persisted.lastRunAt ?? null,
+      lastRunStats: persisted.lastRunStats ?? null,
+      lastError: persisted.lastError ?? null,
+    });
+  }
+  startZoteroVaultSyncScheduler({
+    logger: bootLogger,
+    auditLog: (entry) => auditLogFn(entry),
+    deltaEnabled: process.env.ENABLE_ZOTERO_DELTA_SYNC !== 'false',
+    getLastZoteroVersion: () => {
+      const st = store as unknown as { zoteroVaultSync?: { lastZoteroVersion?: number } };
+      return st.zoteroVaultSync?.lastZoteroVersion ?? 0;
+    },
+    setLastZoteroVersion: (v) => {
+      const st = store as unknown as { zoteroVaultSync?: { lastZoteroVersion?: number } };
+      if (!st.zoteroVaultSync) st.zoteroVaultSync = {};
+      st.zoteroVaultSync.lastZoteroVersion = v;
+      saveStore();
+    },
+    onStatusUpdate: (s) => {
+      const st = store as unknown as { zoteroVaultSync?: PersistedVaultSync };
+      if (!st.zoteroVaultSync) st.zoteroVaultSync = {};
+      st.zoteroVaultSync.lastRunAt = s.lastRunAt;
+      st.zoteroVaultSync.lastRunStats = s.lastRunStats;
+      st.zoteroVaultSync.lastError = s.lastError;
+      saveStore();
+    },
+    // Every 60 minutes.
+    intervalMs: 60 * 60 * 1000,
+    // Opt-out via store.zoteroVaultSyncDisabled for users who don't want it.
+    getEnabled: () => !(store as unknown as { zoteroVaultSyncDisabled?: boolean }).zoteroVaultSyncDisabled,
+  });
+}
+
+function startHabitSpawnerChecker() {
+  startHabitSpawnerCheckerWorker({
+    spawn: async () => {
+      const created = spawnHabitsForToday(store);
+      if (created.length > 0) saveStore();
+      return { created: created.length };
+    },
+    logger: bootLogger,
+  });
+}
+
+function startGoogleTasksSync() {
+  const deps = {
+    getStore: () => store,
+    saveStore,
+    logger: bootLogger,
+    auditLog: (entry: { action: string; source: string; meta?: Record<string, unknown> }) => auditLogFn(entry),
+  };
+  // Register the debounced trigger so /api/tasks CRUD routes and the
+  // fast /sync/tick endpoint can fire syncs on demand.
+  registerGoogleTasksTrigger(deps);
+  startGoogleTasksSyncScheduler(deps);
+}
+
+// Reports → LLM bridge. The reports subsystem needs a simple
+// non-streaming callProvider that picks the model for the signing
+// agent and collects the full response. We pick a sensible default
+// model (override via builtinAgentModels[agentId] if set).
+async function reportsCallProvider(input: {
+  agentId: string;
+  system: string;
+  user: string;
+}): Promise<{ text: string; tokensIn?: number; tokensOut?: number; costUsd?: number }> {
+  const modelOverride = (store as unknown as { builtinAgentModels?: Record<string, string> }).builtinAgentModels?.[input.agentId];
+  const model = modelOverride || 'claude-haiku-4-5-20251001';
+  const provider = pickProviderForModel(model);
+  if (!provider) {
+    throw new Error(`No enabled LLM provider for model ${model} — enable a provider in Settings first`);
+  }
+
+  let text = '';
+  let tokensIn = 0;
+  let tokensOut = 0;
+  const iter = provider.chat({
+    model,
+    messages: [{ role: 'user', content: input.user }],
+    systemPrompt: input.system,
+    temperature: 0.7,
+    maxTokens: 2000,
+  });
+  for await (const chunk of iter) {
+    if (chunk.type === 'text') text += chunk.content;
+    else if (chunk.type === 'usage') {
+      tokensIn = chunk.usage.inputTokens;
+      tokensOut = chunk.usage.outputTokens;
+    }
+  }
+  const costUsd = provider.estimateCost(tokensIn, tokensOut, model);
+  return { text, tokensIn, tokensOut, costUsd };
+}
+
+function startReportsWorker() {
+  void import('./workers/reports-scheduler.js').then(({ startReportsScheduler }) => {
+    startReportsScheduler({
+      getStore: () => store,
+      saveStore,
+      callProvider: reportsCallProvider,
+      logger: bootLogger,
+      auditLog: (entry) => auditLogFn(entry),
+      onFailure: ({ reportName, reportId, error, triggeredBy }) => {
+        // User-facing notification so 3am failures aren't silent until
+        // they next open /settings.
+        try {
+          createNotification({
+            agentId: 'system',
+            title: `📨 فشل إرسال "${reportName}"`,
+            message: `التقرير (${triggeredBy}) لم يُرسَل: ${error.slice(0, 200)}`,
+            link: '/settings?tab=reports',
+            priority: 'high',
+            metadata: { reportId, kind: 'report-send-failed' },
+          });
+        } catch { /* never let notifier crash the scheduler */ }
+      },
+    });
+  }).catch((err) => bootLogger.warn({ err }, '[reports-scheduler] failed to start'));
+}
+
 // ─── Phase 2: workflow DAG orchestrator wiring ───
 import { createWorkflowOrchestrator } from './services/workflow/orchestrator.js';
 import { createRunChannelRegistry } from './routes/workflow-runs.js';
@@ -242,6 +561,36 @@ import { broadcastToConversation } from './state/conversation-channels.js';
 import { createImageService } from './services/generation/images.js';
 import { createGenerationAudioService } from './services/generation/audio.js';
 import { createVideoService } from './services/generation/video.js';
+
+// A-3/A-5: shared runTask — used by both the worker and the pipelines route
+const agentTaskRunTask = async (task: import('./store/types.js').AgentTaskRecord): Promise<string> => {
+  if (task.prompt.startsWith('reminder:')) {
+    return task.prompt.replace('reminder:', '').trim();
+  }
+  const model = 'claude-sonnet-4-6';
+  const provider = pickProviderForModel(model);
+  if (!provider) throw new Error('no provider for agent task worker');
+  const result = await specialistsDispatchImpl({
+    specialist: task.agentId,
+    task: task.prompt,
+    priorMessages: [],
+    roundNumber: 1,
+    deps: {
+      provider,
+      model,
+      logger: { info: (o, m) => bootLogger.info(o, m) },
+      logActivity: ({ from, to, task: t }) => {
+        logActivity('task', `${from} → ${to}`, t.slice(0, 200), { agentId: to });
+      },
+      from: 'worker',
+    },
+  });
+  return result.output;
+};
+
+if (!process.env.VERCEL) {
+  startAgentTaskWorker({ getStore: () => store, saveStore, runTask: agentTaskRunTask });
+}
 
 // ─── Phase 5: generation services ───
 const imageService = createImageService({
@@ -378,10 +727,12 @@ const workflowOrchestrator = createWorkflowOrchestrator({
 
 registerAllRoutes(app, {
   serviceHealth, getStore: () => store, saveStore, logger: bootLogger,
+  agentTaskRunTask,
   createNotification, getAgentNotificationSettings,
   saveNoteFile, deleteNoteFile, logActivity,
   anthropicCache: _anthropicCache, builtinSystemPrompts: BUILTIN_SYSTEM_PROMPTS,
   builtInLibrary: BUILT_IN_PROMPT_LIBRARY,
+  pickProviderForModel,
   papersDir: PAPERS_DIR, ensurePapersDir, splitIntoSections,
   taskStore, runsLogger: { error: (msg: string, err?: unknown) => bootLogger.error({ err }, msg) },
   createTrigger, runAgentLoop, logError: (msg: string, err: unknown) => bootLogger.error({ err }, msg),
@@ -390,6 +741,8 @@ registerAllRoutes(app, {
   legacyRestoreDir: path.resolve(import.meta.dirname || '.', '../../../backups'),
   ensureBackupsDir, agentDisplayNames: AGENT_DISPLAY_NAMES,
   dataDir: DATA_DIR,
+  dataRoot: DATA_ROOT,
+  getDispatcherLLM,
   notifyLogger: { info: (m: string) => bootLogger.info(m) },
   estimateAudioPlanCost, costDemoMapCost: COST_DEMO_MAP_COST,
   capabilityCheckers: CAPABILITY_CHECKERS, getApiKey,
@@ -400,15 +753,43 @@ registerAllRoutes(app, {
   executeApproval,
   chatDeps: {
     getStore: () => store, saveStore, logger: bootLogger, anthropicCache: _anthropicCache,
-    pickProviderForModel, builtinSystemPrompts: BUILTIN_SYSTEM_PROMPTS,
+    pickProviderForModel,
+    // B-4 STABLE PROMPT: use BUILTIN_SYSTEM_PROMPTS directly — no Proxy.
+    // Report actions are injected explicitly in chat.ts where they are needed,
+    // keeping system prompts deterministic and hash-stable per agent.
+    builtinSystemPrompts: BUILTIN_SYSTEM_PROMPTS,
     managerSystemPrompt: MANAGER_SYSTEM_PROMPT, agentHeaders: AGENT_HEADERS,
     agentDisplayNames: AGENT_DISPLAY_NAMES, capabilityCheckers: CAPABILITY_CHECKERS,
     parseArchitectActions, parseTaskActions, executeTaskActions, parseNotifyActions,
+    parseReportActions,
+    executeReportActions: (actions: unknown[]) => executeReportActions(actions as Parameters<typeof executeReportActions>[0], {
+      getStore: () => store,
+      saveStore,
+      sendReport: async (id: string) => { await _sendReport({
+        getStore: () => store, saveStore,
+        callProvider: reportsCallProvider,
+        logger: bootLogger,
+        auditLog: (entry) => auditLogFn(entry),
+        onFailure: ({ reportName, reportId, error, triggeredBy }) => {
+          try {
+            createNotification({
+              agentId: 'system',
+              title: `📨 فشل إرسال "${reportName}"`,
+              message: `التقرير (${triggeredBy}) لم يُرسَل: ${error.slice(0, 200)}`,
+              link: '/settings?tab=reports',
+              priority: 'high',
+              metadata: { reportId, kind: 'report-send-failed' },
+            });
+          } catch { /* noop */ }
+        },
+      }, id, 'chat'); },
+    }),
     autoTitleIfNeeded, autoSummarizeIfNeeded, extractGraphFromMessage,
     buildSubscriptionSnapshot: _chatSubscriptionSnapshot, runResearch,
     getResearchQueue: () => researchQueue as unknown as { add: (name: string, data: unknown, opts: unknown) => unknown } | null,
     taskStore, logActivity,
     workflowOrchestrator,
+    dataDir: DATA_ROOT,
   },
   runSchedule,
   builtinAgentPermissions: BUILTIN_AGENT_PERMISSIONS,
@@ -421,31 +802,53 @@ registerAllRoutes(app, {
   parseLibraryId, deleteRender,
   workflowOrchestrator,
   workflowGetRunChannel: workflowRunChannels.getRunChannel,
+  reportsCallProvider,
+  auditLog: (entry: { action: string; source: string; meta?: Record<string, unknown> }) => auditLogFn(entry),
+  onReportFailure: ({ reportName, reportId, error, triggeredBy }: { reportName: string; reportId: string; error: string; triggeredBy: string }) => {
+    try {
+      createNotification({
+        agentId: 'system',
+        title: `📨 فشل إرسال "${reportName}"`,
+        message: `التقرير (${triggeredBy}) لم يُرسَل: ${error.slice(0, 200)}`,
+        link: '/settings?tab=reports',
+        priority: 'high',
+        metadata: { reportId, kind: 'report-send-failed' },
+      });
+    } catch { /* noop */ }
+  },
 });
 
-// Initialize BullMQ queue + worker for workflow-step (Phase 2).
-try {
-  workflowQueue = initWorkflowQueue({
-    connection: REDIS_CONNECTION,
-    logger: {
-      info: (m) => bootLogger.info(m),
-      warn: (o, m) => bootLogger.warn(o, m || ''),
-      error: (o, m) => bootLogger.error(o, m),
-    },
-  });
-  if (workflowQueue) {
-    workflowWorker = startWorkflowWorker({
+// D-7 / Wave 2: BullMQ + reports scheduler keep persistent Redis
+// connections and tick on intervals — neither survives Vercel's stateless
+// function boundary, AND lingering reconnect loops waste CPU. Skip them.
+if (!process.env.VERCEL) {
+  // Start the reports scheduler — cheap at rest (no-ops until reports exist).
+  startReportsWorker();
+
+  // Initialize BullMQ queue + worker for workflow-step (Phase 2).
+  try {
+    workflowQueue = initWorkflowQueue({
       connection: REDIS_CONNECTION,
-      executeStep: (stepId: string) => workflowOrchestrator.executeStep(stepId),
       logger: {
         info: (m) => bootLogger.info(m),
         warn: (o, m) => bootLogger.warn(o, m || ''),
         error: (o, m) => bootLogger.error(o, m),
       },
     });
+    if (workflowQueue) {
+      workflowWorker = startWorkflowWorker({
+        connection: REDIS_CONNECTION,
+        executeStep: (stepId: string) => workflowOrchestrator.executeStep(stepId),
+        logger: {
+          info: (m) => bootLogger.info(m),
+          warn: (o, m) => bootLogger.warn(o, m || ''),
+          error: (o, m) => bootLogger.error(o, m),
+        },
+      });
+    }
+  } catch (err) {
+    bootLogger.warn({ err: err instanceof Error ? err.message : err }, 'workflow queue init failed — in-process fallback');
   }
-} catch (err) {
-  bootLogger.warn({ err: err instanceof Error ? err.message : err }, 'workflow queue init failed — in-process fallback');
 }
 void workflowWorker;
 
@@ -497,8 +900,15 @@ async function reconcileRunningRuns(): Promise<number> {
   return n;
 }
 
-const PORT = parseInt(process.env.APP_PORT || '3001', 10);
+// Railway / Render / Fly inject PORT; we keep APP_PORT for local-only override.
+const PORT = parseInt(process.env.PORT || process.env.APP_PORT || '3001', 10);
 
+// On Vercel we never call startServer — the Vercel runtime invokes our
+// catch-all route handler directly with each request. The Hono `app` is
+// already wired by the time this module finishes evaluating.
+if (process.env.VERCEL) {
+  bootLogger.info('[boot] Vercel runtime detected — skipping startServer (no port bind, no background workers).');
+} else {
 startServer({
   logger: bootLogger, setupDatabase, serviceHealth, scanAndLoadModules,
   initResearchQueue,
@@ -507,7 +917,8 @@ startServer({
     return researchWorker;
   },
   redisConnection: REDIS_CONNECTION, runResearch,
-  startScheduleChecker, startWatcherWorker,
+  startScheduleChecker, startZoteroRefreshChecker, startZoteroSnapshotSync, startZoteroVaultSync,
+  startHabitSpawnerChecker, startGoogleTasksSync, startWatcherWorker,
   watcherScan: () => scanForAlerts(store as unknown as Phase2StoreLike).length,
   onWatcherChange: () => saveStore(),
   storeFile: STORE_FILE, providersCount: () => store.providers.length,
@@ -519,3 +930,4 @@ startServer({
   dagActivities,
   reconcileRunningRuns,
 }).catch(err => { bootLogger.error({ err }, 'boot failed'); process.exit(1); });
+}

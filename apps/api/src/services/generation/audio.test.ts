@@ -22,7 +22,7 @@ describe('generation/audio', () => {
   it('TTS writes MP3 and returns /api/files URL', async () => {
     const mp3 = Buffer.from('ID3fake-tts');
     const svc = createGenerationAudioService({ audioService: makeAudioServiceStub(mp3), dataDir: tmpDir });
-    const res = await svc.generateTTS({ prompt: 'مرحبا', specialist: 'الكرييتف' });
+    const res = await svc.generateTTS({ prompt: 'مرحبا', specialist: 'المبدع' });
     expect(res.url).toMatch(/^\/api\/files\/audio\/generated\/.+\.mp3$/);
     expect(res.meta.kind).toBe('tts');
     expect(res.meta.bytes).toBe(mp3.length);

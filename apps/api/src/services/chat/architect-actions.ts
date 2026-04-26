@@ -64,7 +64,8 @@ export function createArchitectActions(deps: ArchitectActionsDeps): ArchitectAct
     const updateMatches = response.matchAll(/\[ACTION:UPDATE_AGENT:([^\]]+)\]\s*```(?:json)?\s*([\s\S]*?)```/g);
     for (const match of updateMatches) {
       try {
-        const targetId = match[1];
+        const targetId = match[1].trim();
+        if (!/^[a-zA-Z0-9_-]+$/.test(targetId) || targetId.length > 100) continue;
         const payload = JSON.parse(match[2]);
         approvals.push({
           id: crypto.randomUUID(),
@@ -79,9 +80,16 @@ export function createArchitectActions(deps: ArchitectActionsDeps): ArchitectAct
       } catch { /* skip malformed */ }
     }
 
+    // FIX-1: validate targetId — reject path traversal / special chars
+    const isValidAgentId = (id: string): boolean => /^[a-zA-Z0-9_-]+$/.test(id) && id.length > 0 && id.length <= 100;
+
     const deleteMatches = response.matchAll(/\[ACTION:DELETE_AGENT:([^\]]+)\]/g);
     for (const match of deleteMatches) {
-      const targetId = match[1];
+      const targetId = match[1].trim();
+      if (!isValidAgentId(targetId)) continue;
+      // Verify the agent exists (built-in or custom)
+      const exists = (store.customAgents ?? []).some(a => a.id === targetId);
+      if (!exists) continue;
       approvals.push({
         id: crypto.randomUUID(),
         type: 'delete_agent',
@@ -96,7 +104,8 @@ export function createArchitectActions(deps: ArchitectActionsDeps): ArchitectAct
 
     const memMatches = response.matchAll(/\[ACTION:UPDATE_MEMORY:([^\]]+)\]\s*```(?:[\w]*)?\s*([\s\S]*?)```/g);
     for (const match of memMatches) {
-      const targetId = match[1];
+      const targetId = match[1].trim();
+      if (!isValidAgentId(targetId)) continue;
       const content = match[2].trim();
       approvals.push({
         id: crypto.randomUUID(),
@@ -126,7 +135,10 @@ export function createArchitectActions(deps: ArchitectActionsDeps): ArchitectAct
           const name = (approval.payload as { name?: string }).name;
           if (!name) return { ok: false, error: 'name required' };
           if (!store.taskCategories) store.taskCategories = [];
-          if (!store.taskCategories.includes(name)) store.taskCategories.push(name);
+          const cats = store.taskCategories as unknown as { id: string; en: string; ar: string }[];
+          if (!cats.find(c => c.id === name || c.en === name)) {
+            cats.push({ id: name.toLowerCase().replace(/\s+/g, '-'), en: name, ar: name });
+          }
           saveStore();
           return { ok: true };
         }
@@ -135,7 +147,8 @@ export function createArchitectActions(deps: ArchitectActionsDeps): ArchitectAct
           if (!p.oldName || !p.newName) return { ok: false, error: 'oldName + newName required' };
           for (const t of (store.tasks || [])) { if (t.list === p.oldName) t.list = p.newName; }
           if (Array.isArray(store.taskCategories)) {
-            store.taskCategories = store.taskCategories.map((c) => c === p.oldName ? p.newName! : c);
+            store.taskCategories = (store.taskCategories as unknown as { id: string; en: string; ar: string }[])
+              .map((c) => c.id === p.oldName ? { ...c, id: p.newName!, en: p.newName! } : c);
           }
           saveStore();
           return { ok: true };
@@ -157,9 +170,17 @@ export function createArchitectActions(deps: ArchitectActionsDeps): ArchitectAct
           (store.conversations as ConvRecord[]).splice(idx, 1);
           store.messages = (store.messages || []).filter((m) => m.conversationId !== id);
           if (approval.type === 'deep_delete_conversation') {
-            store.memories = (store.memories || []).filter((m: { metadata?: { conversationId?: string } }) => m?.metadata?.conversationId !== id);
-            store.tasks = (store.tasks || []).filter((t: { metadata?: { conversationId?: string } }) => t?.metadata?.conversationId !== id);
-            store.approvals = (store.approvals || []).filter((a: { metadata?: { conversationId?: string } }) => a?.metadata?.conversationId !== id);
+            // F-020: filter both metadata.conversationId AND direct conversationId fields
+            const matchesConv = (record: { conversationId?: string; metadata?: { conversationId?: string } }) =>
+              record?.conversationId === id || record?.metadata?.conversationId === id;
+            store.memories = (store.memories || []).filter((m) => !matchesConv(m as Parameters<typeof matchesConv>[0]));
+            store.tasks = (store.tasks || []).filter((t) => !matchesConv(t as unknown as Parameters<typeof matchesConv>[0]));
+            store.approvals = (store.approvals || []).filter((a) => !matchesConv(a as unknown as Parameters<typeof matchesConv>[0]));
+            // F-020: also remove agentTasks linked to this conversation
+            const sx = store as StoreData & { agentTasks?: Array<{ conversationId?: string | null }> };
+            if (sx.agentTasks) {
+              sx.agentTasks = sx.agentTasks.filter((t) => t.conversationId !== id);
+            }
           }
           saveStore();
           return { ok: true };
@@ -219,7 +240,8 @@ export function createArchitectActions(deps: ArchitectActionsDeps): ArchitectAct
           if (!name) return { ok: false, error: 'name required' };
           for (const t of (store.tasks || [])) { if (t.list === name) t.list = 'عام'; }
           if (Array.isArray(store.taskCategories)) {
-            store.taskCategories = store.taskCategories.filter((c) => c !== name);
+            store.taskCategories = (store.taskCategories as unknown as { id: string; en: string; ar: string }[])
+              .filter((c) => c.id !== name && c.en !== name);
           }
           saveStore();
           return { ok: true };

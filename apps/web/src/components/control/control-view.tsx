@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app';
 import { apiFetch } from '@/lib/api';
 import { ClippyHelp } from '@/components/help/clippy-help';
+import { ObservabilityDashboard } from './ObservabilityDashboard';
 
 interface Run {
   id: string; conversationId: string; agentId: string;
@@ -284,6 +285,11 @@ export function ControlView() {
             </div>
           </Section>
         </div>
+      </div>
+
+      {/* D-4: Observability Dashboard */}
+      <div className="border-t border-border pt-6">
+        <ObservabilityDashboard />
       </div>
     </div>
   );

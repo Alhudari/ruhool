@@ -7,6 +7,41 @@ import path from 'node:path';
 import { Worker } from 'bullmq';
 import type { Hono } from 'hono';
 import type { WorkflowActivities } from '../workflows/activities/workflow-activities.js';
+import { getVaultRoot } from '@ruhool/core';
+
+// Tracks each worker's init outcome so /api/health can answer factually.
+type WorkerStatus = 'ok' | 'skipped' | 'failed';
+interface BootReport {
+  postgres: WorkerStatus;
+  temporal: WorkerStatus;
+  schedule: WorkerStatus;
+  zoteroRefresh: WorkerStatus;
+  zoteroSnapshotSync: WorkerStatus;
+  zoteroVaultSync: WorkerStatus;
+  watcher: WorkerStatus;
+  research: WorkerStatus;
+  habitSpawner: WorkerStatus;
+  googleTasksSync: WorkerStatus;
+  vaultRootDetected: boolean;
+  startedAtMs: number;
+  reasons: Record<string, string | undefined>;
+}
+
+export const bootReport: BootReport = {
+  postgres: 'skipped',
+  temporal: 'skipped',
+  schedule: 'skipped',
+  zoteroRefresh: 'skipped',
+  zoteroSnapshotSync: 'skipped',
+  zoteroVaultSync: 'skipped',
+  watcher: 'skipped',
+  research: 'skipped',
+  habitSpawner: 'skipped',
+  googleTasksSync: 'skipped',
+  vaultRootDetected: false,
+  startedAtMs: Date.now(),
+  reasons: {},
+};
 
 export interface BootDeps {
   /** Phase 3: Temporal DAG activities. If undefined, durable path disabled. */
@@ -29,6 +64,11 @@ export interface BootDeps {
   redisConnection: { host: string; port: number };
   runResearch: (taskId: string) => Promise<void>;
   startScheduleChecker: () => void;
+  startZoteroRefreshChecker: () => void;
+  startZoteroSnapshotSync: () => void;
+  startZoteroVaultSync: () => void;
+  startHabitSpawnerChecker: () => void;
+  startGoogleTasksSync: () => void;
   startWatcherWorker: (opts: { scan: () => number; onChange: () => void; logger: { info: (m: string) => void; warn: (obj: { err: unknown }, m: string) => void } }) => unknown;
   watcherScan: () => number;
   onWatcherChange: () => void;
@@ -39,10 +79,27 @@ export interface BootDeps {
   app: Hono;
 }
 
+function setStatus(key: keyof BootReport, value: WorkerStatus): void {
+  (bootReport as unknown as Record<string, unknown>)[key as string] = value;
+}
+
+function tryStart(label: keyof BootReport, fn: () => void, reasonsKey?: string): WorkerStatus {
+  try {
+    fn();
+    setStatus(label, 'ok');
+    return 'ok';
+  } catch (err) {
+    setStatus(label, 'failed');
+    if (reasonsKey) bootReport.reasons[reasonsKey] = err instanceof Error ? err.message : String(err);
+    return 'failed';
+  }
+}
+
 export async function startServer(deps: BootDeps): Promise<unknown> {
   const {
     logger, setupDatabase, serviceHealth, scanAndLoadModules, initResearchQueue,
     startResearchBullMQWorker, redisConnection, runResearch, startScheduleChecker,
+    startZoteroRefreshChecker, startZoteroSnapshotSync, startZoteroVaultSync, startHabitSpawnerChecker, startGoogleTasksSync,
     startWatcherWorker, watcherScan, onWatcherChange, storeFile, providersCount,
     onServerStart, port, app,
   } = deps;
@@ -50,9 +107,12 @@ export async function startServer(deps: BootDeps): Promise<unknown> {
   try {
     await setupDatabase();
     serviceHealth.postgres = true;
+    bootReport.postgres = 'ok';
     logger.info('PostgreSQL connected');
   } catch (err) {
     serviceHealth.postgres = false;
+    bootReport.postgres = 'skipped';
+    bootReport.reasons.postgres = err instanceof Error ? err.message : String(err);
     logger.warn({ err: err instanceof Error ? err.message : err }, 'PostgreSQL not available (using JSON store)');
   }
 
@@ -79,14 +139,18 @@ export async function startServer(deps: BootDeps): Promise<unknown> {
           );
         }
       }
+      bootReport.temporal = 'ok';
     } catch (err) {
+      bootReport.temporal = 'failed';
+      bootReport.reasons.temporal = err instanceof Error ? err.message : String(err);
       logger.warn({ err: err instanceof Error ? err.message : err }, 'Temporal worker failed to start; continuing');
     }
   } else {
+    bootReport.temporal = 'skipped';
+    bootReport.reasons.temporal = 'TEMPORAL_ADDRESS not set';
     logger.info('Temporal disabled (set TEMPORAL_ADDRESS to enable)');
   }
 
-  // Phase 3 boot resilience: reconcile stale running runs after restart.
   if (deps.reconcileRunningRuns) {
     try {
       const n = await deps.reconcileRunningRuns();
@@ -105,14 +169,81 @@ export async function startServer(deps: BootDeps): Promise<unknown> {
     runResearch,
     logger,
   });
+  bootReport.research = researchWorker ? 'ok' : 'skipped';
+  if (!researchWorker) bootReport.reasons.research = 'BullMQ not available';
 
-  startScheduleChecker();
-  logger.info('  Schedule checker started (60s interval)');
+  tryStart('schedule', () => {
+    startScheduleChecker();
+    logger.info('  Schedule checker started (60s interval)');
+  }, 'schedule');
 
-  startWatcherWorker({ scan: watcherScan, onChange: onWatcherChange, logger });
-  logger.info('  Watcher started (10min interval)');
+  tryStart('zoteroRefresh', () => {
+    startZoteroRefreshChecker();
+    logger.info('  Zotero refresh checker started (6h interval)');
+  }, 'zoteroRefresh');
 
-  serve({ fetch: app.fetch, port, hostname: '127.0.0.1' }, (info) => {
+  tryStart('zoteroSnapshotSync', () => {
+    startZoteroSnapshotSync();
+    logger.info('  Zotero snapshot sync started (6h interval, fail-soft)');
+  }, 'zoteroSnapshotSync');
+
+  // Precheck the vault root before starting the vault-dependent sync. If it's
+  // not resolvable, skip rather than schedule a worker that will fail every
+  // hour for the life of the process.
+  try {
+    const vault = getVaultRoot();
+    bootReport.vaultRootDetected = !!vault;
+    if (!vault) {
+      bootReport.zoteroVaultSync = 'skipped';
+      bootReport.reasons.zoteroVaultSync = 'Vault root not found';
+      logger.warn({ vault }, '[boot] Vault root not found; Zotero-Vault sync scheduler disabled this run');
+    } else {
+      tryStart('zoteroVaultSync', () => {
+        startZoteroVaultSync();
+        logger.info({ vault }, '  Zotero ↔ Vault sync scheduler started (60min interval)');
+      }, 'zoteroVaultSync');
+    }
+  } catch (err) {
+    bootReport.zoteroVaultSync = 'failed';
+    bootReport.reasons.zoteroVaultSync = err instanceof Error ? err.message : String(err);
+    logger.warn({ err: err instanceof Error ? err.message : err }, '[boot] Vault probe failed');
+  }
+
+  tryStart('watcher', () => {
+    startWatcherWorker({ scan: watcherScan, onChange: onWatcherChange, logger });
+    logger.info('  Watcher started (10min interval)');
+  }, 'watcher');
+
+  tryStart('habitSpawner', () => {
+    startHabitSpawnerChecker();
+    logger.info('  Habit spawner started (hourly, idempotent)');
+  }, 'habitSpawner');
+
+  tryStart('googleTasksSync', () => {
+    startGoogleTasksSync();
+    logger.info('  Google Tasks sync scheduler started (15min interval)');
+  }, 'googleTasksSync');
+
+  // Structured boot summary — one line, greppable, captures every worker.
+  const summary = [
+    `postgres=${bootReport.postgres}`,
+    `temporal=${bootReport.temporal}`,
+    `schedule=${bootReport.schedule}`,
+    `zotero-refresh=${bootReport.zoteroRefresh}`,
+    `zotero-vault-sync=${bootReport.zoteroVaultSync}`,
+    `watcher=${bootReport.watcher}`,
+    `research=${bootReport.research}`,
+    `habit-spawner=${bootReport.habitSpawner}`,
+    `google-tasks-sync=${bootReport.googleTasksSync}`,
+    `vault=${bootReport.vaultRootDetected ? 'ok' : 'missing'}`,
+  ].join(', ');
+  logger.info({ bootReport }, `[boot] workers: ${summary}`);
+
+  // Cloud hosts (Railway, Render, Fly) require listening on 0.0.0.0 to be
+  // reachable from outside the container. Local dev still binds 127.0.0.1
+  // for security (no LAN exposure).
+  const hostname = process.env.HOST || (process.env.PORT ? '0.0.0.0' : '127.0.0.1');
+  serve({ fetch: app.fetch, port, hostname }, (info) => {
     onServerStart(info.port);
     logger.info(
       { port: info.port, storeFile, providers: providersCount() },

@@ -18,8 +18,8 @@ describe('delegateToSpecialistTool', () => {
 
   it('lists at least the known specialists', () => {
     const ids = allowedSpecialistIds();
-    expect(ids).toContain('abdan');
-    expect(ids).toContain('shwasha');
+    expect(ids).toContain('research');
+    expect(ids).toContain('reading-helper');
   });
 });
 
@@ -31,12 +31,12 @@ describe('parseToolUseDelegations', () => {
         type: 'tool_use',
         id: 'toolu_1',
         name: 'delegate_to_specialist',
-        input: { specialist: 'abdan', task: 'research foo', context: 'bar' },
+        input: { specialist: 'research', task: 'research foo', context: 'bar' },
       },
     ] as unknown as Parameters<typeof parseToolUseDelegations>[0];
     const result = parseToolUseDelegations(content);
     expect(result).toHaveLength(1);
-    expect(result[0].specialist).toBe('abdan');
+    expect(result[0].specialist).toBe('research');
     expect(result[0].source).toBe('tool_use');
   });
 
@@ -54,10 +54,10 @@ describe('parseToolUseDelegations', () => {
 });
 
 describe('parseTextMarkerDelegations (legacy)', () => {
-  it('extracts from "أحلتها لعبدان"', () => {
-    const result = parseTextMarkerDelegations('تم. أحلتها لعبدان ✓');
+  it('extracts from "أحلتها لالباحث"', () => {
+    const result = parseTextMarkerDelegations('تم. أحلتها لالباحث ✓');
     expect(result.length).toBeGreaterThan(0);
-    expect(result[0].specialist).toBe('abdan');
+    expect(result[0].specialist).toBe('research');
     expect(result[0].source).toBe('text_marker');
   });
 

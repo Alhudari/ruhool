@@ -1,10 +1,12 @@
 # CHAT_GROUP_AUDIT.md
 
+> **⚠️ SUPERSEDED (2026-04-20)** — The P1/P2 design in this document has **shipped**. See `CHAT_V2_STATUS.md` for the implemented state (per-agent bubbles, workflow→conversation bridge, participantAgentIds, migration `0003_chat_group_messages`, 108/108 tests passing). This file is retained for historical design context only; treat the "not yet implemented" language below as out-of-date.
+
 **Scope:** Redesign Ruhool chat to feel like a WhatsApp group of coworkers (الراعي + specialists) where agents converse, delegate, and post live background-work updates as separate bubbles.
 
 **Date:** 2026-04-15
 **Author:** Engineering redesign pass
-**Status of this pass:** Deep audit complete; **P0 routing fix applied and verified** (80/80 tests pass, tsc clean). P1/P2/P3 are designed and scoped below — they are NOT yet implemented. See §7 for honest scope accounting.
+**Status of this pass (at time of writing):** Deep audit complete; **P0 routing fix applied and verified** (80/80 tests pass, tsc clean). P1/P2/P3 are designed and scoped below. **These have since been implemented — see CHAT_V2_STATUS.md.**
 
 ---
 

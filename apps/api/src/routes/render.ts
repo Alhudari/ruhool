@@ -51,6 +51,7 @@ export function registerRenderRoutes(app: Hono, deps: RenderRoutesDeps): void {
         }
       }, 1000);
 
+      try {
       const result = await renderVideo({
         code,
         width: width || 1080,
@@ -92,7 +93,8 @@ export function registerRenderRoutes(app: Hono, deps: RenderRoutesDeps): void {
       } else {
         renderJobs.set(jobId, { status: 'failed', progress: 0, error: result.error });
       }
-    })();
+      } catch { /* caught by .catch() below */ }
+    })().catch((err) => { console.error({ err, jobId }, "render IIFE failed"); renderJobs.set(jobId, { status: "failed", progress: 0, error: String(err) }); });
 
     return c.json({ ok: true, jobId }, 202);
   });
@@ -119,7 +121,7 @@ export function registerRenderRoutes(app: Hono, deps: RenderRoutesDeps): void {
       } else {
         renderJobs.set(jobId, { status: 'failed', progress: 0, error: result.error });
       }
-    })();
+    })().catch((err) => { console.error({ err, jobId }, "render IIFE failed"); renderJobs.set(jobId, { status: "failed", progress: 0, error: String(err) }); });
 
     return c.json({ ok: true, jobId }, 202);
   });

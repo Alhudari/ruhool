@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
+    "analyze": "node -e \"process.env.ANALYZE='true';require('child_process').execSync('next build',{stdio:'inherit',env:process.env})\"",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
@@ -32,9 +33,12 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^2.6.0",
+    "tesseract.js": "^7.0.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.2",
+    "@next/bundle-analyzer": "^16.2.4",
     "@playwright/test": "^1.59.1",
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.0",

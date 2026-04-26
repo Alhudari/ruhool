@@ -1,0 +1,12 @@
+file,line,pattern,context,verdict,fix
+apps/api/src/prompts/phd-context.ts,193,هاي,"explicit BLOCKLIST in anti-hallucination guard (teaching the agent NOT to use it)",ok,keep-as-is (negative example)
+apps/api/src/prompts/phd-context.ts,193,هسه,"BLOCKLIST",ok,keep-as-is
+apps/api/src/prompts/phd-context.ts,193,شلون,"BLOCKLIST",ok,keep-as-is
+apps/api/src/prompts/phd-context.ts,193,وين,"BLOCKLIST",ok,keep-as-is
+apps/api/src/prompts/phd-context.ts,193,ليش,"BLOCKLIST",ok,keep-as-is
+apps/api/src/prompts/phd-context.ts,197,شلون تبي,"negative example shown in antihall block",ok,keep
+apps/api/src/prompts/phd-context.ts,198,هسه راح,"negative example",ok,keep
+apps/api/src/prompts/phd-context.ts,199,وين الورقة,"negative example",ok,keep
+apps/api/src/prompts/phd-context.ts,200,ليش ما عملته,"negative example",ok,keep
+apps/api/src/prompts/phd-context.ts,201,هاي اقتراحات,"negative example",ok,keep
+apps/web/src/components/settings/voice-profile-settings.tsx,35,ولا لا?,"inside the SUGGESTED_TEMPLATE_AR template for user's own writing voice","intentional-user-copy",keep-as-is (user's personal voice profile — not platform chrome)

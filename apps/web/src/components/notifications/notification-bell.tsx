@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useLayoutEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Bell, Check, CheckCheck, Trash2, ExternalLink, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -23,13 +23,13 @@ export interface NotificationRecord {
 
 const AGENT_NAMES: Record<string, { en: string; ar: string }> = {
   manager: { en: "Al-Ra'i", ar: 'الراعي' },
-  research: { en: 'Abdan', ar: 'عبدان' },
-  'reading-helper': { en: 'Shwasha', ar: 'شواشة' },
-  'writing-critic': { en: 'Al-Safra', ar: 'الصفرا' },
-  comparator: { en: 'Rammana', ar: 'رمّانة' },
+  research: { en: 'Al-Bahith', ar: 'الباحث' },
+  'reading-helper': { en: 'Al-Mulakhkhis', ar: 'المُلخِّص' },
+  'writing-critic': { en: 'Al-Naqid', ar: 'الناقد' },
+  comparator: { en: 'Al-Muqarin', ar: 'المُقارِن' },
   architect: { en: "Al-Musammim", ar: "المصمم" },
-  'content-creator': { en: 'Al-Dabsa', ar: 'الدبسا' },
-  creative: { en: 'Creative', ar: 'الكرييتف' },
+  'content-creator': { en: 'Al-Sarid', ar: 'السارد' },
+  creative: { en: "Al-Mubdi'", ar: 'المبدع' },
   'tasks-agent': { en: 'Maham', ar: 'مهام' },
 };
 
@@ -58,6 +58,8 @@ export function NotificationBell() {
   const isRTL = language === 'ar';
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [panelPos, setPanelPos] = useState<{ top: number; right?: number; left?: number } | null>(null);
   const [count, setCount] = useState(0);
   const [items, setItems] = useState<NotificationRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -160,9 +162,33 @@ export function NotificationBell() {
     }
   }
 
+  // Calculate panel position relative to viewport when opening
+  // FIX-15: recompute on scroll/resize so panel stays attached to button
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const recompute = () => {
+      if (!btnRef.current) return;
+      const rect = btnRef.current.getBoundingClientRect();
+      const viewW = window.innerWidth;
+      if (isRTL) {
+        setPanelPos({ top: rect.bottom + 8, left: rect.left });
+      } else {
+        setPanelPos({ top: rect.bottom + 8, right: viewW - rect.right });
+      }
+    };
+    recompute();
+    window.addEventListener('scroll', recompute, true);
+    window.addEventListener('resize', recompute);
+    return () => {
+      window.removeEventListener('scroll', recompute, true);
+      window.removeEventListener('resize', recompute);
+    };
+  }, [open, isRTL]);
+
   return (
     <div className="relative" ref={panelRef}>
       <button
+        ref={btnRef}
         onClick={() => {
           const wasClosed = !open;
           setOpen((o) => !o);
@@ -186,12 +212,14 @@ export function NotificationBell() {
         )}
       </button>
 
-      {open && (
+      {open && panelPos && (
         <div
-          className={cn(
-            'absolute top-full mt-2 w-[360px] max-h-[480px] flex flex-col bg-surface border border-border rounded-[var(--radius-lg)] shadow-xl z-50',
-            isRTL ? 'left-0' : 'right-0'
-          )}
+          style={{
+            position: 'fixed',
+            top: panelPos.top,
+            ...(panelPos.right !== undefined ? { right: panelPos.right } : { left: panelPos.left }),
+          }}
+          className="w-[360px] max-h-[480px] flex flex-col bg-surface border border-border rounded-[var(--radius-lg)] shadow-xl z-[9999]"
         >
           <div className="flex items-center justify-between px-3 py-2 border-b border-border">
             <span className="text-sm font-semibold text-on-surface">

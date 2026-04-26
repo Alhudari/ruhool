@@ -37,10 +37,20 @@ interface WorkflowData {
 }
 
 const AGENTS = [
-  { id: 'manager', label: 'Al-Ra\'i (Manager)', labelAr: 'الراعي (القائد)' },
-  { id: 'research', label: 'Abdan (Research)', labelAr: 'عبدان (البحث)' },
-  { id: 'reading-helper', label: 'Shwasha (Reading)', labelAr: 'شواشة (القراءة)' },
-  { id: 'writing-critic', label: 'Al-Safra (Writing)', labelAr: 'الصفرا (النقد)' },
+  { id: 'manager', label: "Al-Ra'i (Manager)", labelAr: 'الراعي (القائد)' },
+  { id: 'doctor', label: 'Al-Duktor (Life CEO)', labelAr: 'الدكتور (قائد الحياة)' },
+  { id: 'research', label: 'Al-Bahith (Research)', labelAr: 'الباحث (البحث)' },
+  { id: 'reading-helper', label: 'Al-Mulakhkhis (Reading)', labelAr: 'المُلخِّص (القراءة)' },
+  { id: 'writing-critic', label: 'Al-Naqid (Writing)', labelAr: 'الناقد (النقد)' },
+  { id: 'comparator', label: 'Al-Muqarin (Compare)', labelAr: 'المُقارِن (المقارنة)' },
+  { id: 'architect', label: 'Al-Musammim (Architect)', labelAr: 'المصمم (المصمم)' },
+  { id: 'content-creator', label: 'Al-Sarid (Content)', labelAr: 'السارد (المحتوى)' },
+  { id: 'creative', label: "Al-Mubdi' (Video)", labelAr: 'المبدع (الفيديو)' },
+  { id: 'tasks-agent', label: 'Maham (Tasks)', labelAr: 'مهام (المهام)' },
+  { id: 'analyst', label: 'Al-Muhallil (Analyst)', labelAr: 'المحلل (التحليل)' },
+  { id: 'research-companion', label: 'Al-Khuwy (Companion)', labelAr: 'الخوي (الرفيق)' },
+  { id: 'mudawwin', label: 'Al-Mudawwin (Meetings)', labelAr: 'المُدوّن (الاجتماعات)' },
+  { id: 'sayyaq', label: 'Al-Katib (Writing)', labelAr: 'الكاتب (الكتابة)' },
 ];
 
 const NODE_WIDTH = 240;

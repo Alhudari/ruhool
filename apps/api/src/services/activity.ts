@@ -11,17 +11,29 @@ import { broadcastActivity } from '../state/activity-channel.js';
 
 export const MAX_ACTIVITY_RECORDS = 500;
 
+// Canonical Arabic display names — post trait-based rename (2026-04-23).
+// Single source of truth; UI/prompts/logs all import from here. Old
+// camel-herd names (عبدان/شواشة/رمّانة/الصفرا/الدبسا/الكرييتف/السياق/رمّان)
+// are retired — any remaining references in the codebase are bugs.
 export const AGENT_DISPLAY_NAMES: Record<string, string> = {
-  manager: 'الراعي', research: 'عبدان', 'reading-helper': 'شواشة',
-  'writing-critic': 'الصفرا', comparator: 'رمّانة', architect: 'المصمم',
-  'content-creator': 'الدبسا',
-  creative: '\u0627\u0644\u0643\u0631\u064a\u064a\u062a\u0641',
-  'tasks-agent': '\u0645\u0647\u0627\u0645',
+  manager: 'الراعي',
+  doctor: 'الدكتور',
+  research: 'الباحث',
+  'reading-helper': 'المُلخِّص',
+  'writing-critic': 'الناقد',
+  comparator: 'المُقارِن',
+  architect: 'المصمم',
+  'content-creator': 'السارد',
+  creative: 'المبدع',
+  'tasks-agent': 'مهام',
   analyst: 'المحلل',
   munazzim: 'المنظّم',
   mushakhkhis: 'المشخّص',
+  'research-companion': 'الخوي',
   fatin: 'الفطين',
   playmaker: 'المُمرر',
+  mudawwin: 'المُدوّن',
+  sayyaq: 'الكاتب',
   clippy: 'Clippy',
 };
 
