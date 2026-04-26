@@ -110,10 +110,13 @@ const VISION_SCHEMA = `Return a single JSON object with exactly these keys:
   "mermaid_diagram": string | null - a mermaid source representation if a diagram/flow is shown, else null,
   "data_table": string | null - a markdown table if tabular data is present, else null,
   "phd_relevance": string - one paragraph on thesis relevance,
-  "highlights": Array<{ "text": string, "color": "yellow"|"green"|"red"|"blue"|"purple"|"orange", "reason": string }>
+  "highlights": Array<{ "text": string, "color": "yellow"|"green"|"red"|"blue"|"purple"|"orange", "reason": string }> - aim for 3-7 highlights pulled from the visible text. A page with running prose should produce at least 3; only an empty/blank page returns []. Use yellow for the page's main claim, green for actionable methods, blue for definitions, red for weak/contested evidence, purple for surprising results, orange for citations/data points.,
+  "detected_page_number": number | null - if a page number is printed on the page (footer, header, margin), return that exact integer; if you cannot see one with confidence, return null,
+  "detected_source_title": string | null - if a book/paper title or running header is visible (e.g. on a header, title page, or chapter heading), return it as a clean string; otherwise null,
+  "detected_pages": number[] | null - if the image is a book/journal SPREAD showing two facing pages with two visible page numbers, return both numbers in reading order [left, right] (or [first, second] for RTL). Otherwise null. When non-null, also set detected_page_number to the first/leftmost page.
 }
 
-Return ONLY the JSON object. No prose, no markdown fences.`;
+Keep extracted_content focused on what's immediately visible — don't transcribe huge bodies of running text verbatim, summarize when needed. Return ONLY the JSON object. No prose, no markdown fences.`;
 
 const CHAPTER_SCHEMA = `Return a single JSON object with exactly these keys:
 {

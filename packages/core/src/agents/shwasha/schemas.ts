@@ -44,6 +44,14 @@ export const VisionResultSchema = z.object({
   data_table: z.string().nullable(),
   phd_relevance: z.string(),
   highlights: z.array(HighlightSchema),
+  // Auto-detected from the page itself when visible — the user can still
+  // override these in the UI.
+  detected_page_number: z.number().int().nullable().optional(),
+  detected_source_title: z.string().nullable().optional(),
+  // Book/journal spread support. When the image clearly shows two facing
+  // pages, the model returns both numbers here AND fills detected_page_number
+  // with the first/left one. Empty/absent means single page.
+  detected_pages: z.array(z.number().int()).nullable().optional(),
 });
 
 export const ChapterResultSchema = z.object({

@@ -1,2 +1,10 @@
-import { redirect } from 'next/navigation';
-export default function ResearchRoute() { redirect('/library?type=research-cluster'); }
+import { AppShell } from '@/components/layout/app-shell';
+import { ResearchHub } from '@/components/research/ResearchHub';
+
+export default function ResearchRoute() {
+  return (
+    <AppShell>
+      <ResearchHub />
+    </AppShell>
+  );
+}

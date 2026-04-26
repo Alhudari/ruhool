@@ -31,8 +31,10 @@ export function applyStoreDefaults(
   if (!store.readingSessions) store.readingSessions = [];
   if (!store.pageAnalyses) store.pageAnalyses = [];
   if (!store.agentNameOverrides) store.agentNameOverrides = {};
-  if (!store.shwashaSettings) {
-    store.shwashaSettings = {
+  // Prefer the new field; only seed it when neither field has data so we
+  // don't clobber legacy data still waiting on migration 007.
+  if (!store.alMulakhkhisSettings && !store.shwashaSettings) {
+    store.alMulakhkhisSettings = {
       mindBlock: DEFAULT_MIND_BLOCK,
       agentIntegrations: DEFAULT_AGENT_INTEGRATIONS,
       defaultLanguage: 'en',

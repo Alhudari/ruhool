@@ -1,12 +1,10 @@
-'use client';
-
 import { AppShell } from '@/components/layout/app-shell';
-import { ZoteroPage } from '@/components/zotero/zotero-page';
+import { ZoteroBrowser } from '@/components/zotero/ZoteroBrowser';
 
 export default function ZoteroRoute() {
   return (
     <AppShell>
-      <ZoteroPage />
+      <ZoteroBrowser />
     </AppShell>
   );
 }

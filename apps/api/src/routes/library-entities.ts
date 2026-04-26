@@ -34,6 +34,15 @@ function getEntities(store: StoreData): LibraryEntity[] {
   return store.libraryEntities;
 }
 
+// Only allow http(s) — defends against javascript:, data:, file:, etc. that
+// could otherwise reach the frontend and get opened in a new tab.
+function isSafeExternalUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch { return false; }
+}
+
 export function registerLibraryEntitiesRoutes(app: Hono, deps: LibraryEntitiesRoutesDeps): void {
   const { getStore, saveStore } = deps;
 
@@ -202,6 +211,54 @@ export function registerLibraryEntitiesRoutes(app: Hono, deps: LibraryEntitiesRo
     const all = getEntities(store).filter(e => !e.deletedAt && e.links.some(l => l.targetId === id));
     c.header('Cache-Control', 'private, max-age=60');
     return c.json(all);
+  });
+
+  // External URL — best-effort original-source link for a library entity.
+  // Order: explicit url → DOI → Zotero (desktop "select" or web) → null.
+  // Reject non-http(s) and non-zotero schemes so the frontend can safely
+  // window.open the result without sanitizing again.
+  app.get('/api/library/entities/:id/external-url', (c) => {
+    const store = getStore();
+    const id = c.req.param('id');
+    const entity = getEntities(store).find((e) => e.id === id);
+    if (!entity) return c.json({ error: 'Not found' }, 404);
+    const candidates: Array<{ kind: string; url: string }> = [];
+    if (entity.url && isSafeExternalUrl(entity.url)) candidates.push({ kind: 'url', url: entity.url });
+    if (entity.doi) {
+      const stripped = entity.doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').trim();
+      // DOI shape is loose but ALWAYS lives at https://doi.org/<stripped> — server
+      // resolves to https.
+      if (stripped) candidates.push({ kind: 'doi', url: `https://doi.org/${encodeURI(stripped)}` });
+    }
+    if (entity.zoteroKey && /^[A-Z0-9]{6,12}$/i.test(entity.zoteroKey)) {
+      candidates.push({ kind: 'zotero-desktop', url: `zotero://select/library/items/${entity.zoteroKey}` });
+      candidates.push({ kind: 'zotero-web', url: `https://www.zotero.org/library/items/${entity.zoteroKey}` });
+    }
+    if (candidates.length === 0) return c.json({ url: null, candidates: [] });
+    return c.json({ url: candidates[0].url, candidates });
+  });
+
+  // Open reading session — returns existing session for this entity, or starts
+  // a new one (currently only Zotero-backed entities can auto-start).
+  app.post('/api/library/entities/:id/open-reading', async (c) => {
+    const store = getStore();
+    const id = c.req.param('id');
+    const entity = getEntities(store).find((e) => e.id === id);
+    if (!entity) return c.json({ error: 'Not found' }, 404);
+    const sessions = (store as { readingSessions?: Array<{ id: string; libraryEntityId?: string; deletedAt?: string; updatedAt?: string }> }).readingSessions ?? [];
+    // Pick the most recently updated active session (users expect "resume",
+    // not "open the oldest one").
+    const existing = sessions
+      .filter((s) => s.libraryEntityId === id && !s.deletedAt)
+      .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))[0];
+    if (existing) return c.json({ sessionId: existing.id, created: false });
+    if (!entity.zoteroKey) {
+      return c.json(
+        { error: 'No reading session yet. Open Al-Mulakhkhis and pick a source for this entity.', needsManualStart: true },
+        409,
+      );
+    }
+    return c.json({ needsZoteroStart: true, zoteroKey: entity.zoteroKey });
   });
 
   // Zotero import → create entity

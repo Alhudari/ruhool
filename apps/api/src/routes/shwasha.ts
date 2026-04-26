@@ -161,7 +161,8 @@ interface ShwashaSettingsResolved {
 }
 
 function resolveSettings(store: StoreData): ShwashaSettingsResolved {
-  const s = store.shwashaSettings;
+  // Prefer post-rename field; fall back to legacy one until migration 007 runs.
+  const s = store.alMulakhkhisSettings ?? store.shwashaSettings;
   return {
     mindBlock: s?.mindBlock ?? DEFAULT_MIND_BLOCK,
     agentIntegrations: s?.agentIntegrations ?? DEFAULT_AGENT_INTEGRATIONS,
@@ -175,6 +176,24 @@ function resolveSettings(store: StoreData): ShwashaSettingsResolved {
 
 function findSession(store: StoreData, id: string): ReadingSessionRecord | undefined {
   return (store.readingSessions || []).find((s) => s.id === id);
+}
+
+/** Resolve a page image, following `aliasOf` references one hop. Spreads
+ *  store an alias on the secondary page pointing at the primary so we don't
+ *  duplicate the base64 bytes. Returns null when the page has no image or
+ *  the alias target is missing/circular. */
+function resolvePageImage(
+  session: ReadingSessionRecord,
+  pageNumber: number,
+): { base64: string; mimeType: string } | null {
+  const entry = session.pageImages?.[String(pageNumber)];
+  if (!entry) return null;
+  if ('base64' in entry) return entry;
+  // alias hop — guard against self-reference and missing target
+  if (entry.aliasOf === pageNumber) return null;
+  const target = session.pageImages?.[String(entry.aliasOf)];
+  if (target && 'base64' in target) return target;
+  return null;
 }
 
 function sessionPageAnalyses(store: StoreData, sessionId: string): PageAnalysisRecord[] {
@@ -277,6 +296,76 @@ function stripJsonFences(text: string): string {
     .replace(/,\s*([}\]])/g, '$1');
 }
 
+/**
+ * Best-effort recovery for JSON output truncated by the model hitting maxTokens
+ * mid-string. We walk the text tracking string state and bracket depth, drop
+ * everything after the last complete value, then close any open brackets.
+ *
+ * Returns null if the input doesn't look salvageable (no opening brace/bracket).
+ */
+export function salvageTruncatedJson(raw: string): string | null {
+  const text = stripJsonFences(raw);
+  // Find first opening bracket so we ignore preamble.
+  const startIdx = (() => {
+    const a = text.indexOf('{');
+    const b = text.indexOf('[');
+    if (a === -1 && b === -1) return -1;
+    if (a === -1) return b;
+    if (b === -1) return a;
+    return Math.min(a, b);
+  })();
+  if (startIdx === -1) return null;
+
+  const stack: Array<'{' | '['> = [];
+  let inString = false;
+  let escape = false;
+  // Position right after the most recent complete value (a comma or close-bracket).
+  // We restart from this checkpoint if truncation lands mid-string/value.
+  let lastSafeEnd = startIdx;
+
+  for (let i = startIdx; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) { escape = false; continue; }
+    if (inString) {
+      if (ch === '\\') { escape = true; continue; }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    switch (ch) {
+      case '"':
+        inString = true;
+        break;
+      case '{':
+      case '[':
+        stack.push(ch as '{' | '[');
+        break;
+      case '}':
+      case ']': {
+        stack.pop();
+        lastSafeEnd = i + 1;
+        if (stack.length === 0) return text.slice(startIdx, lastSafeEnd);
+        break;
+      }
+      case ',':
+        // A comma at top of the current container marks a "safe to truncate here" boundary.
+        if (!inString) lastSafeEnd = i;
+        break;
+      default:
+        break;
+    }
+  }
+  // Truncated. Cut to the last safe boundary, drop a dangling comma if any,
+  // then close every open bracket.
+  let head = text.slice(startIdx, lastSafeEnd).trimEnd();
+  while (head.endsWith(',')) head = head.slice(0, -1).trimEnd();
+  // Closers must mirror the open stack in reverse.
+  while (stack.length) {
+    const o = stack.pop();
+    head += o === '{' ? '}' : ']';
+  }
+  return head;
+}
+
 export function registerShwashaRoutes(app: Hono, deps: ShwashaRoutesDeps): void {
   const { getStore, saveStore, logger, logActivity, pickProviderForModel, getApiKey, splitIntoSections, ensurePapersDir, papersDir } = deps;
 
@@ -337,7 +426,7 @@ export function registerShwashaRoutes(app: Hono, deps: ShwashaRoutesDeps): void 
     const total = pages.length || session.totalPages || 0;
     const text = pages[n - 1] ?? '';
 
-    const pageImage = session.pageImages?.[String(n)];
+    const pageImage = resolvePageImage(session, n);
     const imageUrl = pageImage ? `data:${pageImage.mimeType};base64,${pageImage.base64}` : null;
 
     if (imageRequested) {
@@ -424,13 +513,16 @@ export function registerShwashaRoutes(app: Hono, deps: ShwashaRoutesDeps): void 
       // We re-resolve it on read; Shwasha PUT just preserves whatever's currently saved.
       voiceProfile: current.voiceProfile,
     };
-    store.shwashaSettings = {
+    // Always write to the post-rename field. Migration 007 wipes the legacy
+    // one, so we don't need to keep both in sync.
+    store.alMulakhkhisSettings = {
       mindBlock: next.mindBlock,
       agentIntegrations: next.agentIntegrations,
       defaultLanguage: next.defaultLanguage,
       ollamaEnabled: next.ollamaEnabled,
       ollamaBaseUrl: next.ollamaBaseUrl,
     };
+    delete store.shwashaSettings;
 
     // Reflect the toggle in the providers table so pickProviderForModel honors
     // the switch. Does not create the Ollama provider instance here — that's
@@ -459,6 +551,7 @@ export function registerShwashaRoutes(app: Hono, deps: ShwashaRoutesDeps): void 
     pageImages?: Record<string, { base64: string; mimeType: string }>;
     totalPagesOverride?: number;
     readingMode?: ReadingMode;
+    libraryEntityId?: string;
   }): ReadingSessionRecord {
     const now = new Date().toISOString();
     return {
@@ -477,6 +570,7 @@ export function registerShwashaRoutes(app: Hono, deps: ShwashaRoutesDeps): void 
       readingMode: input.readingMode || 'rolling',
       pages: input.pages,
       pageImages: input.pageImages,
+      libraryEntityId: input.libraryEntityId,
       createdAt: now,
       updatedAt: now,
       completedAt: null,
@@ -747,7 +841,7 @@ export function registerShwashaRoutes(app: Hono, deps: ShwashaRoutesDeps): void 
 
   app.post('/api/shwasha/sources/zotero', async (c) => {
     const store = getStore();
-    const body = await c.req.json<{ zoteroKey: string; mindOverride?: string | null; language?: 'en' | 'ar' }>();
+    const body = await c.req.json<{ zoteroKey: string; mindOverride?: string | null; language?: 'en' | 'ar'; libraryEntityId?: string }>();
     const zoteroKey = (body.zoteroKey || '').trim();
     if (!zoteroKey) return c.json({ error: 'zoteroKey required' }, 400);
 
@@ -789,6 +883,51 @@ export function registerShwashaRoutes(app: Hono, deps: ShwashaRoutesDeps): void 
       abstractNote: fetched.meta.abstractNote,
     };
 
+    // Auto-import to the unified Library if no explicit entity was passed.
+    // This is the "اذا اخترت شي على طول يضيفه اول للمكتبة" flow — picking a
+    // Zotero item in Al-Mulakhkhis should land it in the Library so the user
+    // can manage/annotate/categorize it there too.
+    let resolvedEntityId = body.libraryEntityId;
+    if (!resolvedEntityId) {
+      try {
+        const existing = (store.libraryEntities ?? []).find((e) => e.zoteroKey === zoteroKey && !e.deletedAt);
+        if (existing) {
+          resolvedEntityId = existing.id;
+        } else {
+          const itemTypeMap: Record<string, 'paper' | 'book' | 'report' | 'thesis-chapter' | 'webpage' | 'file'> = {
+            journalArticle: 'paper', book: 'book', bookSection: 'book',
+            report: 'report', thesis: 'thesis-chapter', conferencePaper: 'paper',
+            webpage: 'webpage', document: 'file',
+          };
+          const now = new Date().toISOString();
+          const newEntity = {
+            id: crypto.randomUUID(),
+            type: itemTypeMap[fetched.meta.itemType ?? ''] ?? 'paper',
+            title: fetched.meta.title || zoteroKey,
+            notes: '',
+            subNotes: [],
+            links: [],
+            tags: [],
+            zoteroKey,
+            authors: fetched.meta.authors,
+            year: typeof fetched.meta.year === 'number' ? fetched.meta.year : undefined,
+            doi: fetched.meta.doi,
+            abstract: fetched.meta.abstractNote,
+            readingStatus: 'reading' as const,
+            importSource: 'zotero',
+            createdAt: now,
+            updatedAt: now,
+          };
+          if (!store.libraryEntities) store.libraryEntities = [];
+          store.libraryEntities.push(newEntity);
+          resolvedEntityId = newEntity.id;
+        }
+      } catch {
+        // Auto-import is a courtesy — never block session creation if it fails.
+        resolvedEntityId = body.libraryEntityId;
+      }
+    }
+
     const session = buildSession({
       paperId: zoteroKey,
       paperTitle: fetched.meta.title || zoteroKey,
@@ -798,6 +937,7 @@ export function registerShwashaRoutes(app: Hono, deps: ShwashaRoutesDeps): void 
       pages,
       language,
       mindOverride: body.mindOverride ?? null,
+      libraryEntityId: resolvedEntityId,
     });
     pushSession(store, session);
     saveStore();
@@ -2003,6 +2143,14 @@ Return ONLY the JSON. No prose.`;
       id: crypto.randomUUID(),
       paperId: crypto.randomUUID(),
       paperTitle: body.paperTitle || 'Screen capture session',
+      // Mark the title as user-supplied so the captures handler doesn't
+      // clobber a deliberate title that happens to start with "Screen Capture
+      // from My Lecture" etc. (the previous regex-based heuristic would have
+      // matched and overwritten it). When the user doesn't supply a title we
+      // leave the flag undefined — meaning "placeholder, eligible for the
+      // first vision-detected title to take over". After that first detection
+      // the flag flips to 'auto' and the title is locked.
+      ...(body.paperTitle?.trim() ? { paperTitleSource: 'user' as const } : {}),
       source: 'screen-capture',
       sourceRef: null,
       totalPages: 0,
@@ -2033,32 +2181,26 @@ Return ONLY the JSON. No prose.`;
     const session = findSession(store, c.req.param('id'));
     if (!session) return c.json({ error: 'Session not found' }, 404);
     const body = await c.req.json<{
-      pageNumber: number;
+      pageNumber?: number;
       fileName?: string;
       label?: string;
       imageBase64: string;
       mimeType: string;
       specialPrompt?: string;
       deep?: boolean;
+      autoDetect?: boolean;
     }>();
-    if (typeof body.pageNumber !== 'number' || body.pageNumber < 1) {
-      return c.json({ error: 'pageNumber (>=1) required' }, 400);
+    // pageNumber may be omitted when autoDetect is true — we pull it from the
+    // vision result. Otherwise the user must supply a >=1 integer.
+    const autoDetect = body.autoDetect === true;
+    if (!autoDetect) {
+      if (typeof body.pageNumber !== 'number' || body.pageNumber < 1) {
+        return c.json({ error: 'pageNumber (>=1) required (or set autoDetect=true)' }, 400);
+      }
     }
     if (!body.imageBase64 || !body.mimeType) {
       return c.json({ error: 'imageBase64 and mimeType required' }, 400);
     }
-
-    if (!session.pageImages) session.pageImages = {};
-    session.pageImages[String(body.pageNumber)] = {
-      base64: body.imageBase64,
-      mimeType: body.mimeType,
-    };
-    if (!session.pages) session.pages = [];
-    const placeholder = '[screen capture — use vision]';
-    while (session.pages.length < body.pageNumber) session.pages.push(placeholder);
-    // Ensure the slot for this page carries the placeholder if empty.
-    if (!session.pages[body.pageNumber - 1]) session.pages[body.pageNumber - 1] = placeholder;
-    session.totalPages = Math.max(session.totalPages || 0, body.pageNumber);
 
     const settings = resolveSettings(store);
     const shwashaTask: ShwashaTask = body.deep === true ? 'vision_hard' : 'vision_normal';
@@ -2076,6 +2218,9 @@ Return ONLY the JSON. No prose.`;
       ? `${baseVisionPrompt}\n\nAdditional user instructions:\n${body.specialPrompt}`
       : baseVisionPrompt;
 
+    const pageHint = autoDetect
+      ? `Detect the page number from any visible page-number marker. The user did not pre-enter one — return your best read in detected_page_number.`
+      : `Page ${body.pageNumber} of "${session.paperTitle}"${body.label ? ` (${body.label})` : ''}.`;
     const userContent: Array<{ type: string; [k: string]: unknown }> = [
       {
         type: 'image',
@@ -2087,19 +2232,21 @@ Return ONLY the JSON. No prose.`;
       },
       {
         type: 'text',
-        text: `Page ${body.pageNumber} of "${session.paperTitle}"${body.label ? ` (${body.label})` : ''}. Analyze the full page image: text, figures, tables.`,
+        text: `${pageHint} Analyze the full page image: text, figures, tables. Also fill detected_page_number and detected_source_title from anything printed on the page (footer/header/title page).`,
       },
     ];
 
     let fullText = '';
     let usage = { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
     try {
+      // Bumped from 2000 → 4000: dense pages were being truncated mid-string,
+      // producing "Unterminated string in JSON" parse errors.
       for await (const chunk of provider.chat({
         model,
         systemPrompt,
         messages: [{ role: 'user', content: userContent }],
         temperature: 0.2,
-        maxTokens: 2000,
+        maxTokens: 4000,
       })) {
         if (chunk.type === 'text') fullText += chunk.content;
         else if (chunk.type === 'usage') usage = chunk.usage;
@@ -2112,11 +2259,76 @@ Return ONLY the JSON. No prose.`;
     let parsed: unknown;
     try {
       parsed = JSON.parse(stripJsonFences(fullText));
-    } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : 'parse failed', raw: fullText }, 502);
+    } catch (firstErr) {
+      // Best-effort recovery for truncated JSON: trim back to the last complete
+      // string and attempt to close open brackets. If even the salvage fails,
+      // surface the original error with the raw text for inspection.
+      const salvaged = salvageTruncatedJson(fullText);
+      if (salvaged !== null) {
+        try { parsed = JSON.parse(salvaged); }
+        catch { return c.json({ error: firstErr instanceof Error ? firstErr.message : 'parse failed', raw: fullText }, 502); }
+      } else {
+        return c.json({ error: firstErr instanceof Error ? firstErr.message : 'parse failed', raw: fullText }, 502);
+      }
     }
     const safe = VisionResultSchema.safeParse(parsed);
     if (!safe.success) return c.json({ error: safe.error.message, raw: fullText }, 502);
+
+    // Resolve the effective page number AFTER the vision call so autoDetect can
+    // use the model's detected_page_number if the user didn't supply one.
+    const resolvedPageNumber: number | null = autoDetect
+      ? (typeof safe.data.detected_page_number === 'number' && safe.data.detected_page_number >= 1
+          ? Math.floor(safe.data.detected_page_number)
+          : null)
+      : (typeof body.pageNumber === 'number' ? body.pageNumber : null);
+    if (!resolvedPageNumber || resolvedPageNumber < 1) {
+      return c.json({
+        error: 'Could not detect a page number from the image. Please enter it manually.',
+        detectedTitle: safe.data.detected_source_title ?? null,
+      }, 422);
+    }
+    const effectivePageNumber = resolvedPageNumber;
+
+    if (!session.pageImages) session.pageImages = {};
+    session.pageImages[String(effectivePageNumber)] = {
+      base64: body.imageBase64,
+      mimeType: body.mimeType,
+    };
+    if (!session.pages) session.pages = [];
+    const placeholder = '[screen capture — use vision]';
+    while (session.pages.length < effectivePageNumber) session.pages.push(placeholder);
+    if (!session.pages[effectivePageNumber - 1]) session.pages[effectivePageNumber - 1] = placeholder;
+    session.totalPages = Math.max(session.totalPages || 0, effectivePageNumber);
+
+    // Adopt the model-detected title only when the title is still a
+    // placeholder (paperTitleSource is unset). After the first detection the
+    // flag flips to 'auto' and the title is locked — so a later page that
+    // happens to show a chapter heading or running header doesn't replace
+    // the real source title. The flag-based guard replaces an older regex
+    // that incorrectly clobbered any title beginning with "Screen Capture".
+    if (
+      autoDetect &&
+      !session.paperTitleSource &&
+      typeof safe.data.detected_source_title === 'string' &&
+      safe.data.detected_source_title.trim()
+    ) {
+      session.paperTitle = safe.data.detected_source_title.trim().slice(0, 240);
+      session.paperTitleSource = 'auto';
+    }
+
+    // Smart fileName: remember which fileName the user used for which detected
+    // source. Subsequent captures from the same source can auto-fill on the
+    // client. Keyed by lowercased detected_source_title.
+    if (
+      typeof body.fileName === 'string' &&
+      body.fileName.trim() &&
+      typeof safe.data.detected_source_title === 'string' &&
+      safe.data.detected_source_title.trim()
+    ) {
+      if (!session.fileNameBySource) session.fileNameBySource = {};
+      const sourceKey = safe.data.detected_source_title.trim().toLowerCase().slice(0, 120);
+      session.fileNameBySource[sourceKey] = body.fileName.trim();
+    }
 
     // Map vision output → analyze-style page analysis for UI uniformity.
     const vision = safe.data;
@@ -2137,12 +2349,28 @@ Return ONLY the JSON. No prose.`;
     };
 
     const tokenCostUsd = provider.estimateCost(usage.inputTokens, usage.outputTokens, model);
+
+    // Page-pair detection: when the model returned `detected_pages` with two
+    // distinct integers, also reserve the second page so the user sees both
+    // numbers in the timeline. We do NOT re-run the analysis — both pages
+    // share the same record (the analysis already covers the spread).
+    const pair = Array.isArray(safe.data.detected_pages) ? safe.data.detected_pages.filter((n): n is number => typeof n === 'number' && n >= 1) : [];
+    const secondaryPageNumber = pair.length === 2 && pair[0] === effectivePageNumber && pair[1] !== effectivePageNumber ? pair[1] : null;
+    if (secondaryPageNumber) {
+      while (session.pages.length < secondaryPageNumber) session.pages.push(placeholder);
+      if (!session.pages[secondaryPageNumber - 1]) session.pages[secondaryPageNumber - 1] = placeholder;
+      // Spread: don't duplicate the base64 — store an alias to the primary.
+      // Readers (like /pages/:n) follow the alias to fetch the actual bytes.
+      session.pageImages[String(secondaryPageNumber)] = { aliasOf: effectivePageNumber };
+      session.totalPages = Math.max(session.totalPages || 0, secondaryPageNumber);
+    }
+
     const existing = sessionPageAnalyses(store, session.id);
-    const { version, parentVersionId } = nextVersionForPage(existing, body.pageNumber);
+    const { version, parentVersionId } = nextVersionForPage(existing, effectivePageNumber);
     const record: PageAnalysisRecord = {
       id: crypto.randomUUID(),
       sessionId: session.id,
-      pageNumber: body.pageNumber,
+      pageNumber: effectivePageNumber,
       version,
       parentVersionId,
       analysis: mappedAnalysis,
@@ -2160,10 +2388,57 @@ Return ONLY the JSON. No prose.`;
     session.totalCost = (session.totalCost || 0) + tokenCostUsd;
     session.updatedAt = new Date().toISOString();
 
-    upsertPageMemory(store, session, body.pageNumber, record.id, mainIdea, []);
+    upsertPageMemory(store, session, effectivePageNumber, record.id, mainIdea, []);
+
+    // Mirror the same record under the secondary page when it's a spread, so
+    // navigating to either page in the timeline finds the analysis.
+    if (secondaryPageNumber) {
+      const { version: v2, parentVersionId: pv2 } = nextVersionForPage(existing, secondaryPageNumber);
+      store.pageAnalyses.push({
+        ...record,
+        id: crypto.randomUUID(),
+        pageNumber: secondaryPageNumber,
+        version: v2,
+        parentVersionId: pv2,
+      });
+      upsertPageMemory(store, session, secondaryPageNumber, record.id, mainIdea, []);
+    }
 
     saveStore();
-    return c.json({ pageAnalysis: record, session });
+
+    // Cost meter signal: total session cost crossed the soft threshold ($0.50).
+    // The UI uses this to show a one-time prompt, not a hard block.
+    const SOFT_COST_THRESHOLD_USD = 0.5;
+    const previousTotal = (session.totalCost || 0) - tokenCostUsd;
+    const crossedThreshold = previousTotal < SOFT_COST_THRESHOLD_USD && (session.totalCost || 0) >= SOFT_COST_THRESHOLD_USD;
+
+    return c.json({
+      pageAnalysis: record,
+      session,
+      // Stable shape for the UI confirm bar / cost meter — never depend on the
+      // raw vision payload, since the schema may evolve.
+      detected: {
+        pageNumber: typeof safe.data.detected_page_number === 'number' ? safe.data.detected_page_number : null,
+        sourceTitle: safe.data.detected_source_title ?? null,
+        pages: pair.length > 0 ? pair : null,
+      },
+      cost: {
+        usd: tokenCostUsd,
+        sessionUsd: session.totalCost,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        thresholdCrossed: crossedThreshold,
+      },
+      // Smart-fileName lookup — if the user didn't enter one, the client can
+      // suggest this. Mirrors session.fileNameBySource[detectedSource].
+      suggestedFileName: (() => {
+        if (body.fileName?.trim()) return null;
+        const t = safe.data.detected_source_title;
+        if (typeof t !== 'string' || !t.trim()) return null;
+        const key = t.trim().toLowerCase().slice(0, 120);
+        return session.fileNameBySource?.[key] ?? null;
+      })(),
+    });
   });
 
   app.patch('/api/shwasha/analyses/:id', async (c) => {
@@ -2196,6 +2471,44 @@ Return ONLY the JSON. No prose.`;
     record.updatedAt = new Date().toISOString();
     saveStore();
     return c.json({ pageAnalysis: record });
+  });
+
+  // Inline-correction endpoint used by the screen-capture ConfirmBar. The
+  // user fixes a mis-detected page number or source title before continuing.
+  // Scope: only updates the analysis record's pageNumber and (if appropriate)
+  // the session's paperTitle. Image storage keys are NOT re-keyed — corrections
+  // happen near-immediately after capture, when the user usually doesn't need
+  // to re-render the image. This keeps the operation atomic and side-effect-free.
+  app.patch('/api/shwasha/analyses/:id/correct', async (c) => {
+    const store = getStore();
+    const id = c.req.param('id');
+    const record = (store.pageAnalyses || []).find((p) => p.id === id);
+    if (!record) return c.json({ error: 'Not found' }, 404);
+    const body = await c.req.json<{ pageNumber?: number; sourceTitle?: string | null }>().catch(() => ({} as { pageNumber?: number; sourceTitle?: string | null }));
+
+    if (typeof body.pageNumber === 'number') {
+      if (body.pageNumber < 1 || !Number.isFinite(body.pageNumber)) {
+        return c.json({ error: 'pageNumber must be a positive integer' }, 400);
+      }
+      record.pageNumber = Math.floor(body.pageNumber);
+    }
+
+    const session = (store.readingSessions || []).find((s) => s.id === record.sessionId);
+    if (session && typeof body.sourceTitle === 'string') {
+      const trimmed = body.sourceTitle.trim();
+      if (trimmed) {
+        session.paperTitle = trimmed.slice(0, 240);
+        // The user explicitly confirmed this title — lock it from further
+        // auto-detection on subsequent captures.
+        session.paperTitleSource = 'user';
+        session.updatedAt = new Date().toISOString();
+      }
+    }
+
+    record.humanEdited = true;
+    record.updatedAt = new Date().toISOString();
+    saveStore();
+    return c.json({ pageAnalysis: record, session });
   });
 
   app.patch('/api/shwasha/sessions/:id/notes', async (c) => {

@@ -54,6 +54,54 @@ export function startWatcher(deps: WatcherDeps): NodeJS.Timeout {
   }, 10 * 60 * 1000);
 }
 
+// ── Zotero snapshot periodic sync ─────────────────────────────────
+// Pulls items + collections in the background so the user's offline cache
+// stays warm. Failure is silent and never wipes the existing snapshot —
+// the route already implements the keep-old-on-failure semantics.
+//
+// Runs once on startup (after a small delay), then every `intervalMs`.
+// Default 6 hours — Zotero changes are not high-frequency.
+export interface ZoteroSnapshotSyncDeps {
+  syncOnce: () => Promise<{ ok: boolean; itemsCount: number; collectionsCount: number; errors: string[] }>;
+  isConfigured: () => boolean;
+  logger: { info: (m: string) => void; warn: (obj: { err: unknown }, m: string) => void };
+  intervalMs?: number;
+  initialDelayMs?: number;
+}
+
+export function startZoteroSnapshotSync(deps: ZoteroSnapshotSyncDeps): { stop: () => void } {
+  const intervalMs = deps.intervalMs ?? 6 * 60 * 60 * 1000;
+  const initialDelayMs = deps.initialDelayMs ?? 60 * 1000; // 1 min after boot
+  let stopped = false;
+
+  const tick = async () => {
+    if (stopped) return;
+    if (!deps.isConfigured()) return; // skip silently when Zotero not set up
+    try {
+      const r = await deps.syncOnce();
+      if (r.ok) {
+        deps.logger.info(`[zotero-sync] OK — items=${r.itemsCount}, collections=${r.collectionsCount}`);
+      } else {
+        deps.logger.warn({ err: r.errors.join('; ') }, '[zotero-sync] partial failure (snapshot kept)');
+      }
+    } catch (err) {
+      // Defensive: even if syncOnce throws, never let the periodic loop die.
+      deps.logger.warn({ err }, '[zotero-sync] tick threw');
+    }
+  };
+
+  const initialTimer = setTimeout(() => { void tick(); }, initialDelayMs);
+  const interval = setInterval(() => { void tick(); }, intervalMs);
+
+  return {
+    stop: () => {
+      stopped = true;
+      clearTimeout(initialTimer);
+      clearInterval(interval);
+    },
+  };
+}
+
 // ── Zotero refresh-overdue checker ─────────────────────────────────
 // Once a day, checks if it's been > 14 days since last Zotero refresh,
 // and creates a notification if overdue (no auto-refresh — user-triggered only).

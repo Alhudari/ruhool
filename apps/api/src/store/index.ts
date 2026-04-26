@@ -18,6 +18,7 @@ import { STORE_FILE, ensureDataDir } from '../config/paths.js';
 import { encryptSecret, decryptSecret } from './encryption.js';
 import type { StoreData } from './types.js';
 import { runMigrations } from './migrations/index.js';
+import { isPostgresMode, loadStoreFromDb, saveStoreToDb } from './supabase-store.js';
 
 // ─── Promise-chain mutex (inline, no new dep) ───
 let queue: Promise<unknown> = Promise.resolve();
@@ -138,9 +139,71 @@ export function loadStore(): StoreData {
 
 // ─── Singleton ───
 let _store: StoreData | null = null;
+// Promise cache so concurrent calls to `initializeStore()` (top-level await
+// + early route hit during cold start) share a single load. Without this,
+// each caller fires its own DB SELECT and races to set `_store`, last
+// writer wins, migrations may run twice. (MVA finding #3.)
+let _initPromise: Promise<void> | null = null;
+
+/**
+ * Async pre-warm — required when STORE_BACKEND=postgres so the singleton
+ * is loaded from the DB before any sync `getStore()` call. JSON-file mode
+ * doesn't need this (sync load works), but calling it is safe — it just
+ * pre-warms the file path too.
+ *
+ * Call ONCE at process startup, before importing modules that touch the
+ * store at top level. In `apps/api/src/index.ts` this happens via top-level
+ * `await initializeStore()` before `getStore()` is called.
+ *
+ * Idempotent: if already initialized OR in-flight, returns the same promise.
+ */
+export function initializeStore(): Promise<void> {
+  if (_store) return Promise.resolve();
+  if (_initPromise) return _initPromise;
+  _initPromise = (async () => {
+    if (isPostgresMode()) {
+      const fromDb = await loadStoreFromDb();
+      // Merge with emptyStore so a fresh DB row (`{}`) still gets the required
+      // arrays (`providers: []`, `tasks: []`, etc.) — the runtime expects them
+      // to be defined. Same semantics as loadStore() in JSON mode, which always
+      // starts from emptyStore() before applying any persisted overrides.
+      _store = { ...emptyStore(), ...(fromDb ?? {}) };
+      if (fromDb) decryptSensitive(_store);
+    } else {
+      _store = loadStore();
+    }
+    const migrated = runMigrations(_store);
+    // M7: flush immediately when migrations applied — otherwise a crash
+    // before the first save would re-run them on the next cold start.
+    if (migrated.applied.length > 0) {
+      try {
+        await saveStore();
+      } catch (err) {
+        // Don't fail boot on a flush error — log and continue. The next
+        // legitimate save will retry persisting the migrated shape.
+        // eslint-disable-next-line no-console
+        console.error('[store] Failed to flush migrations after init:', err);
+      }
+    }
+  })();
+  return _initPromise;
+}
+
+/** Test-only: clear init state so changing STORE_BACKEND/DATABASE_URL across
+ *  tests works correctly. */
+export function _resetInitForTests(): void {
+  _store = null;
+  _initPromise = null;
+}
 
 export function getStore(): StoreData {
   if (!_store) {
+    if (isPostgresMode()) {
+      // In postgres mode the singleton must be pre-warmed by initializeStore().
+      // Reaching here means the boot order is wrong — fail loud, not silent
+      // (silent would risk writing an empty DEFAULT_STORE over a real DB row).
+      throw new Error('Store not initialized: call initializeStore() before getStore() in STORE_BACKEND=postgres mode');
+    }
     _store = loadStore();
     const migrated = runMigrations(_store);
     if (migrated.applied.length > 0) {
@@ -152,47 +215,61 @@ export function getStore(): StoreData {
   return _store;
 }
 
+/** Build the encrypted-at-rest shape used for both file-write and DB-write.
+ *  Pulled out so the two persistence backends share identical ciphertext. */
+function buildSerializable(store: StoreData): StoreData {
+  const r = (store as { resend?: ResendSecrets }).resend;
+  const g = (store as { googleTasks?: GoogleTasksSecrets }).googleTasks;
+  const keys = (store as { apiKeys?: Record<string, string> }).apiKeys;
+  const n = (store as { notifications?: NotificationSecrets & Record<string, unknown> }).notifications;
+  return {
+    ...store,
+    providers: (store.providers || []).map((p) => ({
+      ...p,
+      apiKey: p.apiKey ? encryptSecret(p.apiKey) : p.apiKey,
+    })),
+    ...(r ? { resend: { ...r, apiKey: r.apiKey ? encryptSecret(r.apiKey) : r.apiKey } } : {}),
+    ...(g ? {
+      googleTasks: {
+        ...g,
+        clientSecret: g.clientSecret ? encryptSecret(g.clientSecret) : g.clientSecret,
+        refreshToken: g.refreshToken ? encryptSecret(g.refreshToken) : g.refreshToken,
+        accessToken: g.accessToken ? encryptSecret(g.accessToken) : g.accessToken,
+      },
+    } : {}),
+    ...(keys ? { apiKeys: Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, v ? encryptSecret(v) : v])) } : {}),
+    ...(n ? {
+      notifications: {
+        ...n,
+        smtpPass: n.smtpPass ? encryptSecret(n.smtpPass) : n.smtpPass,
+        slackWebhookUrl: n.slackWebhookUrl ? encryptSecret(n.slackWebhookUrl) : n.slackWebhookUrl,
+      },
+    } : {}),
+  };
+}
+
 /**
- * Write the current singleton to disk, serialized through the fs-level mutex
- * to prevent concurrent-write corruption.
+ * Write the current singleton to the active backend (JSON file OR Postgres),
+ * serialized through the same promise-chain mutex so concurrent writers can't
+ * corrupt either backend.
  *
- * Returns a promise that resolves when the write completes. For historical
- * compatibility with the god-file's fire-and-forget call sites, callers that
+ * Returns a promise that resolves when the write completes. Callers that
  * don't await still get safe serialized writes (just no backpressure).
  */
 export function saveStore(): Promise<void> {
-  return withLock(() => {
+  return withLock(async () => {
     const store = getStore();
+    const serializable = buildSerializable(store);
+
+    if (isPostgresMode()) {
+      // Postgres backend — single UPSERT on the JSONB row. Encryption already
+      // applied above, so on-disk and in-DB ciphertexts are identical.
+      await saveStoreToDb(serializable);
+      return;
+    }
+
+    // JSON file backend — atomic write (temp file + fsync + rename).
     ensureDataDir();
-    const r = (store as { resend?: ResendSecrets }).resend;
-    const g = (store as { googleTasks?: GoogleTasksSecrets }).googleTasks;
-    const keys = (store as { apiKeys?: Record<string, string> }).apiKeys;
-    const n = (store as { notifications?: NotificationSecrets & Record<string, unknown> }).notifications;
-    const serializable: StoreData = {
-      ...store,
-      providers: (store.providers || []).map((p) => ({
-        ...p,
-        apiKey: p.apiKey ? encryptSecret(p.apiKey) : p.apiKey,
-      })),
-      ...(r ? { resend: { ...r, apiKey: r.apiKey ? encryptSecret(r.apiKey) : r.apiKey } } : {}),
-      ...(g ? {
-        googleTasks: {
-          ...g,
-          clientSecret: g.clientSecret ? encryptSecret(g.clientSecret) : g.clientSecret,
-          refreshToken: g.refreshToken ? encryptSecret(g.refreshToken) : g.refreshToken,
-          accessToken: g.accessToken ? encryptSecret(g.accessToken) : g.accessToken,
-        },
-      } : {}),
-      ...(keys ? { apiKeys: Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, v ? encryptSecret(v) : v])) } : {}),
-      ...(n ? {
-        notifications: {
-          ...n,
-          smtpPass: n.smtpPass ? encryptSecret(n.smtpPass) : n.smtpPass,
-          slackWebhookUrl: n.slackWebhookUrl ? encryptSecret(n.slackWebhookUrl) : n.slackWebhookUrl,
-        },
-      } : {}),
-    };
-    // F-001: atomic write — temp file + fsync + rename
     const json = JSON.stringify(serializable, null, 2);
     const tmpFile = `${STORE_FILE}.tmp.${process.pid}`;
     let fd: number | null = null;
@@ -211,7 +288,13 @@ export function saveStore(): Promise<void> {
   });
 }
 
-/** Test-only: reset the singleton (for unit tests that mutate STORE_FILE). */
+/** Test-only: reset the singleton + init-promise + DB url cache (for unit
+ *  tests that mutate STORE_FILE or toggle STORE_BACKEND between cases). */
 export function _resetStoreForTests(): void {
   _store = null;
+  _initPromise = null;
+  // Re-import to avoid circular dep at module init; safe inside a function
+  // body. Best-effort: if the supabase-store module is mocked the import
+  // returns the mock, which is a no-op.
+  void import('./supabase-store.js').then((m) => m._resetDbUrlCacheForTests?.());
 }

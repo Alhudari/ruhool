@@ -571,3 +571,74 @@ Zotero item
 - [ ] تصميم موحد لكل الـ dashboards
 - [ ] hierarchy واضح: PhD Dashboard → sections (GRS2, Meetings, Milestones, Tasks, Library)
 
+
+---
+
+## Library Matrix Agent — Conversational Chat (2026-04-26)
+
+Streaming chat companion to the existing one-shot `/agent-fill` modal. The
+agent uses Anthropic tool_use to propose changes; the user reviews each
+proposal inline before anything mutates the matrix.
+
+### Architecture
+
+```
+┌────────────────────┐                  ┌──────────────────────────┐
+│ LibraryMatrixView  │ Sparkles per row │   LibraryAgentChat panel │
+│   (existing)       │ ─────────────►   │   (right-side, 480px)    │
+│                    │                  │                          │
+│   Zap per row ──►  │ one-shot modal   │   composer ◄──┐          │
+│   Chat in header   │ (legacy path)    │               │ user msg │
+└────────────────────┘                  │   tool_call ──┘ proposals│
+                                        │     │                    │
+                                        │     ▼ Accept/Reject/Edit │
+                                        │   /tool-results endpoint │
+                                        │     │                    │
+                                        │     ▼ existing            │
+                                        │   apply-proposals or     │
+                                        │   add-columns or         │
+                                        │   collection mutation    │
+                                        └──────────────────────────┘
+
+POST /api/library/agent/conversations          → create/fetch thread
+POST /api/library/agent/conversations/:id/messages → SSE stream
+POST /api/library/agent/conversations/:id/tool-results → user decision
+DELETE /api/library/agent/conversations/:id    → wipe thread
+```
+
+### Tools
+
+| Tool                            | Auto-execute? | What it does                         |
+|---------------------------------|---------------|--------------------------------------|
+| `propose_cell_value`            | ❌ pause       | Sets one cell on one entity          |
+| `propose_new_column`            | ❌ pause       | Adds a column to the matrix schema   |
+| `suggest_collection_assignment` | ❌ pause       | Adds entity to a collection          |
+| `read_entities`                 | ✅ server      | Read sample (max 30) of entities     |
+| `read_zotero_metadata`          | ✅ server      | Pull Zotero item from local snapshot |
+| `search_library`                | ✅ server      | Substring search title/authors/abs   |
+
+### Persistence
+
+Conversations live in `StoreData.libraryAgentConversations[]`. One thread per
+`(entityId, entityType)` for entity threads, one per `entityType` for global.
+Capped at 200 messages per thread; oldest 50 collapse into `rollingSummary`
+when token estimate crosses 12k.
+
+### Identity lock
+
+System prompt ends with the same SECURITY paragraph used by other specialist
+agents (paste, not import — keeps this route off the dispatch graph). Agent
+refuses to write code, draft emails, or do anything off-matrix.
+
+### Cost-of-ownership note
+
+Sonnet 4.6 @ ~2k maxTokens per turn:
+- Input: typical turn ≈ 1500 tokens system + ~500 tokens history = $0.006
+- Output: ≈ 500 tokens per response = $0.0075
+- **Per turn ≈ $0.013**
+- A typical 8-turn discussion ≈ **$0.10**.
+- Read tools add ~200 tokens of result back, marginal.
+- Compared to /agent-fill (one-shot, ~$0.02), chat is ~5× costlier per session
+  but produces verifiable, user-approved output. Net: cheaper than running
+  /agent-fill twice on a bad first proposal.
+

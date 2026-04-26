@@ -1,10 +1,5 @@
-import { AppShell } from '@/components/layout/app-shell';
-import { ScreenCaptureEntry } from '@/components/reading/ScreenCaptureEntry';
+import { redirect } from 'next/navigation';
 
-export default function ShwashaCapturePage() {
-  return (
-    <AppShell>
-      <ScreenCaptureEntry />
-    </AppShell>
-  );
+export default function ShwashaCaptureRedirect() {
+  redirect('/al-mulakhkhis/capture');
 }

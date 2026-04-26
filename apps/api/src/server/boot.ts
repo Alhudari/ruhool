@@ -16,6 +16,7 @@ interface BootReport {
   temporal: WorkerStatus;
   schedule: WorkerStatus;
   zoteroRefresh: WorkerStatus;
+  zoteroSnapshotSync: WorkerStatus;
   zoteroVaultSync: WorkerStatus;
   watcher: WorkerStatus;
   research: WorkerStatus;
@@ -31,6 +32,7 @@ export const bootReport: BootReport = {
   temporal: 'skipped',
   schedule: 'skipped',
   zoteroRefresh: 'skipped',
+  zoteroSnapshotSync: 'skipped',
   zoteroVaultSync: 'skipped',
   watcher: 'skipped',
   research: 'skipped',
@@ -63,6 +65,7 @@ export interface BootDeps {
   runResearch: (taskId: string) => Promise<void>;
   startScheduleChecker: () => void;
   startZoteroRefreshChecker: () => void;
+  startZoteroSnapshotSync: () => void;
   startZoteroVaultSync: () => void;
   startHabitSpawnerChecker: () => void;
   startGoogleTasksSync: () => void;
@@ -96,7 +99,7 @@ export async function startServer(deps: BootDeps): Promise<unknown> {
   const {
     logger, setupDatabase, serviceHealth, scanAndLoadModules, initResearchQueue,
     startResearchBullMQWorker, redisConnection, runResearch, startScheduleChecker,
-    startZoteroRefreshChecker, startZoteroVaultSync, startHabitSpawnerChecker, startGoogleTasksSync,
+    startZoteroRefreshChecker, startZoteroSnapshotSync, startZoteroVaultSync, startHabitSpawnerChecker, startGoogleTasksSync,
     startWatcherWorker, watcherScan, onWatcherChange, storeFile, providersCount,
     onServerStart, port, app,
   } = deps;
@@ -179,6 +182,11 @@ export async function startServer(deps: BootDeps): Promise<unknown> {
     logger.info('  Zotero refresh checker started (6h interval)');
   }, 'zoteroRefresh');
 
+  tryStart('zoteroSnapshotSync', () => {
+    startZoteroSnapshotSync();
+    logger.info('  Zotero snapshot sync started (6h interval, fail-soft)');
+  }, 'zoteroSnapshotSync');
+
   // Precheck the vault root before starting the vault-dependent sync. If it's
   // not resolvable, skip rather than schedule a worker that will fail every
   // hour for the life of the process.
@@ -231,7 +239,11 @@ export async function startServer(deps: BootDeps): Promise<unknown> {
   ].join(', ');
   logger.info({ bootReport }, `[boot] workers: ${summary}`);
 
-  serve({ fetch: app.fetch, port, hostname: '127.0.0.1' }, (info) => {
+  // Cloud hosts (Railway, Render, Fly) require listening on 0.0.0.0 to be
+  // reachable from outside the container. Local dev still binds 127.0.0.1
+  // for security (no LAN exposure).
+  const hostname = process.env.HOST || (process.env.PORT ? '0.0.0.0' : '127.0.0.1');
+  serve({ fetch: app.fetch, port, hostname }, (info) => {
     onServerStart(info.port);
     logger.info(
       { port: info.port, storeFile, providers: providersCount() },

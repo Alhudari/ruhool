@@ -14,6 +14,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Hono } from 'hono';
 import type { StoreData, LibraryEntity, MatrixColumn, MatrixSchema, EntityType } from '../store/types.js';
+import { IMMUTABLE_TOP_LEVEL_KEYS } from '../store/library-immutable.js';
 
 export interface LibraryMatrixDeps {
   getStore: () => StoreData;
@@ -388,4 +389,367 @@ export function registerLibraryMatrixRoutes(app: Hono, deps: LibraryMatrixDeps):
     };
     return c.json({ ok: true, dryRun: !!body.dryRun, stats, imported });
   });
+
+  // ── Library Matrix Agent (Phase 2) ──────────────────────────────────────────
+  // The Librarian helps fill matrix cells based on entity metadata.
+  // Returns proposals (NOT applied) — the user reviews and approves.
+  app.post('/api/library/matrix/:type/:id/agent-fill', async (c) => {
+    const type = c.req.param('type') as EntityType;
+    if (!isValidEntityType(type)) return c.json({ error: 'Invalid type' }, 400);
+    const id = c.req.param('id');
+    const body: { columnKeys?: string[]; userInstructions?: string } = await c.req.json().catch(() => ({}));
+    const requestedKeys = Array.isArray(body.columnKeys) ? body.columnKeys : [];
+
+    const store = getStore();
+    const entity = (store.libraryEntities ?? []).find((e) => e.id === id);
+    if (!entity) return c.json({ error: 'Entity not found' }, 404);
+
+    const hadSchema = !!store.matrixSchemas?.find((s) => s.type === type);
+    const schema = ensureSchema(store, type);
+    // ensureSchema mutates the store on first access — persist so we don't
+    // leave an in-memory-only schema that vanishes on restart.
+    if (!hadSchema) saveStore();
+    const targetColumns = requestedKeys.length > 0
+      ? schema.columns.filter((col) => requestedKeys.includes(col.key))
+      : schema.columns.filter((col) => col.visible);
+    if (targetColumns.length === 0) return c.json({ error: 'No columns to fill' }, 400);
+
+    const apiKey = (store.providers ?? []).find((p) => p.type === 'anthropic' && p.enabled && p.apiKey)?.apiKey;
+    if (!apiKey) return c.json({ error: 'Anthropic provider not configured' }, 503);
+
+    // Build entity context for the agent — include everything we know.
+    const entityCtx: Record<string, unknown> = {
+      title: entity.title,
+      authors: entity.authors,
+      year: entity.year,
+      doi: entity.doi,
+      url: entity.url,
+      abstract: entity.abstract,
+      tags: entity.tags,
+      type: entity.type,
+      citekey: entity.citekey,
+      notes: entity.notes?.slice(0, 4000),
+      existing_fields: entity.customFields ?? {},
+    };
+
+    // Enrich the agent's context: it should know about the user's broader
+    // library and writing voice — the user explicitly asked for an agent
+    // that knows "ما كتبت وكل شي" (what I've written and everything).
+    const sameTypeSiblings = (store.libraryEntities ?? [])
+      .filter((e) => e.type === entity.type && e.id !== entity.id && !e.deletedAt)
+      .slice(0, 8)
+      .map((e) => ({
+        title: e.title,
+        authors: e.authors,
+        year: e.year,
+        tags: e.tags,
+        // Sample of how the user filled this column on similar items — helps
+        // the agent match the user's voice and conventions.
+        sameKeyValues: targetColumns.reduce<Record<string, unknown>>((acc, col) => {
+          const v = col.source === 'top-level'
+            ? (e as unknown as Record<string, unknown>)[col.key]
+            : e.customFields?.[col.key];
+          if (v !== undefined && v !== null && v !== '') acc[col.key] = v;
+          return acc;
+        }, {}),
+      }));
+    const voiceProfile = (store as { userVoiceProfile?: { content?: string } }).userVoiceProfile?.content;
+    const phdContext = {
+      thesis_topic: 'BIM adoption in Kuwait',
+      institution: 'University of Birmingham',
+      started: '2026-01',
+    };
+
+    const columnsCtx = targetColumns.map((col) => ({
+      key: col.key,
+      label: col.labelEn,
+      kind: col.kind,
+      options: col.options,
+      current: col.source === 'top-level'
+        ? (entity as unknown as Record<string, unknown>)[col.key]
+        : entity.customFields?.[col.key],
+    }));
+
+    const systemPrompt = `You are the Librarian agent for Abdullah's PhD platform (Ruhool). Abdullah's thesis is on BIM adoption in Kuwait at the University of Birmingham (started Jan 2026).
+
+Your job: propose values for specific matrix columns about a single library entity, based on the entity's metadata.
+
+Rules:
+1. Be honest — if you cannot infer a value confidently from the metadata provided, return null for that column with reasoning explaining what info is missing.
+2. NEVER fabricate authors, years, DOIs, page counts, or any factual claim.
+3. For free-text columns (aims, methodology, key_findings, limitations, etc.) you may write 1-3 sentence summaries grounded in the abstract/notes. If no abstract or notes are provided, return null.
+4. For tags/list columns, return an array of strings.
+5. For "kind: select", choose only from the provided options or return null.
+6. Output STRICT JSON matching this shape — no commentary, no markdown fences:
+{
+  "proposals": [
+    { "columnKey": "<key>", "value": <value or null>, "reasoning": "<short why or what info is missing>", "confidence": "high" | "medium" | "low" }
+  ]
+}`;
+
+    const userMsg = [
+      `PhD context:\n${JSON.stringify(phdContext, null, 2)}`,
+      `Entity to fill:\n${JSON.stringify(entityCtx, null, 2)}`,
+      sameTypeSiblings.length > 0
+        ? `Other entities of the same type the user has annotated (use as style/voice reference, NOT to copy values):\n${JSON.stringify(sameTypeSiblings, null, 2)}`
+        : null,
+      voiceProfile ? `User's writing voice profile (for free-text columns — match this register):\n${voiceProfile.slice(0, 1500)}` : null,
+      `Columns to fill:\n${JSON.stringify(columnsCtx, null, 2)}`,
+      body.userInstructions ? `Additional instructions from the user:\n${body.userInstructions}` : null,
+      'Return the JSON now.',
+    ].filter(Boolean).join('\n\n');
+
+    try {
+      const Anthropic = (await import('@anthropic-ai/sdk')).default;
+      const client = new Anthropic({ apiKey });
+      const res = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4000,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userMsg }],
+      });
+      const text = res.content
+        .map((b) => (b.type === 'text' ? b.text : ''))
+        .join('\n')
+        .trim();
+      // Strip code fences if the model added them despite instructions.
+      const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+      let parsed: { proposals?: Array<{ columnKey: string; value: unknown; reasoning?: string; confidence?: string }> };
+      try {
+        parsed = JSON.parse(stripped);
+      } catch {
+        return c.json({ error: 'Agent returned non-JSON output', raw: text.slice(0, 1000) }, 502);
+      }
+      const proposals = Array.isArray(parsed.proposals) ? parsed.proposals : [];
+      // Attach column metadata so UI can render a clean diff
+      const enriched = proposals
+        .map((p) => {
+          const col = targetColumns.find((c2) => c2.key === p.columnKey);
+          if (!col) return null;
+          return {
+            columnKey: p.columnKey,
+            label: col.labelEn,
+            labelAr: col.labelAr,
+            kind: col.kind,
+            current: col.source === 'top-level'
+              ? (entity as unknown as Record<string, unknown>)[col.key]
+              : entity.customFields?.[col.key],
+            proposed: p.value,
+            reasoning: p.reasoning ?? '',
+            confidence: p.confidence ?? 'medium',
+            source: col.source ?? 'custom',
+          };
+        })
+        .filter(Boolean);
+
+      return c.json({ entityId: id, proposals: enriched });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ error: `Agent call failed: ${msg}` }, 502);
+    }
+  });
+
+  // Suggest new matrix columns based on the user's existing library content +
+  // their PhD context. Returns proposals only — never modifies the schema.
+  app.post('/api/library/matrix/:type/suggest-columns', async (c) => {
+    const type = c.req.param('type') as EntityType;
+    if (!isValidEntityType(type)) return c.json({ error: 'Invalid type' }, 400);
+    const body: { userInstructions?: string; sampleSize?: number } = await c.req.json().catch(() => ({}));
+    const sampleSize = Math.min(typeof body.sampleSize === 'number' ? body.sampleSize : 15, 40);
+
+    const store = getStore();
+    const apiKey = (store.providers ?? []).find((p) => p.type === 'anthropic' && p.enabled && p.apiKey)?.apiKey;
+    if (!apiKey) return c.json({ error: 'Anthropic provider not configured' }, 503);
+
+    const schema = ensureSchema(store, type);
+    const existingKeys = new Set(schema.columns.map((col) => col.key));
+
+    // Sample real entities of this type so the agent sees what kind of data exists.
+    const entities = (store.libraryEntities ?? [])
+      .filter((e) => e.type === type && !e.deletedAt)
+      .slice(0, sampleSize);
+
+    if (entities.length === 0) {
+      return c.json({ proposals: [], message: 'No entities of this type yet — add a few before asking for column suggestions' });
+    }
+
+    const sample = entities.map((e) => ({
+      title: e.title,
+      authors: e.authors,
+      year: e.year,
+      tags: e.tags,
+      abstract: e.abstract?.slice(0, 400),
+      // Include any custom fields the user already added — agent can spot patterns.
+      customFields: e.customFields,
+    }));
+
+    const existingColumns = schema.columns.map((col) => ({
+      key: col.key,
+      label: col.labelEn,
+      kind: col.kind,
+    }));
+
+    const systemPrompt = `You are the Librarian helping Abdullah extend his PhD library matrix on BIM adoption in Kuwait.
+
+You see the existing matrix columns and a sample of the real entities. Your job: propose NEW columns that would actually be useful for analyzing or filtering these entities — based on patterns you spot in the sample.
+
+Rules:
+1. Propose ONLY columns that are NOT already in the existing list. Use camelCase or snake_case for the key.
+2. Be specific — generic columns like "notes" are useless. Examples of good additions for academic papers: "research_context_country", "BIM_maturity_level", "evidence_strength", "bim_dimension_focus".
+3. Each column needs: key, labelEn, labelAr, kind (one of: string, text, number, tags, list, date, url, select, boolean), and reasoning grounded in what you saw.
+4. For "select" kind, include 3-7 example options.
+5. Limit to at most 5 proposals — quality over quantity.
+6. Output STRICT JSON only — no fences, no commentary:
+{
+  "proposals": [
+    { "key": "...", "labelEn": "...", "labelAr": "...", "kind": "...", "options": [...], "reasoning": "..." }
+  ]
+}`;
+
+    const userMsg = `Existing columns:\n${JSON.stringify(existingColumns, null, 2)}\n\nSample entities (${entities.length}):\n${JSON.stringify(sample, null, 2)}${body.userInstructions ? `\n\nUser instructions: ${body.userInstructions}` : ''}\n\nReturn the JSON now.`;
+
+    try {
+      const Anthropic = (await import('@anthropic-ai/sdk')).default;
+      const client = new Anthropic({ apiKey });
+      const res = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 3000,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userMsg }],
+      });
+      const text = res.content.map((b) => (b.type === 'text' ? b.text : '')).join('\n').trim();
+      const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+      let parsed: { proposals?: unknown };
+      try { parsed = JSON.parse(stripped); }
+      catch { return c.json({ error: 'Agent returned non-JSON output', raw: text.slice(0, 1000) }, 502); }
+
+      const allowedKinds = new Set(['string', 'text', 'number', 'tags', 'list', 'date', 'url', 'select', 'boolean']);
+      const rawProposals: Array<Record<string, unknown>> = Array.isArray(parsed.proposals)
+        ? (parsed.proposals as Array<Record<string, unknown>>)
+        : [];
+      const proposals = rawProposals
+        .filter((p): p is { key: string; labelEn: string; labelAr: string; kind: string; options?: unknown; reasoning?: unknown } =>
+          typeof p.key === 'string' && p.key.length > 0
+            && typeof p.labelEn === 'string'
+            && typeof p.labelAr === 'string'
+            && typeof p.kind === 'string'
+            && allowedKinds.has(p.kind)
+            && !existingKeys.has(p.key))
+        .map((p) => ({
+          key: p.key,
+          labelEn: p.labelEn,
+          labelAr: p.labelAr,
+          kind: p.kind,
+          options: Array.isArray(p.options) ? (p.options as unknown[]).filter((o): o is string => typeof o === 'string') : undefined,
+          reasoning: typeof p.reasoning === 'string' ? p.reasoning : '',
+        }))
+        .slice(0, 5);
+
+      return c.json({ proposals });
+    } catch (err) {
+      return c.json({ error: `Agent call failed: ${err instanceof Error ? err.message : String(err)}` }, 502);
+    }
+  });
+
+  // Apply approved column proposals to the matrix schema (idempotent — skips
+  // existing keys silently).
+  app.post('/api/library/matrix/:type/add-columns', async (c) => {
+    const type = c.req.param('type') as EntityType;
+    if (!isValidEntityType(type)) return c.json({ error: 'Invalid type' }, 400);
+    const body: { columns?: Array<{ key: string; labelEn: string; labelAr: string; kind: string; options?: string[] }> } =
+      await c.req.json().catch(() => ({}));
+    const requested = Array.isArray(body.columns) ? body.columns : [];
+    if (requested.length === 0) return c.json({ error: 'No columns to add' }, 400);
+
+    const allowedKinds = new Set<MatrixColumn['kind']>(['string', 'text', 'number', 'tags', 'list', 'date', 'url', 'select', 'boolean']);
+    const store = getStore();
+    const schema = ensureSchema(store, type);
+    const existingKeys = new Set(schema.columns.map((col) => col.key));
+    const startOrder = Math.max(0, ...schema.columns.map((col) => col.order)) + 1;
+
+    let added = 0;
+    for (let i = 0; i < requested.length; i++) {
+      const r = requested[i];
+      if (existingKeys.has(r.key)) continue;
+      if (!allowedKinds.has(r.kind as MatrixColumn['kind'])) continue;
+      schema.columns.push({
+        key: r.key,
+        labelEn: r.labelEn,
+        labelAr: r.labelAr,
+        kind: r.kind as MatrixColumn['kind'],
+        options: Array.isArray(r.options) ? r.options : undefined,
+        visible: true,
+        order: startOrder + i,
+        source: 'custom',
+      });
+      added++;
+    }
+    schema.updatedAt = new Date().toISOString();
+    saveStore();
+    return c.json({ ok: true, added, schema });
+  });
+
+  // Apply selected proposals — the user-approved subset.
+  // Hardened: every proposed columnKey must exist in the type's schema, and
+  // top-level writes must match the schema's declared `source` for that key.
+  // Top-level keys that are immutable identifiers/relations are blocked outright.
+  app.post('/api/library/matrix/:type/:id/apply-proposals', async (c) => {
+    const type = c.req.param('type') as EntityType;
+    if (!isValidEntityType(type)) return c.json({ error: 'Invalid type' }, 400);
+    const id = c.req.param('id');
+    const body: { proposals?: Array<{ columnKey: string; value: unknown; source?: 'top-level' | 'custom' }> } =
+      await c.req.json().catch(() => ({}));
+    const proposals = Array.isArray(body.proposals) ? body.proposals : [];
+    if (proposals.length === 0) return c.json({ error: 'No proposals to apply' }, 400);
+
+    const store = getStore();
+    const entity = (store.libraryEntities ?? []).find((e) => e.id === id);
+    if (!entity) return c.json({ error: 'Entity not found' }, 404);
+
+    const schema = ensureSchema(store, type);
+    const columnsByKey = new Map(schema.columns.map((col) => [col.key, col]));
+
+    if (!entity.customFields) entity.customFields = {};
+    const applied: string[] = [];
+    const rejected: Array<{ columnKey: string; reason: string }> = [];
+    for (const p of proposals) {
+      const col = columnsByKey.get(p.columnKey);
+      if (!col) {
+        rejected.push({ columnKey: p.columnKey, reason: 'unknown column' });
+        continue;
+      }
+      if (IMMUTABLE_TOP_LEVEL_KEYS.has(p.columnKey)) {
+        rejected.push({ columnKey: p.columnKey, reason: 'immutable field' });
+        continue;
+      }
+      const declaredSource = col.source ?? 'custom';
+      if (p.source && p.source !== declaredSource) {
+        rejected.push({ columnKey: p.columnKey, reason: 'source mismatch' });
+        continue;
+      }
+      if (declaredSource === 'top-level') {
+        (entity as unknown as Record<string, unknown>)[p.columnKey] = p.value;
+      } else {
+        entity.customFields[p.columnKey] = p.value;
+      }
+      applied.push(p.columnKey);
+    }
+    if (applied.length === 0 && rejected.length > 0) {
+      return c.json({ error: 'All proposals rejected', rejected }, 400);
+    }
+    entity.updatedAt = new Date().toISOString();
+    saveStore();
+    return c.json({ ok: true, entity, applied, rejected });
+  });
+}
+
+const ALLOWED_ENTITY_TYPES: ReadonlySet<EntityType> = new Set<EntityType>([
+  'paper', 'book', 'report', 'standard', 'my-writing', 'thesis-chapter',
+  'person', 'organization', 'conference', 'project',
+  'atomic-note', 'reading-session', 'research-cluster',
+  'file', 'webpage', 'video', 'code-repo',
+]);
+
+function isValidEntityType(t: string): t is EntityType {
+  return ALLOWED_ENTITY_TYPES.has(t as EntityType);
 }

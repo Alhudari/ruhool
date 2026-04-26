@@ -499,6 +499,8 @@ export function registerZoteroRoutes(app: Hono, deps?: ZoteroRoutesDeps): void {
   app.get('/api/zotero/collections', async (c) => {
     try {
       const cols = await zoteroListCollections();
+      // Persist snapshot — keeps the offline copy fresh on every successful pull.
+      writeZoteroSnapshotPart('collections', cols);
       // Build hierarchical tree (parent → children)
       const map = new Map(cols.map((c) => [c.key, { ...c, children: [] as typeof cols }]));
       const roots: typeof cols = [];
@@ -512,6 +514,20 @@ export function registerZoteroRoutes(app: Hono, deps?: ZoteroRoutesDeps): void {
       c.header('Cache-Control', 'private, max-age=300');
       return c.json({ collections: cols, tree: roots, total: cols.length });
     } catch (err) {
+      // Failure path: serve from the persisted snapshot if we have one. The
+      // user's existing data is never wiped just because Zotero is unreachable.
+      const snap = deps?.getStore().zoteroSnapshot;
+      if (snap?.collections?.length) {
+        writeZoteroSnapshotError(err);
+        return c.json({
+          collections: snap.collections,
+          tree: buildCollectionTree(snap.collections),
+          total: snap.collections.length,
+          stale: true,
+          lastSuccessfulFetchAt: snap.lastSuccessfulFetchAt,
+          lastError: err instanceof Error ? err.message : String(err),
+        });
+      }
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
   });
@@ -565,6 +581,10 @@ export function registerZoteroRoutes(app: Hono, deps?: ZoteroRoutesDeps): void {
       const items = await zoteroListItemsRich(collection, Number.isFinite(limit) ? limit : 500);
       const payload = { items, total: items.length };
       zoteroCache.set(key, { data: payload, at: Date.now() });
+      // Only persist the "all items" snapshot — per-collection slices are derived
+      // from it client-side. Skip empty responses so a transient empty result
+      // doesn't wipe a populated cache.
+      if (!collection && items.length > 0) writeZoteroSnapshotPart('items', items);
       c.header('Cache-Control', 'private, max-age=300');
       return c.json(payload);
     } catch (err) {
@@ -572,9 +592,147 @@ export function registerZoteroRoutes(app: Hono, deps?: ZoteroRoutesDeps): void {
       if (/not a valid collection key|404/i.test(msg)) {
         return c.json({ items: [], total: 0, invalidCollection: true, hint: 'collection key not found in current Zotero mode' });
       }
+      // Serve from snapshot if we have one. Filter by collection client-/here-side.
+      const snap = deps?.getStore().zoteroSnapshot;
+      if (snap?.items?.length) {
+        writeZoteroSnapshotError(err);
+        const filtered = collection
+          ? snap.items.filter((it) => Array.isArray(it.collections) && it.collections.includes(collection))
+          : snap.items;
+        return c.json({
+          items: filtered,
+          total: filtered.length,
+          stale: true,
+          lastSuccessfulFetchAt: snap.lastSuccessfulFetchAt,
+          lastError: msg,
+        });
+      }
       return c.json({ error: msg }, 500);
     }
   });
+
+  // Manual sync: pulls everything fresh into the persisted snapshot. Used by
+  // the UI's "refresh" button and by any future scheduler. Failure here NEVER
+  // wipes the existing snapshot — only successful pulls overwrite.
+  app.post('/api/zotero/sync', async (c) => {
+    if (!deps) return c.json({ error: 'no deps' }, 500);
+    const errors: string[] = [];
+    let collectionsCount = 0;
+    let itemsCount = 0;
+    try {
+      const cols = await zoteroListCollections();
+      writeZoteroSnapshotPart('collections', cols);
+      collectionsCount = cols.length;
+    } catch (err) {
+      errors.push(`collections: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      const items = await zoteroListItemsRich(undefined, 1000);
+      // Defensive: don't overwrite an existing populated snapshot with an empty pull.
+      if (items.length > 0) writeZoteroSnapshotPart('items', items);
+      itemsCount = items.length;
+    } catch (err) {
+      errors.push(`items: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    const ok = errors.length === 0;
+    if (!ok) writeZoteroSnapshotError(errors.join('; '));
+    invalidateZoteroCache();
+    const snap = deps.getStore().zoteroSnapshot;
+    return c.json({
+      ok,
+      collectionsCount,
+      itemsCount,
+      errors,
+      lastSuccessfulFetchAt: snap?.lastSuccessfulFetchAt,
+      fetchedAt: snap?.fetchedAt,
+    });
+  });
+
+  // Returns just the snapshot status — used by the UI to show "last synced".
+  app.get('/api/zotero/snapshot-status', (c) => {
+    const snap = deps?.getStore().zoteroSnapshot;
+    if (!snap) return c.json({ exists: false });
+    const ageMs = snap.lastSuccessfulFetchAt ? Date.now() - new Date(snap.lastSuccessfulFetchAt).getTime() : null;
+    return c.json({
+      exists: true,
+      mode: snap.mode,
+      itemsCount: snap.items?.length ?? 0,
+      collectionsCount: snap.collections?.length ?? 0,
+      fetchedAt: snap.fetchedAt,
+      lastSuccessfulFetchAt: snap.lastSuccessfulFetchAt,
+      ageMs,
+      isStale: ageMs !== null && ageMs > 24 * 60 * 60 * 1000,
+      lastError: snap.lastError,
+    });
+  });
+
+  // ── Snapshot helpers ──────────────────────────────────────────────────────
+  function writeZoteroSnapshotPart(part: 'items' | 'collections', data: unknown): void {
+    if (!deps) return;
+    const store = deps.getStore();
+    const now = new Date().toISOString();
+    const cfg = (store as unknown as { zoteroConfig?: ZoteroSavedConfig }).zoteroConfig;
+    const mode: 'local' | 'web' = cfg?.mode === 'web' ? 'web' : 'local';
+    if (!store.zoteroSnapshot) {
+      store.zoteroSnapshot = {
+        mode,
+        items: [],
+        collections: [],
+        fetchedAt: now,
+        lastSuccessfulFetchAt: now,
+        lastError: null,
+      };
+    }
+    if (part === 'items') {
+      store.zoteroSnapshot.items = (data as Array<Record<string, unknown>>).map((it) => ({
+        itemKey: String(it.itemKey ?? ''),
+        title: String(it.title ?? ''),
+        authors: typeof it.authors === 'string' ? it.authors : Array.isArray(it.authorsList) ? (it.authorsList as string[]).join(', ') : '',
+        authorsList: Array.isArray(it.authorsList) ? (it.authorsList as string[]) : undefined,
+        year: typeof it.year === 'number' ? it.year : undefined,
+        itemType: String(it.itemType ?? ''),
+        abstractNote: typeof it.abstractNote === 'string' ? it.abstractNote : undefined,
+        publicationTitle: typeof it.publicationTitle === 'string' ? it.publicationTitle : undefined,
+        doi: typeof it.doi === 'string' ? it.doi : undefined,
+        url: typeof it.url === 'string' ? it.url : undefined,
+        tags: Array.isArray(it.tags) ? (it.tags as string[]) : undefined,
+        collections: Array.isArray(it.collections) ? (it.collections as string[]) : undefined,
+        dateAdded: typeof it.dateAdded === 'string' ? it.dateAdded : undefined,
+        dateModified: typeof it.dateModified === 'string' ? it.dateModified : undefined,
+      }));
+    } else {
+      store.zoteroSnapshot.collections = (data as Array<{ key: string; name: string; parentCollection?: string }>).map((cc) => ({
+        key: cc.key,
+        name: cc.name,
+        parentCollection: cc.parentCollection,
+      }));
+    }
+    store.zoteroSnapshot.fetchedAt = now;
+    store.zoteroSnapshot.lastSuccessfulFetchAt = now;
+    store.zoteroSnapshot.lastError = null;
+    deps.saveStore?.();
+  }
+  function writeZoteroSnapshotError(err: unknown): void {
+    if (!deps) return;
+    const store = deps.getStore();
+    if (!store.zoteroSnapshot) return;
+    store.zoteroSnapshot.fetchedAt = new Date().toISOString();
+    store.zoteroSnapshot.lastError = err instanceof Error ? err.message : String(err);
+    deps.saveStore?.();
+  }
+  function buildCollectionTree(cols: Array<{ key: string; name: string; parentCollection?: string }>): unknown[] {
+    type WithChildren = (typeof cols)[number] & { children: WithChildren[] };
+    const map = new Map<string, WithChildren>(cols.map((cc) => [cc.key, { ...cc, children: [] }]));
+    const roots: WithChildren[] = [];
+    for (const cc of map.values()) {
+      if (cc.parentCollection && map.has(cc.parentCollection)) {
+        map.get(cc.parentCollection)!.children.push(cc);
+      } else {
+        roots.push(cc);
+      }
+    }
+    return roots;
+  }
 
   // Manual cache buster — UI can call this after the user confirms
   // they've added new items in Zotero and want a fresh pull.

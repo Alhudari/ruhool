@@ -779,7 +779,7 @@ export function UnifiedLibraryPage() {
           ))}
         </div>
 
-        <div className="p-3 border-t border-border">
+        <div className="p-3 border-t border-border space-y-1.5">
           <button
             onClick={() => setShowAdd(true)}
             className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-accent text-on-accent text-xs font-medium hover:opacity-90 transition-opacity"
@@ -787,6 +787,18 @@ export function UnifiedLibraryPage() {
             <Plus className="h-4 w-4" />
             {isRTL ? 'كيان جديد' : 'New Entity'}
           </button>
+          <div className="flex gap-1.5">
+            <a href="/zotero"
+              className="flex-1 text-center text-[11px] py-1.5 rounded-md bg-surface-secondary hover:bg-surface-tertiary text-on-surface-secondary"
+              title={isRTL ? 'استورد من زوتيرو' : 'Import from Zotero'}>
+              📚 Zotero
+            </a>
+            <a href="/library/matrix"
+              className="flex-1 text-center text-[11px] py-1.5 rounded-md bg-surface-secondary hover:bg-surface-tertiary text-on-surface-secondary"
+              title={isRTL ? 'استورد من Obsidian' : 'Import from Obsidian vault'}>
+              📂 Vault
+            </a>
+          </div>
         </div>
       </div>
 
@@ -816,13 +828,28 @@ export function UnifiedLibraryPage() {
                 {[1,2,3,4,5].map(i => <Skeleton key={i} className="h-16 rounded-lg" />)}
               </div>
             ) : filteredByStatus.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-on-surface-tertiary">
+              <div className="flex flex-col items-center justify-center py-16 text-on-surface-tertiary px-6">
                 <BookOpen className="h-10 w-10 opacity-30 mb-3" />
-                <p className="text-sm">{isRTL ? 'لا كيانات' : 'No entities'}</p>
-                <button onClick={() => setShowAdd(true)}
-                  className="mt-3 text-xs text-accent hover:underline">
-                  {isRTL ? 'أضف أول كيان' : 'Add first entity'}
-                </button>
+                <p className="text-sm">{isRTL ? 'لا كيانات في هذا الفلتر' : 'No entities in this filter'}</p>
+                <p className="text-[11px] text-on-surface-tertiary mt-1 mb-4 text-center">
+                  {isRTL
+                    ? 'لو مكتبتك جديدة، استورد دفعة واحدة من المصادر التالية:'
+                    : 'If your library is empty, import in bulk from one of these sources:'}
+                </p>
+                <div className="flex flex-col gap-2 w-full max-w-xs">
+                  <a href="/zotero"
+                    className="text-xs px-3 py-2 rounded-lg bg-accent/10 text-accent hover:bg-accent/20 text-center">
+                    📚 {isRTL ? 'استورد من زوتيرو' : 'Import from Zotero'}
+                  </a>
+                  <a href="/library/matrix"
+                    className="text-xs px-3 py-2 rounded-lg bg-accent/10 text-accent hover:bg-accent/20 text-center">
+                    📂 {isRTL ? 'استورد من Obsidian vault' : 'Import from Obsidian vault'}
+                  </a>
+                  <button onClick={() => setShowAdd(true)}
+                    className="text-xs px-3 py-2 rounded-lg border border-border hover:bg-surface-secondary">
+                    {isRTL ? 'أو أضف يدوياً' : 'Or add manually'}
+                  </button>
+                </div>
               </div>
             ) : (
               filteredByStatus.map(e => {

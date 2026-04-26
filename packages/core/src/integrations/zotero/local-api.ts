@@ -99,6 +99,15 @@ export function colorToHex(color: ZoteroHighlightColor): string {
   }
 }
 
+/** Typed HTTP error so callers can branch on status (e.g. swallow 404 on /fulltext)
+ *  without having to grep error messages. */
+export class ZoteroHttpError extends Error {
+  constructor(public status: number, public path: string, public body: string) {
+    super(`Zotero ${getZoteroConfig().mode === 'web' ? 'Web' : 'Local'} API ${status} at ${path}: ${body.slice(0, 300)}`);
+    this.name = 'ZoteroHttpError';
+  }
+}
+
 async function zoteroRequest(path: string, init?: RequestInit): Promise<Response> {
   const base = activeBase();
   const url = `${base}${path}`;
@@ -114,7 +123,7 @@ async function zoteroRequest(path: string, init?: RequestInit): Promise<Response
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`Zotero ${config.mode === 'web' ? 'Web' : 'Local'} API ${res.status} at ${path}: ${body.slice(0, 300)}`);
+    throw new ZoteroHttpError(res.status, path, body);
   }
   return res;
 }
@@ -144,20 +153,30 @@ export async function fetchZoteroPaper(itemKey: string): Promise<ZoteroPaperFetc
     abstractNote: typeof data.abstractNote === 'string' ? data.abstractNote : undefined,
   };
 
-  const fullTextRes = await zoteroRequest(`/items/${encodeURIComponent(itemKey)}/fulltext`);
-  const fullTextJson = (await fullTextRes.json()) as {
-    content?: string;
-    totalPages?: number;
-    indexedPages?: number;
-  };
-
-  const fullText = typeof fullTextJson.content === 'string' ? fullTextJson.content : '';
-  const totalPages =
-    typeof fullTextJson.totalPages === 'number'
-      ? fullTextJson.totalPages
-      : typeof fullTextJson.indexedPages === 'number'
-        ? fullTextJson.indexedPages
-        : 0;
+  // /fulltext is only available for items with an indexed PDF attachment.
+  // Parent items, web pages, snapshots, and many other types return 404 here
+  // — that's expected. Fall back to abstract-only metadata in that case.
+  let fullText = '';
+  let totalPages = 0;
+  try {
+    const fullTextRes = await zoteroRequest(`/items/${encodeURIComponent(itemKey)}/fulltext`);
+    const fullTextJson = (await fullTextRes.json()) as {
+      content?: string;
+      totalPages?: number;
+      indexedPages?: number;
+    };
+    fullText = typeof fullTextJson.content === 'string' ? fullTextJson.content : '';
+    totalPages =
+      typeof fullTextJson.totalPages === 'number'
+        ? fullTextJson.totalPages
+        : typeof fullTextJson.indexedPages === 'number'
+          ? fullTextJson.indexedPages
+          : 0;
+  } catch (err) {
+    // Only swallow real 404s — anything else (auth, rate, network) bubbles up.
+    if (!(err instanceof ZoteroHttpError) || err.status !== 404) throw err;
+    // 404 → no indexed fulltext on this item; metadata-only is fine.
+  }
 
   return { meta, fullText, totalPages };
 }

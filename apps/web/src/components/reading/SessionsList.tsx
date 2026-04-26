@@ -154,7 +154,7 @@ export function SessionsList() {
         </div>
         <div>
           <h1 className="text-xl font-bold text-on-surface">
-            {isRTL ? 'جلسات القراءة — صخِّ' : 'Reading Sessions — Shwasha'}
+            {isRTL ? 'جلسات القراءة — الملخص' : 'Reading Sessions — Al-Mulakhkhis'}
           </h1>
           <p className="text-xs text-on-surface-tertiary">
             {isRTL ? 'تحليل عميق للمصادر صفحةً صفحة' : 'Deep source analysis page by page'}

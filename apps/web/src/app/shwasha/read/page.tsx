@@ -1,14 +1,8 @@
-import { AppShell } from '@/components/layout/app-shell';
-import { ReadingPage } from '@/components/reading/ReadingPage';
+import { redirect } from 'next/navigation';
 
-interface ReadPageProps {
-  searchParams: { session?: string };
-}
+interface RedirectProps { searchParams: { session?: string } }
 
-export default function ShwashaReadPage({ searchParams }: ReadPageProps) {
-  return (
-    <AppShell>
-      <ReadingPage sessionId={searchParams.session ?? null} />
-    </AppShell>
-  );
+export default function ShwashaReadRedirect({ searchParams }: RedirectProps) {
+  const session = searchParams.session;
+  redirect(`/al-mulakhkhis/read${session ? `?session=${session}` : ''}`);
 }

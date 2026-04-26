@@ -22,8 +22,9 @@ import { migration003 } from './003-workspace-id.js';
 import { migration004 } from './004-habits-today-fields.js';
 import { migration005 } from './005-rename-cleanup.js';
 import { migration006 } from './006-per-workspace-tasklists.js';
+import { migration007 } from './007-shwasha-to-al-mulakhkhis.js';
 
-export const MIGRATIONS: Migration[] = [migration001, migration002, migration003, migration004, migration005, migration006];
+export const MIGRATIONS: Migration[] = [migration001, migration002, migration003, migration004, migration005, migration006, migration007];
 
 export function runMigrations(
   store: StoreData,

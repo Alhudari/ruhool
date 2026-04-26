@@ -45,11 +45,7 @@ RUN pnpm install --frozen-lockfile --prod
 RUN mkdir -p /app/data
 
 ENV NODE_ENV=production
-ENV APP_PORT=3001
-
-EXPOSE 3001
-
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s \
-  CMD curl -f http://localhost:3001/api/health || exit 1
+# Railway injects PORT at runtime; the API reads `process.env.PORT` first.
+# No EXPOSE / HEALTHCHECK — Railway handles those at the platform level.
 
 CMD ["node", "apps/api/dist/index.js"]

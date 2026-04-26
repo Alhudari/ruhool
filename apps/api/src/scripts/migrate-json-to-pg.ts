@@ -1,12 +1,22 @@
 /**
- * One-time migration: copy providers, usage, conversations, and messages from
- * `data/.store.json` into Postgres.
+ * DEPRECATED FOR D-7 / Wave 1.
  *
- * Usage:
- *   DATABASE_URL=postgres://... pnpm --filter @ruhool/api migrate:json-to-pg
+ * This script targets the per-table Drizzle schema (providers, conversations,
+ * messages, usage as separate tables) — NOT the Wave 1 single-row schema in
+ * `apps/api/src/store/db-schema.sql` (one JSONB row in `app_state`). Running
+ * this against a Wave 1 DB will create unrelated tables and leave the actual
+ * `app_state` row untouched, so the API still boots empty.
  *
- * Idempotent: rows whose primary key already exists are skipped. Run before
- * switching the API to DB-mode for the first time.
+ * Wave 1 migration path: not needed for "start clean" deploys (Vercel boots
+ * against an empty `app_state` row and fills naturally). For an explicit
+ * one-off copy of a local JSON store into Wave 1's layout, use a 5-line
+ * helper that calls `saveStoreToDb(JSON.parse(readFileSync(STORE_FILE)))`
+ * with STORE_BACKEND=postgres + DATABASE_URL set.
+ *
+ * Original docstring (kept for context):
+ *   One-time migration: copy providers, usage, conversations, and messages
+ *   from `data/.store.json` into Postgres. Idempotent: rows whose primary
+ *   key already exists are skipped.
  */
 import fs from 'node:fs';
 import { STORE_FILE } from '../config/paths.js';

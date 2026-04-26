@@ -1,10 +1,6 @@
-import { AppShell } from '@/components/layout/app-shell';
-import { StandaloneNotesPage } from '@/components/reading/standalone/StandaloneNotesPage';
+import { redirect } from 'next/navigation';
 
-export default function StandaloneRoute({ searchParams }: { searchParams: { session?: string } }) {
-  return (
-    <AppShell>
-      <StandaloneNotesPage initialSessionId={searchParams.session ?? null} />
-    </AppShell>
-  );
+export default function ShwashaStandaloneRedirect({ searchParams }: { searchParams: { session?: string } }) {
+  const session = searchParams.session;
+  redirect(`/al-mulakhkhis/standalone${session ? `?session=${session}` : ''}`);
 }

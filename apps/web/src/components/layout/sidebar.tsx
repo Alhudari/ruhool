@@ -107,7 +107,7 @@ const NAV_ITEMS_MAP: Record<string, NavItem> = {
   'workflow-runs': { id: 'workflow-runs', icon: Workflow, label: { en: 'Workflow Runs', ar: 'مسارات العمل' }, href: '/workflow-runs' },
   schedules: { id: 'schedules', icon: Clock, label: { en: 'Schedules', ar: 'الجدولة' }, href: '/schedules' },
   tools: { id: 'tools', icon: Wrench, label: { en: 'Tools', ar: 'الأدوات' }, href: '/tools' },
-  shwasha: { id: 'shwasha', icon: BookOpen, label: { en: 'Reading', ar: 'القراءة' }, href: '/shwasha' },
+  shwasha: { id: 'shwasha', icon: BookOpen, label: { en: 'Al-Mulakhkhis', ar: 'الملخص' }, href: '/al-mulakhkhis' },
   papers: { id: 'papers', icon: BookOpen, label: { en: 'Papers', ar: 'الأوراق' }, href: '/papers' },
   zotero: { id: 'zotero', icon: BookOpen, label: { en: 'Zotero', ar: 'Zotero' }, href: '/zotero' },
   notes: { id: 'notes', icon: NotebookPen, label: { en: 'Atomic Notes', ar: 'الملاحظات الذرية' }, href: '/notes' },
@@ -136,7 +136,7 @@ const NAV_ITEMS_MAP: Record<string, NavItem> = {
   triggers: { id: 'triggers', icon: Zap, label: { en: 'Triggers', ar: 'المحفّزات' }, href: '/triggers' },
   phd: { id: 'phd', icon: GraduationCap, label: { en: 'PhD Dashboard', ar: 'لوحة الدكتوراه' }, href: '/phd' },
   meetings: { id: 'meetings', icon: CalendarDays, label: { en: 'Meetings', ar: 'الاجتماعات' }, href: '/meetings' },
-  grs2: { id: 'grs2', icon: ClipboardList, label: { en: 'GRS2 Reports', ar: 'تقارير GRS2' }, href: '/phd?tab=grs2' },
+  grs2: { id: 'grs2', icon: ClipboardList, label: { en: 'GRS2 Reports', ar: 'تقارير GRS2' }, href: '/grs2' },
   companion: { id: 'companion', icon: GraduationCap, label: { en: 'Al-Khuwy', ar: 'الخوي' }, href: '/companion' },
   mudawwin: { id: 'mudawwin', icon: ClipboardList, label: { en: 'Al-Mudawwin', ar: 'المُدوّن' }, href: '/mudawwin' },
   supervision: { id: 'supervision', icon: Bell, label: { en: 'Supervision', ar: 'الإشراف' }, href: '/supervision' },
@@ -181,7 +181,7 @@ const WORKSPACES: Workspace[] = [
       {
         title: { en: 'PhD', ar: 'الدكتوراه' },
         // MASTER_PROMPT_V2 Part 2: new navigation structure
-        items: ['phd', 'meetings', 'shwasha', 'library', 'library-matrix', 'zotero', 'research', 'tasks', 'inbox'],
+        items: ['phd', 'meetings', 'grs2', 'shwasha', 'library', 'library-matrix', 'zotero', 'research', 'tasks', 'inbox'],
       },
       {
         title: { en: 'Platform', ar: 'المنصة' },

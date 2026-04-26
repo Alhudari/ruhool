@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   BookOpen,
@@ -16,6 +16,8 @@ import {
   Monitor,
   Quote,
   X,
+  Search,
+  RefreshCw,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -159,7 +161,6 @@ export function SourceSelector() {
     return () => clearTimeout(t);
   }, [entitySearch]);
 
-  const [zoteroKey, setZoteroKey] = useState('');
   const [directUrl, setDirectUrl] = useState('');
   const [driveUrl, setDriveUrl] = useState('');
   const [clippingsText, setClippingsText] = useState('');
@@ -168,8 +169,49 @@ export function SourceSelector() {
   const kindleBookRef = useRef<HTMLInputElement>(null);
   const screenshotRef = useRef<HTMLInputElement>(null);
 
+  // Zotero picker — load on demand when user expands the Zotero source
+  interface ZoteroItemMin {
+    itemKey: string; title: string; authors: string; year?: number; itemType: string;
+  }
+  interface ZoteroCol { key: string; name: string; parentCollection?: string }
+  const [zCollections, setZCollections] = useState<ZoteroCol[]>([]);
+  const [zItems, setZItems] = useState<ZoteroItemMin[]>([]);
+  const [zSelectedCol, setZSelectedCol] = useState<string>('');
+  const [zSearch, setZSearch] = useState('');
+  const [zLoading, setZLoading] = useState(false);
+  const [zError, setZError] = useState<string | null>(null);
+  const [zPicking, setZPicking] = useState<string | null>(null);
+  const [zLoaded, setZLoaded] = useState(false);
+
+  const loadZotero = useCallback(async (collection?: string) => {
+    setZLoading(true);
+    setZError(null);
+    try {
+      const [colsRes, itemsRes] = await Promise.all([
+        zCollections.length === 0
+          ? apiFetch<unknown>('/api/zotero/collections').catch(() => [])
+          : Promise.resolve(null),
+        apiFetch<{ items?: ZoteroItemMin[] }>(
+          `/api/zotero/items-rich?limit=300${collection ? `&collection=${collection}` : ''}`,
+        ).catch(() => ({ items: [] })),
+      ]);
+      if (colsRes !== null) {
+        const cols = Array.isArray(colsRes)
+          ? (colsRes as ZoteroCol[])
+          : ((colsRes as { collections?: ZoteroCol[] })?.collections ?? []);
+        setZCollections(cols);
+      }
+      setZItems(Array.isArray(itemsRes?.items) ? itemsRes.items : []);
+      setZLoaded(true);
+    } catch (e) {
+      setZError(e instanceof Error ? e.message : 'Failed to load Zotero');
+    } finally {
+      setZLoading(false);
+    }
+  }, [zCollections.length]);
+
   useEffect(() => {
-    apiFetch<ShwashaSettings>('/api/shwasha/settings')
+    apiFetch<ShwashaSettings>('/api/al-mulakhkhis/settings')
       .then((s) => {
         if (s.mindBlock) {
           setMindBlock(s.mindBlock);
@@ -195,12 +237,12 @@ export function SourceSelector() {
   };
 
   const goToSession = (id: string) => {
-    router.push(`/shwasha/read?session=${id}`);
+    router.push(`/al-mulakhkhis/read?session=${id}`);
   };
 
   /**
    * Non-upload source submit. Each source has its own server-side ingestion
-   * endpoint under `/api/shwasha/sources/*` that parses the input and returns
+   * endpoint under `/api/al-mulakhkhis/sources/*` that parses the input and returns
    * a fully-formed ReadingSessionRecord.
    */
   const submit = async (kind: SourceKind, payload: Record<string, unknown>) => {
@@ -213,28 +255,28 @@ export function SourceSelector() {
         case 'zotero': {
           const key = typeof payload.zoteroKey === 'string' ? payload.zoteroKey : '';
           if (!key) throw new Error('Zotero item key required');
-          endpoint = '/api/shwasha/sources/zotero';
+          endpoint = '/api/al-mulakhkhis/sources/zotero';
           body = buildCommonBody({ zoteroKey: key });
           break;
         }
         case 'link': {
           const url = typeof payload.url === 'string' ? payload.url : '';
           if (!url) throw new Error('URL required');
-          endpoint = '/api/shwasha/sources/link';
+          endpoint = '/api/al-mulakhkhis/sources/link';
           body = buildCommonBody({ url });
           break;
         }
         case 'drive': {
           const publicUrl = typeof payload.publicUrl === 'string' ? payload.publicUrl : '';
           if (!publicUrl) throw new Error('Drive share link required');
-          endpoint = '/api/shwasha/sources/drive';
+          endpoint = '/api/al-mulakhkhis/sources/drive';
           body = buildCommonBody({ publicUrl });
           break;
         }
         case 'kindle-clippings': {
           const clippings = typeof payload.clippings === 'string' ? payload.clippings : '';
           if (!clippings.trim()) throw new Error('Clippings text required');
-          endpoint = '/api/shwasha/sources/kindle-clippings';
+          endpoint = '/api/al-mulakhkhis/sources/kindle-clippings';
           body = buildCommonBody({ clippings });
           break;
         }
@@ -255,9 +297,9 @@ export function SourceSelector() {
 
   /**
    * Upload-source submit. PDFs keep the existing `/api/papers` → sessions
-   * two-step flow. Kindle books go to `/api/shwasha/sources/kindle-book`,
+   * two-step flow. Kindle books go to `/api/al-mulakhkhis/sources/kindle-book`,
    * kindle-clippings files are read locally and POSTed as JSON, screenshots
-   * go to `/api/shwasha/sources/screenshot`.
+   * go to `/api/al-mulakhkhis/sources/screenshot`.
    */
   const submitFile = async (file: File, source: SourceKind) => {
     setSubmitting(true);
@@ -297,7 +339,7 @@ export function SourceSelector() {
         const override = sessionMindOverride.trim();
         if (override && override !== mindBlock.trim()) createBody.mindOverride = override;
 
-        const session = await apiFetch<SessionResponse>('/api/shwasha/sessions', {
+        const session = await apiFetch<SessionResponse>('/api/al-mulakhkhis/sessions', {
           method: 'POST',
           body: JSON.stringify(createBody),
         });
@@ -309,7 +351,7 @@ export function SourceSelector() {
         // File path — read locally and reuse the JSON endpoint.
         const text = await file.text();
         const body = buildCommonBody({ clippings: text });
-        const session = await apiFetch<SessionResponse>('/api/shwasha/sources/kindle-clippings', {
+        const session = await apiFetch<SessionResponse>('/api/al-mulakhkhis/sources/kindle-clippings', {
           method: 'POST',
           body: JSON.stringify(body),
         });
@@ -324,7 +366,7 @@ export function SourceSelector() {
         fd.append('readingMode', sessionMode);
         const override = sessionMindOverride.trim();
         if (override && override !== mindBlock.trim()) fd.append('mindOverride', override);
-        const res = await fetch(`${API_BASE_URL}/api/shwasha/sources/kindle-book`, {
+        const res = await fetch(`${API_BASE_URL}/api/al-mulakhkhis/sources/kindle-book`, {
           method: 'POST',
           body: fd,
         });
@@ -344,7 +386,7 @@ export function SourceSelector() {
         fd.append('readingMode', sessionMode);
         const override = sessionMindOverride.trim();
         if (override && override !== mindBlock.trim()) fd.append('mindOverride', override);
-        const res = await fetch(`${API_BASE_URL}/api/shwasha/sources/screenshot`, {
+        const res = await fetch(`${API_BASE_URL}/api/al-mulakhkhis/sources/screenshot`, {
           method: 'POST',
           body: fd,
         });
@@ -445,15 +487,16 @@ export function SourceSelector() {
               disabled={s.disabled}
               onClick={async () => {
                 if (s.id === 'screen-capture') {
-                  router.push('/shwasha/capture');
+                  router.push('/al-mulakhkhis/capture');
                   return;
                 }
                 if (s.id === 'standalone') {
                   // Route to the dedicated standalone editor (not the page-by-page reader)
-                  router.push('/shwasha/standalone');
+                  router.push('/al-mulakhkhis/standalone');
                   return;
                 }
                 setSelected(isActive ? null : s.id);
+                if (s.id === 'zotero' && !isActive && !zLoaded) loadZotero();
               }}
               className={cn(
                 'relative text-start p-4 rounded-[var(--radius-lg)] border transition-colors',
@@ -484,25 +527,89 @@ export function SourceSelector() {
       {selected && !SOURCES.find((s) => s.id === selected)?.disabled && (
         <div className="rounded-[var(--radius-lg)] border border-border bg-surface-secondary/30 p-4 mb-6 space-y-3">
           {selected === 'zotero' && (
-            <div className="space-y-2">
-              <label className="text-xs text-on-surface-secondary block">
-                {isRTL ? 'مفتاح العنصر في زوتيرو' : 'Zotero Item Key'}
-              </label>
-              <input
-                type="text"
-                value={zoteroKey}
-                onChange={(e) => setZoteroKey(e.target.value)}
-                placeholder="ABC123XY"
-                className="w-full px-3 py-2 bg-input border border-border rounded-[var(--radius)] text-sm text-on-surface placeholder:text-on-surface-tertiary focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-              <button
-                disabled={!zoteroKey.trim() || submitting}
-                onClick={() => submit('zotero', { zoteroKey: zoteroKey.trim() })}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-[var(--radius)] text-sm bg-accent text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-50"
-              >
-                {submitting && <Loader2 size={14} className="animate-spin" />}
-                {isRTL ? 'ابدأ القراءة' : 'Start Reading'}
-              </button>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-on-surface-secondary">
+                  {isRTL ? 'اختر عنصرًا من مكتبة زوتيرو' : 'Pick an item from your Zotero library'}
+                </label>
+                <button
+                  onClick={() => loadZotero(zSelectedCol || undefined)}
+                  className="text-xs text-on-surface-tertiary hover:text-on-surface flex items-center gap-1"
+                  title={isRTL ? 'تحديث' : 'Refresh'}
+                >
+                  <RefreshCw size={12} className={zLoading ? 'animate-spin' : ''} />
+                </button>
+              </div>
+
+              <div className="flex gap-2 flex-wrap">
+                <div className="relative flex-1 min-w-[200px]">
+                  <Search size={13} className="absolute start-2.5 top-1/2 -translate-y-1/2 text-on-surface-tertiary" />
+                  <input
+                    value={zSearch}
+                    onChange={(e) => setZSearch(e.target.value)}
+                    placeholder={isRTL ? 'ابحث بالعنوان أو المؤلف...' : 'Search by title or author...'}
+                    className="w-full h-9 ps-8 pe-3 bg-input border border-border rounded-[var(--radius)] text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+                {zCollections.length > 0 && (
+                  <select
+                    value={zSelectedCol}
+                    onChange={(e) => { setZSelectedCol(e.target.value); loadZotero(e.target.value || undefined); }}
+                    className="h-9 px-3 bg-input border border-border rounded-[var(--radius)] text-sm text-on-surface focus:outline-none"
+                  >
+                    <option value="">{isRTL ? 'كل المجموعات' : 'All collections'}</option>
+                    {zCollections.map((c) => (
+                      <option key={c.key} value={c.key}>{c.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {zError && (
+                <div className="text-xs text-error bg-error/10 px-3 py-2 rounded-lg">{zError}</div>
+              )}
+
+              <div className="max-h-80 overflow-y-auto rounded-[var(--radius)] border border-border bg-surface divide-y divide-border">
+                {zLoading && zItems.length === 0 && (
+                  <div className="flex items-center gap-2 justify-center py-8 text-on-surface-tertiary text-sm">
+                    <Loader2 size={14} className="animate-spin" />
+                    {isRTL ? 'جاري تحميل زوتيرو...' : 'Loading Zotero...'}
+                  </div>
+                )}
+                {!zLoading && zItems.length === 0 && (
+                  <div className="text-center py-8 text-on-surface-tertiary text-sm">
+                    {isRTL ? 'لا توجد عناصر' : 'No items'}
+                  </div>
+                )}
+                {zItems
+                  .filter((it) => {
+                    if (!zSearch.trim()) return true;
+                    const q = zSearch.toLowerCase();
+                    return (it.title || '').toLowerCase().includes(q) || (it.authors || '').toLowerCase().includes(q);
+                  })
+                  .slice(0, 200)
+                  .map((it) => (
+                    <button
+                      key={it.itemKey}
+                      disabled={submitting || zPicking !== null}
+                      onClick={async () => {
+                        setZPicking(it.itemKey);
+                        try { await submit('zotero', { zoteroKey: it.itemKey }); }
+                        finally { setZPicking(null); }
+                      }}
+                      className="w-full text-start flex items-center gap-3 px-3 py-2.5 hover:bg-surface-secondary disabled:opacity-50 transition-colors"
+                    >
+                      <Library size={14} className="text-on-surface-tertiary shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-on-surface truncate">{it.title}</p>
+                        <p className="text-[11px] text-on-surface-tertiary truncate">
+                          {it.authors}{it.year ? ` · ${it.year}` : ''}{it.itemType ? ` · ${it.itemType}` : ''}
+                        </p>
+                      </div>
+                      {zPicking === it.itemKey && <Loader2 size={13} className="animate-spin text-accent shrink-0" />}
+                    </button>
+                  ))}
+              </div>
             </div>
           )}
 

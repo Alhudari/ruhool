@@ -726,6 +726,13 @@ export interface ReadingSessionRecord {
   undoStack?: Array<{ id: string; ts: string; field: string; previousValue: unknown }>;
   /** Zotero item key linked to this session (if any). */
   linkedZoteroKey?: string | null;
+  /** Library entity this session belongs to (Phase 4 link). */
+  libraryEntityId?: string;
+  /** Smart-fileName mapping for screen-capture sessions. When the vision model
+   *  detects a source title, we remember the user-entered fileName so subsequent
+   *  captures from the same source can auto-fill it. Keyed by the lowercased
+   *  detected_source_title (truncated to 120 chars). */
+  fileNameBySource?: Record<string, string>;
   /**
    * Raw page text captured at session-create time.
    * Indexed from 0; page N in the UI maps to `pages[N-1]`.
@@ -738,8 +745,17 @@ export interface ReadingSessionRecord {
    * Inline page images, keyed by page number (as string).
    * Populated by screenshot/camera sources and used by PaperView to render
    * image-only pages (and by `/api/shwasha/vision` for vision analysis).
+   *
+   * For 2-page spreads (book photo showing facing pages), the secondary page
+   * stores `{ aliasOf: primary }` instead of duplicating the base64 — readers
+   * follow the alias to look up the actual bytes. Keeps the store small for
+   * heavy-spread sessions.
    */
-  pageImages?: Record<string, { base64: string; mimeType: string }>;
+  pageImages?: Record<string, { base64: string; mimeType: string } | { aliasOf: number }>;
+  /** How `paperTitle` was set: 'user' when the user supplied it explicitly,
+   *  'auto' when the vision model detected it. The captures handler only
+   *  auto-overwrites when this is 'auto' (or absent for legacy sessions). */
+  paperTitleSource?: 'user' | 'auto';
   createdAt: string;
   updatedAt: string;
   completedAt?: string | null;
@@ -911,9 +927,58 @@ export interface LibraryEntity {
   /** Free-form fields tied to the matrix. Per-type columns live here so each
    *  EntityType can have its own schema (paper aims, methodology vs. book chapters). */
   customFields?: Record<string, unknown>;
+  /** Library collections this entity is a member of. An entity can live in
+   *  multiple collections (Zotero parity). Membership is the source of truth
+   *  on the entity, not on the collection — keeps deletes simple. */
+  collectionIds?: string[];
   createdAt: string;
   updatedAt: string;
   archivedAt?: string;
+  deletedAt?: string;
+}
+
+/** Local snapshot of the user's Zotero library. Refreshed on demand or on a
+ *  schedule. Old snapshots survive failed refreshes — the UI just shows a
+ *  "stale" indicator until the next successful pull. */
+export interface ZoteroSnapshot {
+  mode: 'local' | 'web';
+  collections: Array<{ key: string; name: string; parentCollection?: string }>;
+  items: Array<{
+    itemKey: string;
+    title: string;
+    authors: string;
+    authorsList?: string[];
+    year?: number;
+    itemType: string;
+    abstractNote?: string;
+    publicationTitle?: string;
+    doi?: string;
+    url?: string;
+    tags?: string[];
+    collections?: string[];
+    dateAdded?: string;
+    dateModified?: string;
+  }>;
+  fetchedAt: string;
+  lastSuccessfulFetchAt?: string;
+  lastError?: string | null;
+}
+
+/** Folder-like grouping for library entities. Mirrored once from Zotero on
+ *  initial import, then fully editable. Tree shape via parentId.
+ *  No live sync — `zoteroCollectionKey` is just a dedup hint for re-imports. */
+export interface LibraryCollection {
+  id: string;
+  name: string;
+  parentId?: string | null;
+  zoteroCollectionKey?: string;
+  color?: string;
+  icon?: string;
+  notes?: string;
+  /** Stable order within siblings; set by drag-reorder on the client. */
+  sortOrder?: number;
+  createdAt: string;
+  updatedAt: string;
   deletedAt?: string;
 }
 
@@ -930,6 +995,76 @@ export interface MatrixColumn {
   width?: number;           // pixel width hint
   order: number;            // sort order
   source?: 'top-level' | 'custom'; // top-level = LibraryEntity field; custom = customFields
+}
+
+// ─── Library Agent Chat ──────────────────────────────────────────────────
+// Conversational variant of the matrix agent. The user can chat about a
+// specific entity (entityId set) OR globally about the matrix
+// (entityId === null, scope='global'). Tool calls live on the assistant
+// message; user accept/reject/edit decisions are tracked per tool-call id.
+
+export type LibraryAgentToolName =
+  | 'propose_cell_value'
+  | 'propose_new_column'
+  | 'read_entities'
+  | 'read_zotero_metadata'
+  | 'suggest_collection_assignment'
+  | 'search_library';
+
+export type LibraryAgentToolStatus = 'pending' | 'accepted' | 'rejected' | 'edited' | 'errored';
+
+export interface LibraryAgentToolCall {
+  id: string;
+  name: LibraryAgentToolName;
+  input: Record<string, unknown>;
+  /** Server-side dispatch result for read tools; null for proposal tools that
+   *  require user review before applying. */
+  result?: unknown;
+  status: LibraryAgentToolStatus;
+  /** Final value used when status='edited' (user changed the proposal before applying). */
+  editedInput?: Record<string, unknown>;
+  /** Brief reason supplied by the user when rejecting; fed back to the agent
+   *  on the next turn so it can adapt. */
+  rejectionReason?: string;
+  createdAt: string;
+  resolvedAt?: string;
+}
+
+export interface LibraryAgentMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  /** Free-text body. Empty string permitted for assistant messages that are
+   *  100% tool calls. */
+  content: string;
+  toolCalls?: LibraryAgentToolCall[];
+  /** Token usage for assistant messages — populated from the LLM response. */
+  inputTokens?: number;
+  outputTokens?: number;
+  costUsd?: number;
+  createdAt: string;
+}
+
+export interface LibraryAgentConversation {
+  id: string;
+  /** When set, the thread is scoped to a single entity. When null, the thread
+   *  is the matrix-wide "global" thread (column suggestions, cross-entity
+   *  reasoning). One global thread per `type` + per entity. */
+  entityId: string | null;
+  /** EntityType for both entity-scoped and global threads — the matrix the
+   *  agent is reasoning about. */
+  entityType: EntityType;
+  scope: 'entity' | 'global';
+  title?: string;
+  messages: LibraryAgentMessage[];
+  /** Rolling summary inserted as a system message at the top of the context
+   *  window when the message history exceeds the token budget. */
+  rollingSummary?: string;
+  /** Soft cap to prevent unbounded growth. Oldest messages are dropped when
+   *  the count crosses MAX_MESSAGES_PER_THREAD (200) AND the rollingSummary
+   *  has captured them. */
+  totalTokens?: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface MatrixSchema {
@@ -1142,6 +1277,11 @@ export interface StoreData {
   voicePreferences?: { elevenlabsVoiceId?: string; [k: string]: unknown };
   pageAnalyses?: PageAnalysisRecord[];
   agentNameOverrides?: Record<string, { en: string; ar: string } | string>;
+  /** Reading-helper settings. Migrated from the legacy `shwashaSettings` key
+   *  by migration 007. Both fields may be present mid-migration. */
+  alMulakhkhisSettings?: ShwashaSettings;
+  /** @deprecated kept for read-side fallback only — migration 007 moves data
+   *  to `alMulakhkhisSettings`. Do not write here. */
   shwashaSettings?: ShwashaSettings;
   // Free-form, long-form description of the user's writing voice — style,
   // tone, common phrases, even spelling/grammar quirks. Injected into all
@@ -1156,6 +1296,15 @@ export interface StoreData {
   libraryEntities?: LibraryEntity[];
   /** Per-EntityType matrix column schemas — show/hide/order/labels for the matrix view. */
   matrixSchemas?: MatrixSchema[];
+  /** Folder-like groupings for library entities. */
+  libraryCollections?: LibraryCollection[];
+  /** Per-entity (and per-thread) chat threads with the Library matrix agent.
+   *  The agent uses tool calls to propose cell values, new columns, etc.; the
+   *  user reviews and accepts/rejects/edits inline. See LibraryAgentMessage. */
+  libraryAgentConversations?: LibraryAgentConversation[];
+  /** Local snapshot of Zotero items/collections so the UI works offline and
+   *  doesn't wipe on a failed sync (Phase C). */
+  zoteroSnapshot?: ZoteroSnapshot;
   inboxItems?: InboxItemRecord[];
   tags?: TagRecord[];
   tagAssignments?: TagAssignment[];

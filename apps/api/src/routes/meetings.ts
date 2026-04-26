@@ -67,7 +67,10 @@ function getVoiceProfile(store: StoreData): string {
 }
 
 function getLanguage(store: StoreData): 'en' | 'ar' {
-  return (store.shwashaSettings?.defaultLanguage as 'en' | 'ar') ?? 'en';
+  // Prefer the post-rename field, fall back to the legacy one for stores
+  // that haven't picked up migration 007 yet.
+  const settings = store.alMulakhkhisSettings ?? store.shwashaSettings;
+  return (settings?.defaultLanguage as 'en' | 'ar') ?? 'en';
 }
 
 export function registerMeetingsRoutes(app: Hono, deps: MeetingsRoutesDeps): void {

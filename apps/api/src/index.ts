@@ -1,16 +1,16 @@
-import { runAgentLoop } from './agent-runner';
+import { runAgentLoop } from './agent-runner.js';
 import {
   createTrigger, setHierarchyNode,
   scanForAlerts, resolveAlert,
   type Phase2StoreLike,
-} from './phase2';
+} from './phase2.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import 'dotenv/config';
 
-import { renderVideo, listRenders, archiveRender, deleteRender } from './render';
-import { setupDatabase } from './db-setup';
+import { renderVideo, listRenders, archiveRender, deleteRender } from './render.js';
+import { setupDatabase } from './db-setup.js';
 import { Queue, Worker } from 'bullmq';
 import {
   DATA_DIR, STORE_FILE, PAPERS_DIR, NOTES_DIR, BACKUPS_DIR,
@@ -29,7 +29,7 @@ import {
 const REDIS_CONNECTION = { host: process.env.REDIS_HOST || 'localhost', port: parseInt(process.env.REDIS_PORT || '6379', 10) };
 
 import type { ScheduleRecord, StoreData, NoteRecord } from './store/types.js';
-import { getStore, saveStore as _saveStore } from './store/index.js';
+import { getStore, saveStore as _saveStore, initializeStore } from './store/index.js';
 import { applyStoreDefaults, EXPERIMENTS_CATEGORY_ID } from './store/defaults.js';
 import { taskStore, updateTask } from './state/tasks-store.js';
 import { createRenderQueueState } from './state/render-queue.js';
@@ -73,7 +73,7 @@ import { CAPABILITY_CHECKERS } from './services/capability-checkers.js';
 import { buildSubscriptionSnapshot as buildAnalystSnapshot } from './routes/analyst.js';
 import { makeEnsureSubscriptionDefaults } from './routes/subscriptions.js';
 import { createSubscriptionsEngine } from './services/subscriptions-engine.js';
-import { startSubscriptionChecker, startScheduleChecker as startScheduleCheckerWorker, startWatcher as startWatcherWorker, startZoteroRefreshChecker as startZoteroRefreshCheckerWorker, startHabitSpawnerChecker as startHabitSpawnerCheckerWorker } from './workers/scheduler.js';
+import { startSubscriptionChecker, startScheduleChecker as startScheduleCheckerWorker, startWatcher as startWatcherWorker, startZoteroRefreshChecker as startZoteroRefreshCheckerWorker, startHabitSpawnerChecker as startHabitSpawnerCheckerWorker, startZoteroSnapshotSync as startZoteroSnapshotSyncWorker } from './workers/scheduler.js';
 import { startZoteroVaultSyncScheduler, seedSyncStatus, type SyncStats } from './workers/zotero-vault-sync.js';
 import { startGoogleTasksSyncScheduler } from './workers/google-tasks-sync.js';
 import { registerGoogleTasksTrigger } from './services/google-tasks-trigger.js';
@@ -97,9 +97,19 @@ import { startServer } from './server/boot.js';
 
 void AGENT_HEADERS; void OpenAIProvider; void GeminiProvider; void BUILTIN_AGENTS; void parseTaskActions; void PRICING; void computeNextRun;
 
+// D-7 / Wave 1: pre-warm the store BEFORE any sync `getStore()` call. In
+// JSON-file mode this is fast; in `STORE_BACKEND=postgres` mode it awaits
+// the initial DB load. ESM top-level await blocks module evaluation until
+// this resolves, so subsequent imports see a fully-initialized store.
+await initializeStore();
+
 const logActivity = createLogActivity({ getStore: () => store, saveStore });
 
-const app = createApp();
+// `app` is exported so the Vercel Function wrapper in
+// `apps/web/src/app/api/[...path]/route.ts` can re-use the same Hono
+// instance with all routes already registered. On Vercel the import side
+// effects (initializeStore, route registration) run once per cold start.
+export const app = createApp();
 const store: StoreData = getStore();
 applyStoreDefaults(store, { saveStore, builtinSystemPrompts: BUILTIN_SYSTEM_PROMPTS });
 
@@ -242,8 +252,13 @@ const ensureSubscriptionDefaults = makeEnsureSubscriptionDefaults({ getStore: ()
 const { checkSubscriptionRules } = createSubscriptionsEngine({
   getStore: () => store, saveStore, capabilityCheckers: CAPABILITY_CHECKERS, createNotification,
 });
-startSubscriptionChecker({ checkSubscriptionRules });
-setTimeout(() => { checkSubscriptionRules().catch(() => {}); }, 10_000);
+// D-7: skip module-level workers under Vercel — they wouldn't survive
+// stateless function boundaries anyway, and the setInterval timers would
+// just leak handles in the serverless runtime.
+if (!process.env.VERCEL) {
+  startSubscriptionChecker({ checkSubscriptionRules });
+  setTimeout(() => { checkSubscriptionRules().catch(() => {}); }, 10_000);
+}
 
 const audioService = createAudioService({
   getApiKey,
@@ -336,6 +351,60 @@ function startZoteroRefreshChecker() {
   startZoteroRefreshCheckerWorker({
     getStore: () => store as { zoteroLastRefreshAt?: string },
     createNotification,
+    logger: bootLogger,
+  });
+}
+
+// Periodic Zotero snapshot sync (Phase C). Pulls items+collections every 6h
+// to keep the offline cache fresh. Disabled in tests via the env flag.
+function startZoteroSnapshotSync() {
+  if (process.env.RUHOOL_DISABLE_ZOTERO_SYNC === 'true' || process.env.NODE_ENV === 'test') return;
+  startZoteroSnapshotSyncWorker({
+    isConfigured: () => {
+      const cfg = (store as unknown as { zoteroConfig?: { mode?: string; webUserId?: string; webApiKey?: string } }).zoteroConfig;
+      if (!cfg) return false;
+      if (cfg.mode === 'web') return !!cfg.webUserId && !!cfg.webApiKey;
+      return true; // local mode: nothing to validate up front
+    },
+    syncOnce: async () => {
+      const errors: string[] = [];
+      let itemsCount = 0;
+      let collectionsCount = 0;
+      try {
+        const { zoteroListCollections } = await import('@ruhool/core');
+        const cols = await zoteroListCollections();
+        const storeRef = store as unknown as { zoteroSnapshot?: { mode: 'local' | 'web'; items: unknown[]; collections: Array<{ key: string; name: string; parentCollection?: string }>; fetchedAt: string; lastSuccessfulFetchAt?: string; lastError?: string | null } };
+        const now = new Date().toISOString();
+        if (!storeRef.zoteroSnapshot) {
+          storeRef.zoteroSnapshot = { mode: 'local', items: [], collections: [], fetchedAt: now, lastSuccessfulFetchAt: now, lastError: null };
+        }
+        storeRef.zoteroSnapshot.collections = cols.map((cc) => ({ key: cc.key, name: cc.name, parentCollection: cc.parentCollection }));
+        storeRef.zoteroSnapshot.fetchedAt = now;
+        storeRef.zoteroSnapshot.lastSuccessfulFetchAt = now;
+        storeRef.zoteroSnapshot.lastError = null;
+        collectionsCount = cols.length;
+      } catch (err) {
+        errors.push(`collections: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      try {
+        const { zoteroListItemsRich } = await import('@ruhool/core');
+        const items = await zoteroListItemsRich(undefined, 1000);
+        if (items.length > 0) {
+          const storeRef = store as unknown as { zoteroSnapshot?: { items: unknown[]; fetchedAt: string; lastSuccessfulFetchAt?: string; lastError?: string | null } };
+          if (!storeRef.zoteroSnapshot) return { ok: false, itemsCount: 0, collectionsCount, errors: ['no snapshot bootstrap'] };
+          storeRef.zoteroSnapshot.items = items;
+          const now = new Date().toISOString();
+          storeRef.zoteroSnapshot.fetchedAt = now;
+          storeRef.zoteroSnapshot.lastSuccessfulFetchAt = now;
+          storeRef.zoteroSnapshot.lastError = null;
+          itemsCount = items.length;
+        }
+      } catch (err) {
+        errors.push(`items: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      try { saveStore(); } catch { /* save failure is non-fatal for the tick */ }
+      return { ok: errors.length === 0, itemsCount, collectionsCount, errors };
+    },
     logger: bootLogger,
   });
 }
@@ -519,7 +588,9 @@ const agentTaskRunTask = async (task: import('./store/types.js').AgentTaskRecord
   return result.output;
 };
 
-startAgentTaskWorker({ getStore: () => store, saveStore, runTask: agentTaskRunTask });
+if (!process.env.VERCEL) {
+  startAgentTaskWorker({ getStore: () => store, saveStore, runTask: agentTaskRunTask });
+}
 
 // ─── Phase 5: generation services ───
 const imageService = createImageService({
@@ -747,32 +818,37 @@ registerAllRoutes(app, {
   },
 });
 
-// Start the reports scheduler — cheap at rest (no-ops until reports exist).
-startReportsWorker();
+// D-7 / Wave 2: BullMQ + reports scheduler keep persistent Redis
+// connections and tick on intervals — neither survives Vercel's stateless
+// function boundary, AND lingering reconnect loops waste CPU. Skip them.
+if (!process.env.VERCEL) {
+  // Start the reports scheduler — cheap at rest (no-ops until reports exist).
+  startReportsWorker();
 
-// Initialize BullMQ queue + worker for workflow-step (Phase 2).
-try {
-  workflowQueue = initWorkflowQueue({
-    connection: REDIS_CONNECTION,
-    logger: {
-      info: (m) => bootLogger.info(m),
-      warn: (o, m) => bootLogger.warn(o, m || ''),
-      error: (o, m) => bootLogger.error(o, m),
-    },
-  });
-  if (workflowQueue) {
-    workflowWorker = startWorkflowWorker({
+  // Initialize BullMQ queue + worker for workflow-step (Phase 2).
+  try {
+    workflowQueue = initWorkflowQueue({
       connection: REDIS_CONNECTION,
-      executeStep: (stepId: string) => workflowOrchestrator.executeStep(stepId),
       logger: {
         info: (m) => bootLogger.info(m),
         warn: (o, m) => bootLogger.warn(o, m || ''),
         error: (o, m) => bootLogger.error(o, m),
       },
     });
+    if (workflowQueue) {
+      workflowWorker = startWorkflowWorker({
+        connection: REDIS_CONNECTION,
+        executeStep: (stepId: string) => workflowOrchestrator.executeStep(stepId),
+        logger: {
+          info: (m) => bootLogger.info(m),
+          warn: (o, m) => bootLogger.warn(o, m || ''),
+          error: (o, m) => bootLogger.error(o, m),
+        },
+      });
+    }
+  } catch (err) {
+    bootLogger.warn({ err: err instanceof Error ? err.message : err }, 'workflow queue init failed — in-process fallback');
   }
-} catch (err) {
-  bootLogger.warn({ err: err instanceof Error ? err.message : err }, 'workflow queue init failed — in-process fallback');
 }
 void workflowWorker;
 
@@ -824,8 +900,15 @@ async function reconcileRunningRuns(): Promise<number> {
   return n;
 }
 
-const PORT = parseInt(process.env.APP_PORT || '3001', 10);
+// Railway / Render / Fly inject PORT; we keep APP_PORT for local-only override.
+const PORT = parseInt(process.env.PORT || process.env.APP_PORT || '3001', 10);
 
+// On Vercel we never call startServer — the Vercel runtime invokes our
+// catch-all route handler directly with each request. The Hono `app` is
+// already wired by the time this module finishes evaluating.
+if (process.env.VERCEL) {
+  bootLogger.info('[boot] Vercel runtime detected — skipping startServer (no port bind, no background workers).');
+} else {
 startServer({
   logger: bootLogger, setupDatabase, serviceHealth, scanAndLoadModules,
   initResearchQueue,
@@ -834,7 +917,7 @@ startServer({
     return researchWorker;
   },
   redisConnection: REDIS_CONNECTION, runResearch,
-  startScheduleChecker, startZoteroRefreshChecker, startZoteroVaultSync,
+  startScheduleChecker, startZoteroRefreshChecker, startZoteroSnapshotSync, startZoteroVaultSync,
   startHabitSpawnerChecker, startGoogleTasksSync, startWatcherWorker,
   watcherScan: () => scanForAlerts(store as unknown as Phase2StoreLike).length,
   onWatcherChange: () => saveStore(),
@@ -847,3 +930,4 @@ startServer({
   dagActivities,
   reconcileRunningRuns,
 }).catch(err => { bootLogger.error({ err }, 'boot failed'); process.exit(1); });
+}

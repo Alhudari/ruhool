@@ -175,13 +175,13 @@ function ReadingModePicker({
       id: 'rolling',
       en: 'Rolling synthesis',
       ar: 'خلاصة تراكمية',
-      hint: { en: 'Default — context carries across pages', ar: 'الافتراضي — الكاتب يتراكم عبر الصفحات' },
+      hint: { en: 'Default — context carries across pages', ar: 'الافتراضي — السياق يتراكم عبر الصفحات' },
     },
     { id: 'page', en: 'Page-by-page', ar: 'صفحة صفحة' },
     {
       id: 'full',
       en: 'Full context (10× cost)',
-      ar: 'الكاتب الكامل (تكلفة ×10)',
+      ar: 'السياق الكامل (تكلفة ×10)',
     },
     { id: 'tac', en: 'Skim (title+abstract+conclusion)', ar: 'تصفح سريع (مقدمة + خلاصة)' },
   ];
